@@ -1555,14 +1555,6 @@ public:
     NonParmVarDeclBits.IsConsteval = IC;
   }
 
-  void setConstexprKind(ConstexprSpecKind Kind, bool IC) {
-    if (Kind == ConstexprSpecKind::Constexpr) {
-      setConstexpr(IC);
-    } else if (Kind == ConstexprSpecKind::Consteval) {
-      setConsteval(IC);
-    }
-  }
-
   /// Whether this variable is the implicit variable for a lambda init-capture.
   bool isInitCapture() const {
     return isa<ParmVarDecl>(this) ? false : NonParmVarDeclBits.IsInitCapture;

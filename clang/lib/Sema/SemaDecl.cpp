@@ -7917,7 +7917,9 @@ NamedDecl *Sema::ActOnVariableDeclarator(
     break;
 
   case ConstexprSpecKind::Consteval:
-    if (!getLangOpts().CPlusPlus26) {
+    if (getLangOpts().CPlusPlus26) {
+      NewVD->setConsteval(true);
+    } else {
       Diag(D.getDeclSpec().getConstexprSpecLoc(),
           diag::err_constexpr_wrong_decl_kind)
           << static_cast<int>(D.getDeclSpec().getConstexprSpecifier());
@@ -7925,7 +7927,7 @@ NamedDecl *Sema::ActOnVariableDeclarator(
     [[fallthrough]];
 
   case ConstexprSpecKind::Constexpr:
-    NewVD->setConstexprKind(D.getDeclSpec().getConstexprSpecifier(), true);
+    NewVD->setConstexpr(true);
     // C++1z [dcl.spec.constexpr]p1:
     //   A static data member declared with the constexpr specifier is
     //   implicitly an inline variable.
