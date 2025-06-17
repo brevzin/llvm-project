@@ -1097,6 +1097,10 @@ protected:
 
     LLVM_PREFERRED_TYPE(bool)
     unsigned IsCXXCondDecl : 1;
+
+    /// Whether this variable is (C++26) consteval.
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned IsConsteval : 1;
   };
 
   union {
@@ -1540,6 +1544,23 @@ public:
   void setConstexpr(bool IC) {
     assert(!isa<ParmVarDecl>(this));
     NonParmVarDeclBits.IsConstexpr = IC;
+  }
+
+  /// Whether this variable is (C++26) consteval.
+  bool isConsteval() const {
+    return isa<ParmVarDecl>(this) ? false : NonParmVarDeclBits.IsConsteval;
+  }
+  void setConsteval(bool IC) {
+    assert(!isa<ParmVarDecl>(this));
+    NonParmVarDeclBits.IsConsteval = IC;
+  }
+
+  void setConstexprKind(ConstexprSpecKind Kind, bool IC) {
+    if (Kind == ConstexprSpecKind::Constexpr) {
+      setConstexpr(IC);
+    } else if (Kind == ConstexprSpecKind::Consteval) {
+      setConsteval(IC);
+    }
   }
 
   /// Whether this variable is the implicit variable for a lambda init-capture.

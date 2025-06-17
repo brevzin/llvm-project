@@ -2433,7 +2433,7 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
           << IsReferenceType << !Designator.Entries.empty() << !!BaseVD
           << BaseVD;
       auto *VarD = dyn_cast_or_null<VarDecl>(BaseVD);
-      if (VarD && VarD->isConstexpr()) {
+      if (VarD && (VarD->isConstexpr() || VarD->isConsteval())) {
         // Non-static local constexpr variables have unintuitive semantics:
         //   constexpr int a = 1;
         //   constexpr const int *p = &a;
@@ -4465,7 +4465,7 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
     bool ConstexprVar = false;
     if (const auto *VD = dyn_cast_if_present<VarDecl>(
             Info.EvaluatingDecl.dyn_cast<const ValueDecl *>()))
-      ConstexprVar = VD->isConstexpr();
+      ConstexprVar = VD->isConstexpr() || VD->isConsteval();
 
     // Unless we're looking at a local variable or argument in a constexpr call,
     // the variable we're reading must be const.
@@ -4483,7 +4483,7 @@ static CompleteObject findCompleteObject(EvalInfo &Info, const Expr *E,
         // All the remaining cases do not permit modification of the object.
         Info.FFDiag(E, diag::note_constexpr_modify_global);
         return CompleteObject();
-      } else if (VD->isConstexpr()) {
+      } else if (VD->isConstexpr() || VD->isConsteval()) {
         // OK, we can read this variable.
       } else if (Info.getLangOpts().C23 && ConstexprVar) {
         Info.FFDiag(E);
