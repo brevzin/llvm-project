@@ -18301,8 +18301,15 @@ HandleImmediateInvocations(Sema &SemaRef,
 
     if (!Rec.InImmediateEscalatingFunctionContext ||
         (SemaRef.inTemplateInstantiation() && !ImmediateEscalating)) {
-      SemaRef.Diag(E->getExprLoc(), diag::err_expr_consteval_only_type)
-          << E->getSourceRange();
+      // Check if this is a consteval variable reference vs consteval-only type
+      unsigned DiagID = diag::err_expr_consteval_only_type;
+      if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+          if (VD->isConsteval())
+            DiagID = diag::err_expr_consteval_var;
+        }
+      }
+      SemaRef.Diag(E->getExprLoc(), DiagID) << E->getSourceRange();
     } else {
       SemaRef.MarkExpressionAsImmediateEscalating(E);
     }
@@ -20543,7 +20550,7 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
       if (FD->getType()->isConstevalOnly())
         ExprEvalContexts.back().ConstevalOnly.insert(E);
     } else if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
-               VD && VD->getType()->isConstevalOnly()) {
+               VD && (VD->getType()->isConstevalOnly() || VD->isConsteval())) {
       ExprEvalContexts.back().ConstevalOnly.insert(E);
     }
   }
