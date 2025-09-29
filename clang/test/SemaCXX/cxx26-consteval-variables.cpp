@@ -52,7 +52,7 @@ namespace N1 {
         }
 
         static constexpr int call2(int i) {
-            return F(i); // expected-error {{expressions involving consteval variables}}
+            return F(i);
         }
 
         static consteval int call3(int i) {
@@ -61,8 +61,11 @@ namespace N1 {
     };
 
     int i = D<f>::call1(3);
-    static_assert(D<f>::call2(5) == 47); // expected-error {{consteval variables}}
+    static_assert(D<f>::call2(5) == 47); // ok
     static_assert(D<f>::call3(5) == 47); // ok
+
+    constexpr auto call2a = D<f>::call2; // expected-error {{constant expression}}
+    consteval auto call2b = D<f>::call2; // ok
 }
 
 namespace N2 {
@@ -80,4 +83,27 @@ namespace N2 {
     constexpr auto w1 = C<Wrap{.p=::f}>::value; // expected-error {{constant expression}}
     consteval auto w2 = C<Wrap{.p=::f}>::value;
     static_assert(w2.p(2) == 44);
+}
+
+namespace N3 {
+    // the not_fn example from
+    // https://stackoverflow.com/questions/79763246/cannot-use-stdnot-fn-with-immediate-functions/79763257#79763257
+
+    template <class F>
+    constexpr auto not_fn(F f) {
+        return [f](auto... xs){
+            return not f(xs...);
+        };
+    }
+
+    template <auto F>
+    constexpr auto not_fn() {
+        return [](auto... xs) {
+            return not F(xs...);
+        };
+    }
+
+    consteval bool f() { return false; }
+    static_assert( not_fn(f)() );   // OK
+    static_assert( not_fn<f>()() ); // OK
 }
