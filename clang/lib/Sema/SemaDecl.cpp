@@ -14555,6 +14555,68 @@ StmtResult Sema::ActOnCXXForRangeIdentifier(Scope *S, SourceLocation IdentLoc,
                                                       : IdentLoc);
 }
 
+namespace {
+
+// Helper function to recursively check if an APValue contains consteval-only values
+// (reflection values or references to consteval variables)
+bool APValueContainsConstevalOnlyValue(const APValue &V) {
+  // Direct reflection value
+  if (V.isReflection())
+    return true;
+  
+  // Check arrays
+  if (V.isArray()) {
+    // Use getArrayInitializedElts() to get the number of initialized elements
+    for (unsigned i = 0; i < V.getArrayInitializedElts(); ++i) {
+      if (APValueContainsConstevalOnlyValue(V.getArrayInitializedElt(i)))
+        return true;
+    }
+    // Also check the array filler if present
+    if (V.hasArrayFiller()) {
+      if (APValueContainsConstevalOnlyValue(V.getArrayFiller()))
+        return true;
+    }
+  }
+  
+  // Check structs
+  if (V.isStruct()) {
+    for (unsigned i = 0; i < V.getStructNumFields(); ++i) {
+      if (APValueContainsConstevalOnlyValue(V.getStructField(i)))
+        return true;
+    }
+    // Also check the struct base if present
+    for (unsigned i = 0; i < V.getStructNumBases(); ++i) {
+      if (APValueContainsConstevalOnlyValue(V.getStructBase(i)))
+        return true;
+    }
+  }
+  
+  // Check unions
+  if (V.isUnion()) {
+    if (APValueContainsConstevalOnlyValue(V.getUnionValue()))
+      return true;
+  }
+  
+  // Check LValues that refer to consteval variables
+  if (V.isLValue()) {
+    if (const ValueDecl *D = V.getLValueBase().dyn_cast<const ValueDecl*>()) {
+      if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
+        if (VD->isConsteval())
+          return true;
+      }
+      // Check for immediate function pointers
+      if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+        if (FD->isImmediateFunction())
+          return true;
+      }
+    }
+  }
+  
+  return false;
+}
+
+}
+
 void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (var->isInvalidDecl()) return;
 
@@ -14730,43 +14792,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
     Diag(var->getLocation(), diag::err_constexpr_var_requires_const_init)
         << var;
 
-  // Check if this is a constexpr templated variable initialized with a consteval value
-  // If so, implicitly make it consteval before checking the initialization
-  // Only do this for templated variables (variable templates or static members of templates)
-  if (var->isConstexpr() && !var->isConsteval() && Init && !Init->isValueDependent()) {
-    bool HasConstevalValue = false;
-    
-    // First check if it's a direct reference
-    if (auto *DRE = dyn_cast<DeclRefExpr>(Init->IgnoreImplicit())) {
-      if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
-        HasConstevalValue = FD->isImmediateFunction();
-      } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-        HasConstevalValue = VD->isConsteval();
-      }
-    } 
-    // Check if it's a substituted non-type template parameter
-    else if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(Init->IgnoreImplicit())) {
-      if (auto *DRE = dyn_cast<DeclRefExpr>(SNTTPE->getReplacement())) {
-        if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
-          HasConstevalValue = FD->isImmediateFunction();
-        } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-          HasConstevalValue = VD->isConsteval();
-        }
-      }
-    }
-    
-    if (HasConstevalValue) {
-      // Only upgrade templated variables to consteval
-      // For non-templated variables, let the normal error checking handle it
-      bool IsTemplated = isa<VarTemplateSpecializationDecl>(var) ||
-                        (var->isStaticDataMember() && var->isTemplated());
-      if (IsTemplated) {
-        // Upgrade from constexpr to consteval
-        var->setConstexpr(false);
-        var->setConsteval(true);
-      }
-    }
-  }
+
 
   // Check whether the initializer is sufficiently constant.
   if ((getLangOpts().CPlusPlus || (getLangOpts().C23 && var->isConstexpr())) &&
@@ -14802,6 +14828,27 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
     }
 
     if (HasConstInit) {
+      // Check if a constexpr variable contains consteval-only values
+      // Skip static data members as they're already handled correctly
+      if (var->isConstexpr() && !var->isConsteval() && !var->isStaticDataMember()) {
+        // Get the evaluated value
+        if (APValue *V = var->evaluateValue()) {
+          if (APValueContainsConstevalOnlyValue(*V)) {
+            // Upgrade standalone variable templates to consteval
+            bool IsVariableTemplate = isa<VarTemplateSpecializationDecl>(var);
+            if (IsVariableTemplate) {
+              // Upgrade from constexpr to consteval
+              var->setConstexpr(false);
+              var->setConsteval(true);
+            } else {
+              // For non-templated variables, produce an error
+              Diag(var->getLocation(), diag::err_constexpr_var_requires_const_init)
+                  << var << Init->getSourceRange();
+              HasConstInit = false;  // Treat as failed constant init
+            }
+          }
+        }
+      }
       // FIXME: Consider replacing the initializer with a ConstantExpr.
     } else if (var->isConstexpr()) {
       SourceLocation DiagLoc = var->getLocation();

@@ -107,3 +107,21 @@ namespace N3 {
     static_assert( not_fn(f)() );   // OK
     static_assert( not_fn<f>()() ); // OK
 }
+
+namespace N4 {
+    using info = decltype(^^::);
+
+    constexpr info r1 = ^^int; //expected-error {{constant expression}}
+    consteval info r2 = ^^int; // OK
+
+    struct M { info r; };
+    constexpr auto m1 = M{.r=^^int}; // expected-error {{constant expression}}
+    consteval auto m2 = M{.r=^^int}; // OK
+    constexpr auto m3 = m2;          // expected-error {{constant expression}}
+    constexpr auto m4 = []{ return m2; }(); // expected-error {{constant expression}}
+    consteval auto m5 = []{ return m2; }(); // OK
+
+    constexpr info* pr = nullptr; // OK
+    constexpr M const* pm1 = &m2; // expected-error {{constant expression}}
+    consteval M const* pm2 = &m2; // OK
+}
