@@ -14730,6 +14730,44 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
     Diag(var->getLocation(), diag::err_constexpr_var_requires_const_init)
         << var;
 
+  // Check if this is a constexpr templated variable initialized with a consteval value
+  // If so, implicitly make it consteval before checking the initialization
+  // Only do this for templated variables (variable templates or static members of templates)
+  if (var->isConstexpr() && !var->isConsteval() && Init && !Init->isValueDependent()) {
+    bool HasConstevalValue = false;
+    
+    // First check if it's a direct reference
+    if (auto *DRE = dyn_cast<DeclRefExpr>(Init->IgnoreImplicit())) {
+      if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
+        HasConstevalValue = FD->isImmediateFunction();
+      } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+        HasConstevalValue = VD->isConsteval();
+      }
+    } 
+    // Check if it's a substituted non-type template parameter
+    else if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(Init->IgnoreImplicit())) {
+      if (auto *DRE = dyn_cast<DeclRefExpr>(SNTTPE->getReplacement())) {
+        if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
+          HasConstevalValue = FD->isImmediateFunction();
+        } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+          HasConstevalValue = VD->isConsteval();
+        }
+      }
+    }
+    
+    if (HasConstevalValue) {
+      // Only upgrade templated variables to consteval
+      // For non-templated variables, let the normal error checking handle it
+      bool IsTemplated = isa<VarTemplateSpecializationDecl>(var) ||
+                        (var->isStaticDataMember() && var->isTemplated());
+      if (IsTemplated) {
+        // Upgrade from constexpr to consteval
+        var->setConstexpr(false);
+        var->setConsteval(true);
+      }
+    }
+  }
+
   // Check whether the initializer is sufficiently constant.
   if ((getLangOpts().CPlusPlus || (getLangOpts().C23 && var->isConstexpr())) &&
       !type->isDependentType() && Init && !Init->isValueDependent() &&

@@ -45,6 +45,7 @@
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/CurrentSourceLocExprScope.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/OSLog.h"
 #include "clang/AST/OptionalDiagnostic.h"
@@ -2411,8 +2412,33 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
   if (auto *FD = dyn_cast_or_null<FunctionDecl>(BaseVD);
       FD && FD->isImmediateFunction()) {
     bool ShouldFail = true;
-    if (auto *VD = dyn_cast<VarDecl>(Info.ContainingDecl)) {
-      if (VD->isConsteval()) {
+    if (Info.ContainingDecl) {
+      if (auto *VD = dyn_cast<VarDecl>(Info.ContainingDecl)) {
+        if (VD->isConsteval()) {
+          ShouldFail = false;
+        } else if (VD->isConstexpr()) {
+          // Only allow constexpr variables in template contexts to be initialized with consteval values
+          // This includes:
+          // - Variable template specializations
+          // - Static data members of class template instantiations
+          // They will be upgraded to consteval after instantiation
+          // Non-templated constexpr variables should fail
+          if (isa<VarTemplateSpecializationDecl>(VD)) {
+            ShouldFail = false;
+          } else if (VD->isStaticDataMember()) {
+            // Check if this is a static member of a templated class
+            if (auto *RD = dyn_cast<CXXRecordDecl>(VD->getDeclContext())) {
+              if (RD->getTemplateSpecializationKind() != TSK_Undeclared ||
+                  RD->getDescribedClassTemplate()) {
+                ShouldFail = false;
+              }
+            }
+          }
+          // Non-templated constexpr variables should fail - don't set ShouldFail = false
+        }
+      } else if (isa<NonTypeTemplateParmDecl>(Info.ContainingDecl)) {
+        // Allow consteval functions as non-type template parameters
+        // The template parameter will effectively be consteval
         ShouldFail = false;
       }
     }

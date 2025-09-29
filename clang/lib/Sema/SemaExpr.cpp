@@ -18308,6 +18308,27 @@ HandleImmediateInvocations(Sema &SemaRef,
           if (VD->isConsteval())
             DiagID = diag::err_expr_consteval_var;
         }
+      } else if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(E)) {
+        // Treat template parameters bound to consteval values as consteval variables
+        if (auto *DRE = dyn_cast<DeclRefExpr>(SNTTPE->getReplacement())) {
+          if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
+            if (FD->isImmediateFunction())
+              DiagID = diag::err_expr_consteval_var;
+          } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+            if (VD->isConsteval())
+              DiagID = diag::err_expr_consteval_var;
+          }
+        }
+      } else if (auto *CE = dyn_cast<CallExpr>(E)) {
+        // Check if this is a call through a consteval template parameter
+        if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(CE->getCallee())) {
+          if (auto *DRE = dyn_cast<DeclRefExpr>(SNTTPE->getReplacement())) {
+            if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
+              if (FD->isImmediateFunction())
+                DiagID = diag::err_expr_consteval_var;
+            }
+          }
+        }
       }
       SemaRef.Diag(E->getExprLoc(), DiagID) << E->getSourceRange();
     } else {
@@ -20527,6 +20548,30 @@ MarkExprReferenced(Sema &SemaRef, SourceLocation Loc, Decl *D, Expr *E,
     SemaRef.MarkAnyDeclReferenced(Loc, DM, MightBeOdrUse);
 }
 
+void Sema::MarkSubstNonTypeTemplateParmExprReferenced(SubstNonTypeTemplateParmExpr *E) {
+  // Check if the replacement expression refers to a consteval value
+  // If so, mark this substitution as requiring constant evaluation
+  if (!isUnevaluatedContext()) {
+    if (auto *DRE = dyn_cast<DeclRefExpr>(E->getReplacement())) {
+      if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
+        if (FD->isImmediateFunction()) {
+          // Mark as ConstevalOnly even in constant evaluated contexts
+          // unless we're already in a consteval context
+          if (!isImmediateFunctionContext()) {
+            ExprEvalContexts.back().ConstevalOnly.insert(E);
+          }
+        }
+      } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+        if (VD->isConsteval() || VD->getType()->isConstevalOnly()) {
+          if (!isImmediateFunctionContext()) {
+            ExprEvalContexts.back().ConstevalOnly.insert(E);
+          }
+        }
+      }
+    }
+  }
+}
+
 void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
   // [basic.def.odr] (CWG 1614)
   // A function is named by an expression or conversion [...]
@@ -20549,9 +20594,11 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
 
       if (FD->getType()->isConstevalOnly())
         ExprEvalContexts.back().ConstevalOnly.insert(E);
-    } else if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
-               VD && (VD->getType()->isConstevalOnly() || VD->isConsteval())) {
-      ExprEvalContexts.back().ConstevalOnly.insert(E);
+    } else if (E->getDecl()) {
+      if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
+          VD && (VD->getType()->isConstevalOnly() || VD->isConsteval())) {
+        ExprEvalContexts.back().ConstevalOnly.insert(E);
+      }
     }
   }
   MarkExprReferenced(*this, E->getLocation(), E->getDecl(), E, OdrUse,
@@ -20688,6 +20735,11 @@ public:
   void VisitMemberExpr(MemberExpr *E) {
     S.MarkMemberReferenced(E);
     Visit(E->getBase());
+  }
+
+  void VisitSubstNonTypeTemplateParmExpr(SubstNonTypeTemplateParmExpr *E) {
+    S.MarkSubstNonTypeTemplateParmExprReferenced(E);
+    Visit(E->getReplacement());
   }
 };
 } // namespace

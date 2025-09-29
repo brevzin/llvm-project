@@ -7049,6 +7049,7 @@ public:
   /// Note, this may change the dependence of the DeclRefExpr, and so needs to
   /// be handled with care if the DeclRefExpr is not newly-created.
   void MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base = nullptr);
+  void MarkSubstNonTypeTemplateParmExprReferenced(SubstNonTypeTemplateParmExpr *E);
 
   /// Perform reference-marking and odr-use handling for a MemberExpr.
   void MarkMemberReferenced(MemberExpr *E);
@@ -10384,7 +10385,8 @@ public:
   ExprResult
   EvaluateConvertedConstantExpression(Expr *E, QualType T, APValue &Value,
                                       CCEKind CCE, bool RequireInt,
-                                      const APValue &PreNarrowingValue);
+                                      const APValue &PreNarrowingValue,
+                                      Decl *ContainingDecl = nullptr);
 
   /// Abstract base class used to perform a contextual implicit
   /// conversion from an expression to any type passing a filter.

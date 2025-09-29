@@ -13,9 +13,9 @@ constexpr int h(int) { return 0; }
 constexpr auto pf1 = f; // expected-error {{constant expression}}
 consteval auto pf2 = f; // OK
 
-struct C { int(*p)(int); };
-constexpr auto c1 = C{.p=f}; // expected-error {{constant expression}}
-consteval auto c2 = C{.p=f}; // ok
+struct Wrap { int(*p)(int); };
+constexpr auto c1 = Wrap{.p=f}; // expected-error {{constant expression}}
+consteval auto c2 = Wrap{.p=f}; // ok
 
 int main(int argc, char**) {
     // Local consteval variables
@@ -42,4 +42,42 @@ int main(int argc, char**) {
     // OK: consteval variables can be captured and used in constant expressions
     auto f2 = [](int i) { return x + i; };
     static_assert(f2(1) == 43);
+}
+
+namespace N1 {
+    template <auto F>
+    struct D {
+        static int call1(int i) {
+            return F(i); // expected-error {{consteval}}
+        }
+
+        static constexpr int call2(int i) {
+            return F(i); // expected-error {{expressions involving consteval variables}}
+        }
+
+        static consteval int call3(int i) {
+            return F(i); // OK
+        }
+    };
+
+    int i = D<f>::call1(3);
+    static_assert(D<f>::call2(5) == 47); // expected-error {{consteval variables}}
+    static_assert(D<f>::call3(5) == 47); // ok
+}
+
+namespace N2 {
+    template <auto V>
+    struct C {
+        static constexpr auto value = V;
+    };
+
+    constexpr auto i = C<0>::value;
+    static_assert(i == 0);
+    constexpr auto pf1 = C<::f>::value; // expected-error {{constant expression}}
+    consteval auto pf2 = C<::f>::value;
+    static_assert(pf2(2) == 44);
+
+    constexpr auto w1 = C<Wrap{.p=::f}>::value; // expected-error {{constant expression}}
+    consteval auto w2 = C<Wrap{.p=::f}>::value;
+    static_assert(w2.p(2) == 44);
 }
