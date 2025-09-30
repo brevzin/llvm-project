@@ -125,3 +125,10 @@ namespace N4 {
     constexpr M const* pm1 = &m2; // expected-error {{constant expression}}
     consteval M const* pm2 = &m2; // OK
 }
+
+void lambda_capture() {
+    constexpr int x = 1;
+    consteval int y = 2;
+    auto fx = []{ return x; };
+    auto fy = []{ return y; };
+}

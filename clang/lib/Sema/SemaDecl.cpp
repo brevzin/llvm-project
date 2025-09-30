@@ -14797,7 +14797,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   // Check whether the initializer is sufficiently constant.
   if ((getLangOpts().CPlusPlus || (getLangOpts().C23 && var->isConstexpr())) &&
       !type->isDependentType() && Init && !Init->isValueDependent() &&
-      (GlobalStorage || var->isConstexpr() || var->isConsteval() ||
+      (GlobalStorage || var->isConstexpr() ||
        var->mightBeUsableInConstantExpressions(Context))) {
     // If this variable might have a constant initializer or might be usable in
     // constant expressions, check whether or not it actually is now.  We can't
