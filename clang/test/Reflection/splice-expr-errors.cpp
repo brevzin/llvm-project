@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// RUN: %clang_cc1 %s -std=c++23 -freflection -verify
+// RUN: %clang_cc1 %s -std=c++26 -freflection -verify
 
 using info = decltype(^^int);
 
@@ -76,7 +76,7 @@ void fn([:^^int:]);
 namespace enclosing_lambdas {
 void fn() {
   int x = 1;  // expected-note {{'x' declared here}}
-  constexpr auto r = ^^x;
+  consteval auto r = ^^x;
 
   (void) [] -> decltype([:r:]) {
     return [:r:];

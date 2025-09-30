@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// RUN: %clang_cc1 %s -std=c++23 -freflection -fentity-proxy-reflection
+// RUN: %clang_cc1 %s -std=c++26 -freflection -fentity-proxy-reflection
 
 using info = decltype(^^int);
 
@@ -48,7 +48,7 @@ static_assert(!is_same_v<typename [:^^const int:], int>);
 
 // Check use of splices in alias definitions.
 namespace aliases {
-constexpr info r_int_alias = ^^int, r_const_int_alias = ^^const int;
+consteval info r_int_alias = ^^int, r_const_int_alias = ^^const int;
 using int_alias = [:r_int_alias:];
 using const_int_alias = [:r_const_int_alias:];
 static_assert(is_same_v<typename [:r_int_alias:], int>);
@@ -65,7 +65,7 @@ static_assert(!is_same_v<typename [:r_int_alias:],
 
 // Check use of splices in declarations.
 namespace in_decls {
-constexpr info r_const_int = ^^const int;
+consteval info r_const_int = ^^const int;
 constexpr [:r_const_int:] x = 42;
 static_assert(is_same_v<decltype(x), const int>);
 static_assert(x == 42);
@@ -77,8 +77,8 @@ static_assert(x == 42);
 
 // Check use of splices in function return and parameter types.
 namespace in_fn_defs {
-constexpr info r_int = ^^int;
-constexpr info r_const_int = ^^const int;
+consteval info r_int = ^^int;
+consteval info r_const_int = ^^const int;
 consteval typename [:r_const_int:] incr(typename [:r_int:] p) {
   return p + 1;
 }
@@ -113,8 +113,8 @@ struct S {
   using type = bool;
   static constexpr int s_value = 2;
 };
-constexpr auto r_S = ^^S;
-constexpr auto r_S_Inner = ^^S::Inner;
+consteval auto r_S = ^^S;
+consteval auto r_S_Inner = ^^S::Inner;
 static_assert(is_same_v<[:r_S:]::type, bool>);
 static_assert(is_same_v<[:r_S_Inner:]::type, int>);
 static_assert(is_same_v<int [:r_S:]::*, int S::*>);
@@ -173,7 +173,7 @@ namespace with_enum_types {
 enum Enum { A, B, C };
 enum class EnumCls { A, B, C };
 
-constexpr info rEnum = ^^Enum, rEnumCls = ^^EnumCls;
+consteval info rEnum = ^^Enum, rEnumCls = ^^EnumCls;
 static_assert([:rEnum:]::B == B);
 static_assert([:rEnumCls:]::B == EnumCls::B);
 static_assert(static_cast<Enum>([:rEnumCls:]::B) == [:rEnum:]::B);
@@ -191,7 +191,7 @@ static_assert(int(C) == 2);
 // using-enum-declaration with a qualified-id having a splice as the leading
 // nested-name-specifier.
 namespace {
-constexpr auto rns = ^^with_enum_types;
+consteval auto rns = ^^with_enum_types;
 using enum [:rns:]::EnumCls;
 static_assert(int(B) == 1);
 }  // namespace

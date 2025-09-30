@@ -23,7 +23,7 @@ auto c = C{.i=2};
 auto v = c.[:^^C::i:];  // expected-error {{not derived from}}
 
 static union { int m; };
-constexpr auto r = ^^m;
+consteval auto r = ^^m;
 auto p = &[:r:];  // expected-error {{cannot form a pointer-to-member}}
 }  // namespace anon_union_member_slice
 
@@ -63,7 +63,7 @@ namespace with_variables {
 consteval int fn() {
   int x = 32;
 
-  constexpr auto rx = ^^x;
+  consteval auto rx = ^^x;
   ++[:rx:];
 
   return x;
@@ -79,8 +79,8 @@ namespace with_functions {
 consteval int vanilla_fn() { return 42; }
 consteval int with_default_arg(int a = 5) { return a; }
 
-constexpr info r_vanilla_fn = ^^vanilla_fn;
-constexpr info r_with_default_arg = ^^with_default_arg;
+consteval info r_vanilla_fn = ^^vanilla_fn;
+consteval info r_with_default_arg = ^^with_default_arg;
 static_assert([:r_vanilla_fn:]() == 42);
 static_assert([:r_with_default_arg:]() == 5);
 static_assert([:r_with_default_arg:](11) == 11);
@@ -103,11 +103,11 @@ namespace with_shadowed_function_names {
 struct B { consteval char fn() const { return 'B'; } };
 struct D : B { consteval char fn() const { return 'D'; } };
 
-constexpr auto rBfn = ^^B::fn;
-constexpr auto rDfn = ^^D::fn;
+consteval auto rBfn = ^^B::fn;
+consteval auto rDfn = ^^D::fn;
 
 constexpr D d;
-constexpr auto rd = ^^d;
+consteval auto rd = ^^d;
 
 static_assert([:rd:].[:rBfn:]() == 'B');
 static_assert([:rd:].[:rDfn:]() == 'D');
@@ -154,24 +154,24 @@ static_assert(fn<^^S::j>() == 22);
 static_assert(fn<^^S::k>() == 26);
 
 // Splicing member functions.
-constexpr info r_getJ = ^^S::getJ;
+consteval info r_getJ = ^^S::getJ;
 static_assert(S{2, 4}.[:r_getJ:]() == 2);
 
 // Splicing static member functions.
-constexpr auto rEleven = ^^S::eleven;
+consteval auto rEleven = ^^S::eleven;
 static_assert([:rEleven:]() == 11);
 
 // Splicing static member template function instantiation.
-constexpr auto rConst14 = ^^S::constant<14>;
+consteval auto rConst14 = ^^S::constant<14>;
 static_assert([:rConst14:]() == 14);
 
 // Splicing member function template instanstiations.
-constexpr auto rgetJPlus5 = ^^S::getJPlusN<5>;
+consteval auto rgetJPlus5 = ^^S::getJPlusN<5>;
 static_assert(S{2, 4}.[:rgetJPlus5:]() == 7);
 
 // Splicing member function template instantiations with spliced objects.
 constexpr S instance {1, 4};
-constexpr info rInstance = ^^instance;
+consteval info rInstance = ^^instance;
 static_assert([:rInstance:].[:rgetJPlus5:]() == 6);
 static_assert((&[:rInstance:])->[:rgetJPlus5:]() == 6);
 
@@ -186,7 +186,7 @@ static_assert(fn3<^^instance>() == 4);
 consteval int getMem(const S *s, int S::* mem) {
   return s->*mem;
 }
-constexpr info rJ = ^^S::j;
+consteval info rJ = ^^S::j;
 static_assert(getMem(&instance, &[:rJ:]) == 1);
 
 // Member access through a splice of a private member.
@@ -279,7 +279,7 @@ static_assert(d.[:^^B:]::fn() == 1);
 
 // Splicing member as intermediate component of a member-access expression.
 struct T { struct Inner { int v; } inner; };
-constexpr auto r_inner = ^^T::inner;
+consteval auto r_inner = ^^T::inner;
 constexpr T t = {{4}};
 static_assert(t.[:r_inner:].v == 4);
 }  // namespace with_overridden_memfns
@@ -292,7 +292,7 @@ namespace with_enums {
 enum Enum { A, B, C };
 enum class EnumCls { A, B, C };
 
-constexpr info rB = ^^B, rClsB = ^^EnumCls::B;
+consteval info rB = ^^B, rClsB = ^^EnumCls::B;
 static_assert(rB != rClsB);
 static_assert(int([:rB:]) == int([:rClsB:]));
 static_assert(static_cast<Enum>([:rClsB:]) == B);
@@ -308,7 +308,7 @@ struct S {
 };
 
 constexpr auto f() {
-  constexpr auto r = ^^S::y;
+  consteval auto r = ^^S::y;
   return &[:r:];  // expected-error {{address of bit-field requested}}
 }
 }  // namespace address_of_bit_field
@@ -320,14 +320,14 @@ constexpr auto f() {
 // Check that parsing correctly handles successions of ':'-characters.
 namespace colon_parsing {
 constexpr int x = 4;
-constexpr auto rx = ^^x;
+consteval auto rx = ^^x;
 static_assert([:rx:] == 4);
 
 constexpr unsigned Idx = 1;
 constexpr int arr[] = {1, 2, 3};
 static_assert(arr[::colon_parsing::Idx] == 2);
 
-constexpr info rIdx = ^^Idx;
+consteval info rIdx = ^^Idx;
 static_assert([:::colon_parsing::rIdx:] == 1);
 
 struct WithIndexOperator {
@@ -363,7 +363,7 @@ static_assert(^^decltype(Cls<^^fn>::Impl(&fn)) == ^^Cls<^^fn>::Impl<void, int>);
                   // ========================================
 
 namespace bb_clang_p2996_issue_131_regression_test {
-struct Y 
+struct Y
 {
     int g(this Y const&, int, int);
 };

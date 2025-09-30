@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// RUN: %clang_cc1 %s -std=c++23 -freflection
+// RUN: %clang_cc1 %s -std=c++26 -freflection
 
 using info = decltype(^^::);
 
@@ -23,15 +23,15 @@ struct Test {
   using type = int;
 };
 
-constexpr info rTest = ^^Test;
+consteval info rTest = ^^Test;
 }  // namespace myns
 
 struct Test {
   using type = int;
 };
 
-constexpr info null1;
-constexpr info null2;
+consteval info null1;
+consteval info null2;
 
 // Test equality of instantiations parameterized by reflection types.
 static_assert(fn<null1> == fn<null2>);
@@ -46,7 +46,7 @@ static_assert(fn<^^::Test::type> != fn<^^myns::Test::type>);
 static_assert(fn<^^::Test::type> == fn<^^::Test::type>);
 
 // Test instantiations in the presence of a variable holding the reflection.
-constexpr info refl = ^^int;
+consteval info refl = ^^int;
 static_assert(fn<refl> == fn<refl>);
 static_assert(fn<refl> == fn<^^int>);
 static_assert(fn<refl> != fn<null1>);

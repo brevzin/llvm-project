@@ -8,37 +8,37 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// RUN: %clang_cc1 %s -std=c++23 -freflection -verify
+// RUN: %clang_cc1 %s -std=c++26 -freflection -verify
 
 // Reflecting Types
 using info = decltype(^^void);
 
-constexpr info info_void = ^^void;
-constexpr info info_decltype = ^^decltype(42);
+consteval info info_void = ^^void;
+consteval info info_decltype = ^^decltype(42);
 
 using alias = int;
-constexpr info info_alias = ^^alias;
+consteval info info_alias = ^^alias;
 
-constexpr info info_infoint = ^^decltype(^^int);
+consteval info info_infoint = ^^decltype(^^int);
 
-constexpr info abominable = ^^void() const & noexcept;
+consteval info abominable = ^^void() const & noexcept;
 
 // Reflecting variables
 constexpr int i = 42;
-constexpr info info_i = ^^i;
+consteval info info_i = ^^i;
 
 // Reflecting templates
 template <typename T>
 void TemplateFunc();
-constexpr info info_template_func = ^^TemplateFunc;
+consteval info info_template_func = ^^TemplateFunc;
 
 template <typename T>
 int TemplateVar;
-constexpr info info_template_var = ^^TemplateVar;
+consteval info info_template_var = ^^TemplateVar;
 
 template <typename T>
 struct TemplateStruct {};
-constexpr info info_template_struct = ^^TemplateStruct;
+consteval info info_template_struct = ^^TemplateStruct;
 
 // Reflecting members of a class
 struct Members {
@@ -49,11 +49,11 @@ struct Members {
     int member_func();
     static int static_member_func();
 };
-constexpr info info_nested_type = ^^Members::Type;
-constexpr info info_mem_var = ^^Members::member_var;
-constexpr info info_static_mem_var = ^^Members::static_member_var;
-constexpr info info_mem_func = ^^Members::member_func;
-constexpr info info_static_mem_func = ^^Members::static_member_func;
+consteval info info_nested_type = ^^Members::Type;
+consteval info info_mem_var = ^^Members::member_var;
+consteval info info_static_mem_var = ^^Members::static_member_var;
+consteval info info_mem_func = ^^Members::member_func;
+consteval info info_static_mem_func = ^^Members::static_member_func;
 
 // Reflecting member templates
 struct MemberTemplates {
@@ -72,31 +72,31 @@ struct MemberTemplates {
     template <typename T>
     static int template_var;
 };
-constexpr info info_nested_template_struct =
+consteval info info_nested_template_struct =
       ^^MemberTemplates::NestedTemplateStruct;
-constexpr info info_nested_template_struct2 =
+consteval info info_nested_template_struct2 =
       ^^MemberTemplates::template NestedTemplateStruct;
-constexpr info info_nested_template_func = ^^MemberTemplates::template_func;
-constexpr info info_nested_template_func2 =
+consteval info info_nested_template_func = ^^MemberTemplates::template_func;
+consteval info info_nested_template_func2 =
       ^^MemberTemplates::template template_func;
-constexpr info info_nested_template_static_func =
+consteval info info_nested_template_static_func =
       ^^MemberTemplates::template_static_func;
-constexpr info info_nested_template_static_func2 =
+consteval info info_nested_template_static_func2 =
       ^^MemberTemplates::template template_static_func;
-constexpr info info_nested_template_var = ^^MemberTemplates::template_var;
-constexpr info info_nested_template_var2 =
+consteval info info_nested_template_var = ^^MemberTemplates::template_var;
+consteval info info_nested_template_var2 =
       ^^MemberTemplates::template template_var;
-constexpr info info_nested_template_operator = ^^MemberTemplates::operator+;
-constexpr info info_nested_template_operator2 =
+consteval info info_nested_template_operator = ^^MemberTemplates::operator+;
+consteval info info_nested_template_operator2 =
       ^^MemberTemplates::template operator+;
 
 template <typename T>
 void DepScope() {
-  constexpr info nested_struct = ^^T::template NestedTemplateStruct;
-  constexpr info nested_func = ^^T::template template_func;
-  constexpr info nested_static_func = ^^T::template template_static_func;
-  constexpr info nested_var = ^^T::template template_var;
-  constexpr info nested_operator = ^^T::template operator+;
+  consteval info nested_struct = ^^T::template NestedTemplateStruct;
+  consteval info nested_func = ^^T::template template_func;
+  consteval info nested_static_func = ^^T::template template_static_func;
+  consteval info nested_var = ^^T::template template_var;
+  consteval info nested_operator = ^^T::template operator+;
 }
 void InstantiateDepScope() {
   DepScope<MemberTemplates>();
@@ -104,19 +104,19 @@ void InstantiateDepScope() {
 
 // Reflecting function scope variables
 void reflect_func_scope(int param) {
-    constexpr info info_param = ^^param;
+    consteval info info_param = ^^param;
 
     int local_var;
-    constexpr info info_local = ^^local_var;
+    consteval info info_local = ^^local_var;
 
     static int static_var;
-    constexpr info info_static = ^^static_var;
+    consteval info info_static = ^^static_var;
 
     thread_local int thread_var;
-    constexpr info info_thread = ^^thread_var;
+    consteval info info_thread = ^^thread_var;
 
     struct local_type {};
-    constexpr info info_type = ^^local_type;
+    consteval info info_type = ^^local_type;
 }
 
 // Reflecting a template parameter
@@ -124,10 +124,10 @@ template <typename T>
 consteval info foo() {
     return ^^T;
 }
-constexpr info info_tmplparam = foo<int>();
+consteval info info_tmplparam = foo<int>();
 
 namespace ns {}
-constexpr info info_ns = ^^ns;
+consteval info info_ns = ^^ns;
 namespace ns {}
 static_assert(info_ns == ^^ns);
 
@@ -135,11 +135,11 @@ static_assert(info_ns == ^^ns);
 class WithDefaultInitializer {
     [[maybe_unused]] info k = ^^::;
 };
-constexpr WithDefaultInitializer with_default_init;
+consteval WithDefaultInitializer with_default_init;
 
 // Type with a nested name specifier that can't be parsed as an identifier.
 namespace A { namespace B { using C = int; } }
-constexpr auto complicated_type = ^^A::B::C &;
+consteval auto complicated_type = ^^A::B::C &;
 
                                 // ============
                                 // east_west_cv
@@ -175,14 +175,14 @@ static int s1;
 void fn() {
   int l1;
   static int s2;
-  constexpr auto rl1 = ^^l1;
+  consteval auto rl1 = ^^l1;
   (void) [] -> decltype(^^s1, ^^l1, s2) {
     // expected-error@-1 {{intervening lambda expression}}
     int l2;
 
-    constexpr auto rl1_2 = ^^l1;
+    consteval auto rl1_2 = ^^l1;
       // expected-error@-1 {{intervening lambda expression}}
-    constexpr auto rl2 = ^^l2;
+    consteval auto rl2 = ^^l2;
   };
 }
 }  // namespace enclosing_lambdas
@@ -208,7 +208,7 @@ template <typename T> void fn() requires (^^T != ^^int);
 template <typename T> void fn() requires (^^T == ^^int);
 template <typename T> void fn() requires (sizeof(T) == sizeof(int));
 
-[[maybe_unused]] constexpr auto a = ^^fn<char>;  // OK
+[[maybe_unused]] consteval auto a = ^^fn<char>;  // OK
 }  // namespace overload_resolution
 
                    // =======================================
