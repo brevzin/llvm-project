@@ -24,7 +24,7 @@ namespace ptr_ref {
 
 consteval int f(int i) { return x + i; }
 consteval int g(int) { return 0; }
-constexpr int h(int) { return 0; }
+constexpr int h(int const&) { return 0; }
 
 constexpr auto pf1 = f; // expected-error {{constant expression}}
 consteval auto pf2 = f; // OK

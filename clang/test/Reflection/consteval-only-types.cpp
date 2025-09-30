@@ -66,16 +66,16 @@ info fn2() { return valid_cases::cfn1(); }
 // expected-error@-1 {{expressions of consteval-only type}}
 
 void fn3() { (void) valid_cases::r1; }
-// expected-error@-1 {{expressions of consteval-only type}}
+// expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn4() { (void) valid_cases::s1.m; }
-// expected-error@-1 {{expressions of consteval-only type}}
+// expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn5() { (void) static_cast<const void *>(valid_cases::p2); }
-// expected-error@-1 {{expressions of consteval-only type}}
+// expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn6() { (void) [:^^valid_cases::r1:]; }
-// expected-error@-1 {{expressions of consteval-only type}}
+// expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn7() {
   (void) info{}; // expected-error {{expressions of consteval-only type}}
