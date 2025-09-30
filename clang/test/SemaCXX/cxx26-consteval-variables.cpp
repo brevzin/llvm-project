@@ -26,15 +26,15 @@ int main(int argc, char**) {
     consteval int z = argc; // expected-error {{constexpr variable 'z' must be initialized by a constant expression}}
 
     // Error: expressions involving consteval variables must be constant-evaluated
-    int a1 = y + argc; // expected-error {{expressions involving consteval variables are only allowed in constant-evaluated contexts}}
-    int a2 = y + x;    // expected-error 2 {{expressions involving consteval variables}}
+    int a1 = y + argc; // expected-error {{expressions involving consteval-only values}}
+    int a2 = y + x;    // expected-error 2 {{expressions involving consteval-only values}}
 
     // OK: consteval functions create constant-evaluated contexts
     int a3 = g(y);
     int a4 = g(x);
 
     // Error: constexpr functions don't create constant-evaluated contexts
-    int a5 = h(y);    // expected-error {{expressions involving consteval variables}}
+    int a5 = h(y);    // expected-error {{expressions involving consteval-only values}}
 
     // OK: static_assert creates a constant-evaluated context
     static_assert(f(1) == 43);
