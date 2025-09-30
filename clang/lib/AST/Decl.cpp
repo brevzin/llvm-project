@@ -2516,7 +2516,7 @@ bool VarDecl::mightBeUsableInConstantExpressions(const ASTContext &C) const {
   // with the type and value of the declared object.
   // Additionally, in C++11, non-volatile constexpr variables can be used in
   // constant expressions.
-  return (Lang.CPlusPlus11 || Lang.C23) && isConstexpr();
+  return (Lang.CPlusPlus11 || Lang.C23) && (isConstexpr() || isConsteval());
 }
 
 bool VarDecl::isUsableInConstantExpressions(const ASTContext &Context) const {

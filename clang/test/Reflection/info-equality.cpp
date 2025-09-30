@@ -8,7 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// RUN: %clang_cc1 %s -std=c++23 -freflection
+// RUN: %clang_cc1 %s -std=c++26 -freflection
 
 using info = decltype(^^int);
 
@@ -18,7 +18,7 @@ namespace inner {}
 struct Test {
   using type = int;
 };
-constexpr info rTest = ^^Test::type;
+consteval info rTest = ^^Test::type;
 }
 
 struct Test {
@@ -61,9 +61,9 @@ namespace NsAlias = ::myns;
 
 
 // Ensure that different entities compare equally to themselves.
-constexpr info null1;     // default-initialized
-constexpr info null2 {};  // zero-initialized
-constexpr info refl = ^^int;
+consteval info null1;     // default-initialized
+consteval info null2 {};  // zero-initialized
+consteval info refl = ^^int;
 
 static_assert(null1 == null1);
 static_assert(null2 == null2);
@@ -142,8 +142,8 @@ static_assert(^^::myns != ^^NsAlias);
 static_assert(^^::myns != ^^::myns::inner);
 
 constexpr int i = 42;
-constexpr auto i_refl = ^^i;
-constexpr auto i_refl_copy = i_refl;
+consteval auto i_refl = ^^i;
+consteval auto i_refl_copy = i_refl;
 static_assert(i_refl == ^^i);
 static_assert(i_refl == i_refl_copy);
 

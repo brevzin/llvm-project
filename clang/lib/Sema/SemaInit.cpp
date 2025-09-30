@@ -7788,8 +7788,8 @@ ExprResult InitializationSequence::Perform(Sema &S,
     // The initialization would have succeeded with this fixit. Since the fixit
     // is on the error, we need to build a valid AST in this case, so this isn't
     // handled in the Failed() branch above.
-    if (!DestType->isRecordType() && VD && VD->isConstexpr()) {
-      // Use a more useful diagnostic for constexpr variables.
+    if (!DestType->isRecordType() && VD && (VD->isConstexpr() || VD->isConsteval())) {
+      // Use a more useful diagnostic for constexpr/consteval variables.
       S.Diag(Kind.getLocation(), diag::err_constexpr_var_requires_const_init)
           << VD
           << FixItHint::CreateInsertion(ZeroInitializationFixitLoc,
@@ -9315,7 +9315,7 @@ bool InitializationSequence::Diagnose(Sema &S,
       S.Diag(Entity.getDecl()->getLocation(), diag::note_previous_decl)
         << Entity.getName();
     } else if (const auto *VD = dyn_cast_if_present<VarDecl>(Entity.getDecl());
-               VD && VD->isConstexpr()) {
+               VD && (VD->isConstexpr() || VD->isConsteval())) {
       S.Diag(Kind.getLocation(), diag::err_constexpr_var_requires_const_init)
           << VD;
     } else {

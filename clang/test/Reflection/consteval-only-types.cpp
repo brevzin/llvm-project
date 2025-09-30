@@ -18,17 +18,17 @@ struct S { info m = {}; };
                                  // ===========
 
 namespace valid_cases {
-constexpr info r1 = ^^int;
-static constexpr info r2 = ^^int;
+consteval info r1 = ^^int;
+static consteval info r2 = ^^int;
 
-constexpr S s1;
-constexpr S s2{};
-constexpr S s3 = {^^int};
+consteval S s1;
+consteval S s2{};
+consteval S s3 = {^^int};
 
 constexpr info *p1 = nullptr;
-constexpr const info *p2 = &r1;
+consteval const info *p2 = &r1;
 
-void fn1() { static constexpr info r = ^^int; }
+void fn1() { static consteval info r = ^^int; }
 void fn2() { extern info r; }
 consteval info cfn1() { return ^^int; }
 consteval void cfn2() { (void) static_cast<const void *>(p2); }
@@ -140,7 +140,7 @@ struct Derived : Base {
   consteval Derived() : Base(), k(^^int) {}
 };
 consteval const Base &fn1() {
-  static constexpr Derived d;
+  static consteval Derived d;
   return d;
 }
 constexpr auto &ref = fn1();
@@ -148,7 +148,7 @@ constexpr auto &ref = fn1();
 // expected-note@-2 {{reference into an object of consteval-only type}}
 
 consteval void *fn2() {
-  static constexpr auto v = ^^int;
+  static consteval auto v = ^^int;
   return (void *)&v;
 }
 constexpr const void *ptr = fn2();

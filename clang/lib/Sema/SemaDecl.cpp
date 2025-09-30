@@ -14563,7 +14563,7 @@ bool APValueContainsConstevalOnlyValue(const APValue &V) {
   // Direct reflection value
   if (V.isReflection())
     return true;
-  
+
   // Check arrays
   if (V.isArray()) {
     // Use getArrayInitializedElts() to get the number of initialized elements
@@ -14577,7 +14577,7 @@ bool APValueContainsConstevalOnlyValue(const APValue &V) {
         return true;
     }
   }
-  
+
   // Check structs
   if (V.isStruct()) {
     for (unsigned i = 0; i < V.getStructNumFields(); ++i) {
@@ -14590,13 +14590,13 @@ bool APValueContainsConstevalOnlyValue(const APValue &V) {
         return true;
     }
   }
-  
+
   // Check unions
   if (V.isUnion()) {
     if (APValueContainsConstevalOnlyValue(V.getUnionValue()))
       return true;
   }
-  
+
   // Check LValues that refer to consteval variables
   if (V.isLValue()) {
     if (const ValueDecl *D = V.getLValueBase().dyn_cast<const ValueDecl*>()) {
@@ -14611,7 +14611,7 @@ bool APValueContainsConstevalOnlyValue(const APValue &V) {
       }
     }
   }
-  
+
   return false;
 }
 
@@ -14797,7 +14797,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   // Check whether the initializer is sufficiently constant.
   if ((getLangOpts().CPlusPlus || (getLangOpts().C23 && var->isConstexpr())) &&
       !type->isDependentType() && Init && !Init->isValueDependent() &&
-      (GlobalStorage || var->isConstexpr() ||
+      (GlobalStorage || var->isConstexpr() || var->isConsteval() ||
        var->mightBeUsableInConstantExpressions(Context))) {
     // If this variable might have a constant initializer or might be usable in
     // constant expressions, check whether or not it actually is now.  We can't
