@@ -5610,7 +5610,11 @@ static TypeSourceInfo *GetFullTypeForDeclarator(TypeProcessingState &state,
   // C++0x [dcl.constexpr]p9:
   //  A constexpr specifier used in an object declaration declares the object
   //  as const.
-  if (D.getDeclSpec().getConstexprSpecifier() == ConstexprSpecKind::Constexpr &&
+  // C++26 [dcl.constexpr]p??: (P3603R0)
+  //  A consteval specifier used in an object declaration declares the object
+  //  as const.
+  if ((D.getDeclSpec().getConstexprSpecifier() == ConstexprSpecKind::Constexpr ||
+       D.getDeclSpec().getConstexprSpecifier() == ConstexprSpecKind::Consteval) &&
       T->isObjectType())
     T.addConst();
 

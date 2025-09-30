@@ -18224,8 +18224,28 @@ HandleImmediateInvocations(Sema &SemaRef,
         return DynamicRecursiveASTVisitor::VisitExpr(E);
       }
       bool VisitDeclRefExpr(DeclRefExpr *E) override {
+        // Remove this DeclRefExpr if it's in the sets
         RefConsteval.erase(E);
         ConstevalOnly.erase(E);
+
+        // Also remove any other DeclRefExprs in ConstevalOnly that refer to the same variable
+        // This handles the case where the AST was transformed and we have different DeclRefExpr nodes
+        if (auto *VD = dyn_cast<VarDecl>(E->getDecl())) {
+          if (VD->isConsteval()) {
+            // Remove all DeclRefExprs that refer to this consteval variable
+            llvm::SmallVector<Expr*, 4> ToRemove;
+            for (auto *OtherE : ConstevalOnly) {
+              if (auto *OtherDRE = dyn_cast<DeclRefExpr>(OtherE)) {
+                if (OtherDRE->getDecl() == VD) {
+                  ToRemove.push_back(OtherDRE);
+                }
+              }
+            }
+            for (auto *E : ToRemove)
+              ConstevalOnly.erase(E);
+          }
+        }
+
         return RefConsteval.size() + ConstevalOnly.size();
       }
     } Visitor(Rec.ReferenceToConsteval, Rec.ConstevalOnly, RootExpr);
@@ -19896,7 +19916,19 @@ static ExprResult rebuildPotentialResultsAsNonOdrUsed(Sema &S, Expr *E,
   auto MarkNotOdrUsed = [&] {
     if (!MaybeCUDAODRUsed()) {
       S.MaybeODRUseExprs.remove(E);
-      S.ExprEvalContexts.back().ConstevalOnly.erase(E);
+      // Don't remove consteval variables from ConstevalOnly - they need to be
+      // diagnosed even if they're not ODR-used
+      if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+          if (!VD->isConsteval()) {
+            S.ExprEvalContexts.back().ConstevalOnly.erase(E);
+          }
+        } else {
+          S.ExprEvalContexts.back().ConstevalOnly.erase(E);
+        }
+      } else {
+        S.ExprEvalContexts.back().ConstevalOnly.erase(E);
+      }
       if (LambdaScopeInfo *LSI = S.getCurLambda())
         LSI->markVariableExprAsNonODRUsed(E);
     }
@@ -20551,21 +20583,15 @@ MarkExprReferenced(Sema &SemaRef, SourceLocation Loc, Decl *D, Expr *E,
 void Sema::MarkSubstNonTypeTemplateParmExprReferenced(SubstNonTypeTemplateParmExpr *E) {
   // Check if the replacement expression refers to a consteval value
   // If so, mark this substitution as requiring constant evaluation
-  if (!isUnevaluatedContext()) {
+  if (!isUnevaluatedContext() && !isImmediateFunctionContext()) {
     if (auto *DRE = dyn_cast<DeclRefExpr>(E->getReplacement())) {
       if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
         if (FD->isImmediateFunction()) {
-          // Mark as ConstevalOnly even in constant evaluated contexts
-          // unless we're already in a consteval context
-          if (!isImmediateFunctionContext()) {
-            ExprEvalContexts.back().ConstevalOnly.insert(E);
-          }
+          ExprEvalContexts.back().ConstevalOnly.insert(E);
         }
       } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
         if (VD->isConsteval() || VD->getType()->isConstevalOnly()) {
-          if (!isImmediateFunctionContext()) {
-            ExprEvalContexts.back().ConstevalOnly.insert(E);
-          }
+          ExprEvalContexts.back().ConstevalOnly.insert(E);
         }
       }
     }
@@ -20594,10 +20620,20 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
 
       if (FD->getType()->isConstevalOnly())
         ExprEvalContexts.back().ConstevalOnly.insert(E);
-    } else if (E->getDecl()) {
-      if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
-          VD && (VD->getType()->isConstevalOnly() || VD->isConsteval())) {
-        ExprEvalContexts.back().ConstevalOnly.insert(E);
+    }
+  }
+
+  // Check for consteval variables - they need to be tracked
+  // when not in constant-evaluated or immediate function contexts
+  if (!isUnevaluatedContext() && !isImmediateFunctionContext() &&
+      !isConstantEvaluatedContext() && !RebuildingImmediateInvocation) {
+    if (E->getDecl()) {
+      if (auto *VD = dyn_cast<VarDecl>(E->getDecl())) {
+        bool IsConsteval = VD->isConsteval();
+        bool IsConstevalOnly = VD->getType()->isConstevalOnly();
+        if (IsConsteval || IsConstevalOnly) {
+          ExprEvalContexts.back().ConstevalOnly.insert(E);
+        }
       }
     }
   }
