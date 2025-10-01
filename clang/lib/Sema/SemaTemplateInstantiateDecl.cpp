@@ -6047,6 +6047,18 @@ VarTemplateSpecializationDecl *Sema::CompleteVarTemplateSpecializationDecl(
   // Instantiate the initializer.
   InstantiateVariableInitializer(VarSpec, PatternDecl, TemplateArgs);
 
+  // Check if a constexpr variable template specialization contains
+  // consteval-only values and needs to be escalated to consteval
+  if (VarSpec->isConstexpr() && !VarSpec->isConsteval()) {
+    if (APValue *V = VarSpec->evaluateValue()) {
+      // Check if the value contains consteval-only values
+      if (APValueContainsConstevalOnlyValue(*V)) {
+        // Upgrade from constexpr to consteval
+        VarSpec->setConsteval(true);
+      }
+    }
+  }
+
   if (getLangOpts().OpenCL)
     deduceOpenCLAddressSpace(VarSpec);
 

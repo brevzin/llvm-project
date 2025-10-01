@@ -22,7 +22,7 @@
 #include <print>
 
 
-constexpr auto ctx = std::meta::access_context::unchecked();
+consteval auto ctx = std::meta::access_context::unchecked();
 
                                  // ===========
                                  // well_formed
@@ -70,7 +70,7 @@ consteval auto fn4() {
   consteval { define_aggregate(^^S, {}); }
   return ^^S;
 }
-constexpr auto i4 = fn4<int>();
+consteval auto i4 = fn4<int>();
 
 }  // namespace well_formed
 
@@ -81,7 +81,7 @@ constexpr auto i4 = fn4<int>();
 
 namespace non_plainly_constant_evaluated {
 struct I1;
-constexpr auto u1 = define_aggregate(^^I1, {});
+consteval auto u1 = define_aggregate(^^I1, {});
 // expected-error@-1 {{must be initialized by a constant expression}}
 // expected-note@-2 {{non-plainly constant-evaluated context}}
 
@@ -113,12 +113,12 @@ constexpr auto Completion = define_aggregate(^^Ty, {});
 // expected-note@-2 {{non-plainly constant-evaluated}}
 
 struct I4;
-constexpr auto D = Completion<I4>;
+consteval auto D = Completion<I4>;
 // expected-error@-1 {{must be initialized by a constant expression}}
 
 void fn() {
   struct I5;
-  [[maybe_unused]] static constexpr auto r = define_aggregate(^^I5, {});
+  [[maybe_unused]] static consteval auto r = define_aggregate(^^I5, {});
     // expected-error@-1 {{must be initialized by a constant expression}}
     // expected-note@-2 {{non-plainly constant-evaluated}}
 }

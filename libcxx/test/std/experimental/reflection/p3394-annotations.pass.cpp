@@ -281,8 +281,8 @@ constexpr test_struct test;
 [[=test]] void func() {}
 [[=1]] void func2() {}
 
-constexpr auto func_first = std::meta::constant_of(std::meta::annotations_of(^^func)[0]);
-constexpr auto func2_first = std::meta::constant_of(std::meta::annotations_of(^^func2)[0]);
+consteval auto func_first = std::meta::constant_of(std::meta::annotations_of(^^func)[0]);
+consteval auto func2_first = std::meta::constant_of(std::meta::annotations_of(^^func2)[0]);
 
 static_assert(std::meta::constant_of(^^test) == std::meta::reflect_constant(test));
 static_assert(std::same_as<decltype([:func_first:]), const test_struct &>);

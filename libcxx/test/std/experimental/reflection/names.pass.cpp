@@ -19,7 +19,7 @@
 #include <experimental/meta>
 
 
-constexpr auto ctx = std::meta::access_context::unchecked();
+consteval auto ctx = std::meta::access_context::unchecked();
 
 static_assert(u8display_string_of(^^::) == u8"(global-namespace)");
 static_assert(display_string_of(^^::) == "(global-namespace)");
@@ -309,10 +309,10 @@ static_assert(display_string_of(^^S::operator new) == "operator new");
 }  // namespace Ops
 
 namespace DataMemberSpecs {
-constexpr auto a = data_member_spec(^^int, {});
-constexpr auto b = data_member_spec(^^int, {.name=""});
-constexpr auto c = data_member_spec(^^int, {.name="ident"});
-constexpr auto d = data_member_spec(^^int, {.name=u8"ident"});
+consteval auto a = data_member_spec(^^int, {});
+consteval auto b = data_member_spec(^^int, {.name=""});
+consteval auto c = data_member_spec(^^int, {.name="ident"});
+consteval auto d = data_member_spec(^^int, {.name=u8"ident"});
 
 static_assert(!has_identifier(a));
 static_assert(!has_identifier(b));

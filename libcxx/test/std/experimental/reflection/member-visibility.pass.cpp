@@ -108,7 +108,7 @@ private:
                                            access_context::unchecked())[1]));
 
         // Everything in this class is accessible.
-        constexpr auto ctx = access_context::current();
+        consteval auto ctx = access_context::current();
         static_assert(is_accessible(^^pub, ctx));
         static_assert(is_accessible(^^prot, ctx));
         static_assert(is_accessible(^^priv, ctx));
@@ -132,12 +132,12 @@ private:
     friend consteval access_context FriendFnOfAccess();
 
 public:
-    static constexpr auto r_prot = ^^prot;
+    static consteval auto r_prot = ^^prot;
 };
 
 struct Derived : Access {
-  static constexpr auto ctx = access_context::current();
-  static constexpr auto obj_ctx = access_context::current().via(^^Derived);
+  static consteval auto ctx = access_context::current();
+  static consteval auto obj_ctx = access_context::current().via(^^Derived);
 
   static_assert(is_accessible(^^Access::PublicBase::mem, ctx));
   static_assert(is_accessible(^^Access::ProtectedBase::mem, ctx));
@@ -147,7 +147,7 @@ struct Derived : Access {
   static_assert(is_accessible(Access::r_prot, obj_ctx));
 };
 
-static constexpr auto gctx = access_context::current();
+static consteval auto gctx = access_context::current();
 static_assert(is_accessible(^^Access::pub, gctx));
 static_assert(is_accessible(^^Access::PublicCls, gctx));
 static_assert(is_accessible(^^Access::PublicTFn, gctx));
@@ -191,7 +191,7 @@ static_assert(!is_accessible(bases_of(^^Access,  // PrivateBase
                                       access_context::unchecked())[2], gctx));
 
 struct FriendClsOfAccess {
-  static constexpr auto ctx = access_context::current();
+  static consteval auto ctx = access_context::current();
 
   static_assert(is_accessible(^^Access::pub, ctx));
   static_assert(is_accessible(^^Access::prot, ctx));
@@ -216,7 +216,7 @@ struct FriendClsOfAccess {
 };
 
 consteval access_context FriendFnOfAccess() {
-  static constexpr auto ctx = access_context::current();
+  static consteval auto ctx = access_context::current();
 
   static_assert(is_accessible(^^Access::pub, ctx));
   static_assert(is_accessible(^^Access::prot, ctx));
@@ -254,7 +254,7 @@ static_assert(access_context::current().scope() == ^^::new_accessibility_api);
 void fn() {
   static_assert(access_context::current().scope() == ^^fn);
   [] {
-    constexpr auto repr = access_context::current().scope();
+    consteval auto repr = access_context::current().scope();
     static_assert(is_function(repr));
     static_assert(repr != ^^fn);
   }();
@@ -383,8 +383,8 @@ struct C {};
 struct D : A, protected B, private C {
     static consteval auto foo()
     {
-        constexpr auto ctx = std::meta::access_context::current();
-        constexpr auto n = bases_of(^^D, ctx).size();
+        consteval auto ctx = std::meta::access_context::current();
+        consteval auto n = bases_of(^^D, ctx).size();
         static_assert(n == 3);
         static_assert(bases_of(^^D, ctx).size() == 3);
     }

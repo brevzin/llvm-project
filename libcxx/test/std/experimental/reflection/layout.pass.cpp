@@ -112,10 +112,10 @@ static_assert(alignment_of(^^AlignedTo64) == 64);
 static_assert(size_of(^^AlignedTo64) == 64);
 static_assert(size_of(^^AlignedTo64::mem) == sizeof(int));
 
-constexpr auto dms1 = data_member_spec(^^int, {});
-constexpr auto dms2 = data_member_spec(^^int, {.width=0});
-constexpr auto dms3 = data_member_spec(^^int, {.width=3});
-constexpr auto dms4 = data_member_spec(^^int, {.alignment=8});
+consteval auto dms1 = data_member_spec(^^int, {});
+consteval auto dms2 = data_member_spec(^^int, {.width=0});
+consteval auto dms3 = data_member_spec(^^int, {.width=3});
+consteval auto dms4 = data_member_spec(^^int, {.alignment=8});
 static_assert(alignment_of(dms1) == alignof(int));
 static_assert(alignment_of(dms4) == 8);
 static_assert(size_of(dms1) == sizeof(int));

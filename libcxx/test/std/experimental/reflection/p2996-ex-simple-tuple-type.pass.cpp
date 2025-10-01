@@ -38,7 +38,7 @@ template<typename... Ts> struct Tuple {
 };
 
 consteval std::meta::info get_nth_field(std::meta::info r, std::size_t n) {
-  constexpr auto ctx = std::meta::access_context::current();
+  consteval auto ctx = std::meta::access_context::current();
   return nonstatic_data_members_of(r, ctx)[n];
 }
 

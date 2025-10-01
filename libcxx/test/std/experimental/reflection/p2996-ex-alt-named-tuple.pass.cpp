@@ -28,7 +28,7 @@ consteval auto make_named_tuple(
     std::vector<std::meta::info> nsdms;
     for (auto [ty, name] : members) {
         nsdms.push_back(data_member_spec(ty, {.name=name}));
-    }    
+    }
     return define_aggregate(type, nsdms);
 }
 
@@ -37,7 +37,7 @@ consteval {
   make_named_tuple(^^R, {{^^int, "x"}, {^^double, "y"}});
 }
 
-constexpr auto ctx = std::meta::access_context::unchecked();
+consteval auto ctx = std::meta::access_context::unchecked();
 static_assert(type_of(nonstatic_data_members_of(^^R, ctx)[0]) == ^^int);
 static_assert(type_of(nonstatic_data_members_of(^^R, ctx)[1]) == ^^double);
 

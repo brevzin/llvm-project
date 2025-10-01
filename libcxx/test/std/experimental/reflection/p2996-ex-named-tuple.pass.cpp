@@ -61,7 +61,7 @@ consteval {
   make_named_tuple(^^R, pair<int, "x">{}, pair<double, "y">{});
 }
 
-constexpr auto ctx = std::meta::access_context::current();
+consteval auto ctx = std::meta::access_context::current();
 static_assert(type_of(nonstatic_data_members_of(^^R, ctx)[0]) == ^^int);
 static_assert(type_of(nonstatic_data_members_of(^^R, ctx)[1]) == ^^double);
 

@@ -149,7 +149,7 @@ static_assert(!has_automatic_storage_duration(R<S{}>));
 
 static std::pair<int, int> p;
 
-constexpr auto first = std::meta::reflect_object(p.first);
+consteval auto first = std::meta::reflect_object(p.first);
 static_assert(has_static_storage_duration(first));
 static_assert(!has_thread_storage_duration(first));
 static_assert(!has_automatic_storage_duration(first));

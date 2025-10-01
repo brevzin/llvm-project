@@ -6,6 +6,19 @@
 consteval int x = 42;
 static_assert(x == 42);
 
+namespace ptr_ref {
+    constexpr int const* p1 = &x; // expected-error {{constant expression}}
+    consteval int const* p2 = &x;
+    constexpr int const& r1 = x;  // expected-error {{constant expression}}
+    consteval int const& r2 = x;
+
+    template <class T> struct Wrap { T t; };
+    constexpr auto w1 = Wrap<int const*>{&x}; // expected-error {{constant expression}}
+    constexpr auto w2 = Wrap<int const&>{x};  // expected-error {{constant expression}}
+    consteval auto w3 = Wrap<int const*>{&x};
+    consteval auto w4 = Wrap<int const&>{x};
+}
+
 consteval int f(int i) { return x + i; }
 consteval int g(int) { return 0; }
 constexpr int h(int) { return 0; }
@@ -17,7 +30,7 @@ struct Wrap { int(*p)(int); };
 constexpr auto c1 = Wrap{.p=f}; // expected-error {{constant expression}}
 consteval auto c2 = Wrap{.p=f}; // ok
 
-int main(int argc, char**) {
+void local(int argc) {
     // Local consteval variables
     consteval int y = 0;
     static_assert(y == 0);
@@ -74,15 +87,25 @@ namespace N2 {
         static constexpr auto value = V;
     };
 
+    template <auto V>
+    static constexpr auto var = V;
+
     constexpr auto i = C<0>::value;
     static_assert(i == 0);
     constexpr auto pf1 = C<::f>::value; // expected-error {{constant expression}}
     consteval auto pf2 = C<::f>::value;
     static_assert(pf2(2) == 44);
+    constexpr auto pf3 = var<::f>; // expected-error {{constant expression}}
+    consteval auto pf4 = var<::f>;
+    static_assert(pf4(2) == 44);
 
     constexpr auto w1 = C<Wrap{.p=::f}>::value; // expected-error {{constant expression}}
     consteval auto w2 = C<Wrap{.p=::f}>::value;
     static_assert(w2.p(2) == 44);
+    constexpr auto w3 = var<Wrap{.p=::f}>; // expected-error {{constant expression}}
+    consteval auto w4 = var<Wrap{.p=::f}>;
+    static_assert(w4.p(2) == 44);
+
 }
 
 namespace N3 {

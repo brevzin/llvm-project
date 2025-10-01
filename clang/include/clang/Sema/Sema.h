@@ -10388,6 +10388,9 @@ public:
                                       const APValue &PreNarrowingValue,
                                       Decl *ContainingDecl = nullptr);
 
+  /// Check to see if an APValue contains a consteval-only value
+  bool APValueContainsConstevalOnlyValue(const APValue &V);
+
   /// Abstract base class used to perform a contextual implicit
   /// conversion from an expression to any type passing a filter.
   class ContextualImplicitConverter {

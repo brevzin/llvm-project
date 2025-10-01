@@ -20,8 +20,8 @@
 #include <experimental/meta>
 
 
-constexpr auto ctx = std::meta::access_context::current();
-constexpr auto unchecked = std::meta::access_context::unchecked();
+consteval auto ctx = std::meta::access_context::current();
+consteval auto unchecked = std::meta::access_context::unchecked();
 
 struct Base {};
 enum Enum { Red };

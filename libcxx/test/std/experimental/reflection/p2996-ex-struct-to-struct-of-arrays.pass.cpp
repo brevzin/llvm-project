@@ -29,7 +29,7 @@ struct struct_of_arrays_impl {
   struct impl;
 
   consteval {
-    constexpr auto ctx = std::meta::access_context::current();
+    consteval auto ctx = std::meta::access_context::current();
     std::vector<std::meta::info> old_members = nonstatic_data_members_of(^^T,
                                                                          ctx);
     std::vector<std::meta::info> new_members = {};

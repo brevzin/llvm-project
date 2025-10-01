@@ -201,7 +201,7 @@ namespace extract_ref_semantics {
   consteval const int &returnsRef() { return constGlobal; }
 
   void nonConstFn() {
-    constexpr auto r = std::meta::reflect_object(returnsRef());
+    consteval auto r = std::meta::reflect_object(returnsRef());
     static_assert(extract<const int &>(r) == 2);
   }
 }  // namespace extract_ref_semantics
@@ -288,7 +288,7 @@ static_assert(type_of(object_of(^^r)) == ^^A);
 namespace values_from_objects {
 
 const int constGlobal = 11;
-constexpr auto rref = std::meta::reflect_object(constGlobal);
+consteval auto rref = std::meta::reflect_object(constGlobal);
 
 static_assert(constant_of(^^constGlobal) != ^^constGlobal);
 static_assert([:constant_of(^^constGlobal):] == 11);
@@ -315,12 +315,12 @@ static_assert(constant_of(^^ce) != std::meta::reflect_constant(Enum(0)));
 static_assert(constant_of(^^ce) == std::meta::reflect_constant(EnumCls(0)));
 
 constexpr std::pair<std::pair<int, bool>, int> p = {{1, true}, 2};
-constexpr std::meta::info rfirst = std::meta::reflect_object(p.first);
+consteval std::meta::info rfirst = std::meta::reflect_object(p.first);
 static_assert(is_object(rfirst) && !is_value(rfirst));
 static_assert(type_of(rfirst) == ^^const std::pair<int, bool>);
 static_assert(rfirst != std::meta::reflect_constant(std::make_pair(1, true)));
 
-constexpr std::meta::info rvfirst = constant_of(rfirst);
+consteval std::meta::info rvfirst = constant_of(rfirst);
 static_assert(is_object(rvfirst) && !is_value(rvfirst));
 static_assert(type_of(rvfirst) == ^^const std::pair<int, bool>);
 static_assert(rvfirst == std::meta::reflect_constant(std::make_pair(1, true)));
@@ -386,7 +386,7 @@ namespace pointer_object_ambiguity {
 constexpr int k = 3;
 constexpr const int *p = &k;
 
-constexpr auto rp = ^^p;
+consteval auto rp = ^^p;
 static_assert(is_variable(rp));
 //static_assert(!is_object(rp));
 static_assert(!is_value(rp));

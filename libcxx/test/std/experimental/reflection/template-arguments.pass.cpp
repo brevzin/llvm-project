@@ -18,7 +18,7 @@
 #include <experimental/meta>
 
 
-constexpr auto ctx = std::meta::access_context::unchecked();
+consteval auto ctx = std::meta::access_context::unchecked();
 
 template <typename P1, auto P2, template <typename...> class P3>
 struct TCls {
@@ -218,7 +218,7 @@ template <int P> void fn_int_value() {
 }
 
 template <const int &P> void fn_int_ref() {
-  static constexpr auto R = std::meta::reflect_object(P);
+  static consteval auto R = std::meta::reflect_object(P);
 
   static_assert(is_object(R));
   static_assert(!is_variable(R));
@@ -231,7 +231,7 @@ template <const int &P> void fn_int_ref() {
 }
 
 template <const int &P> void fn_int_subobject_ref() {
-  static constexpr auto R = std::meta::reflect_object(P);
+  static consteval auto R = std::meta::reflect_object(P);
 
   static_assert(is_object(R));
   static_assert(!is_variable(R));
@@ -242,7 +242,7 @@ template <const int &P> void fn_int_subobject_ref() {
 struct S { int m; };
 
 template <S P> void fn_cls_value() {
-  static constexpr auto R = std::meta::reflect_object(P);
+  static consteval auto R = std::meta::reflect_object(P);
 
   static_assert(is_object(R));
   static_assert(!is_variable(R));  // template-parameter-object
@@ -251,7 +251,7 @@ template <S P> void fn_cls_value() {
 }
 
 template <S &P> void fn_cls_ref() {
-  static constexpr auto R = std::meta::reflect_object(P);
+  static consteval auto R = std::meta::reflect_object(P);
 
   static_assert(is_object(R));
   static_assert(!is_variable(R));
