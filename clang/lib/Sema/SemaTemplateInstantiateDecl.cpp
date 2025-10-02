@@ -6050,11 +6050,16 @@ VarTemplateSpecializationDecl *Sema::CompleteVarTemplateSpecializationDecl(
   // Check if a constexpr variable template specialization contains
   // consteval-only values and needs to be escalated to consteval
   if (VarSpec->isConstexpr() && !VarSpec->isConsteval()) {
-    if (APValue *V = VarSpec->evaluateValue()) {
-      // Check if the value contains consteval-only values
-      if (APValueContainsConstevalOnlyValue(*V)) {
-        // Upgrade from constexpr to consteval
-        VarSpec->setConsteval(true);
+    // Only evaluate if the initializer is not value-dependent
+    if (const Expr *Init = VarSpec->getInit()) {
+      if (!Init->isValueDependent()) {
+        if (APValue *V = VarSpec->evaluateValue()) {
+          // Check if the value contains consteval-only values
+          if (APValueContainsConstevalOnlyValue(*V)) {
+            // Upgrade from constexpr to consteval
+            VarSpec->setConsteval(true);
+          }
+        }
       }
     }
   }
@@ -6100,7 +6105,7 @@ void Sema::BuildVariableInstantiation(
   NewVar->setObjCForDecl(OldVar->isObjCForDecl());
   NewVar->setConstexpr(OldVar->isConstexpr());
   NewVar->setConsteval(OldVar->isConsteval());
-  // NewVar->setExpansionVariable(OldVar->isExpansionVariable());
+  NewVar->setExpansionVariable(OldVar->isExpansionVariable());
   NewVar->setInitCapture(OldVar->isInitCapture());
   NewVar->setPreviousDeclInSameBlockScope(
       OldVar->isPreviousDeclInSameBlockScope());

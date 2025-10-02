@@ -1101,6 +1101,11 @@ protected:
     /// Whether this variable is (C++26) consteval.
     LLVM_PREFERRED_TYPE(bool)
     unsigned IsConsteval : 1;
+    
+    /// Whether this variable is an expansion statement variable (e.g., the
+    /// iteration variable in a template for loop).
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned IsExpansionVariable : 1;
   };
 
   union {
@@ -1557,11 +1562,11 @@ public:
   
   /// Whether this variable is an expansion statement variable.
   bool isExpansionVariable() const {
-    // Temporarily always return false to test if our bit field is causing issues
-    return false;
+    return isa<ParmVarDecl>(this) ? false : NonParmVarDeclBits.IsExpansionVariable;
   }
   void setExpansionVariable(bool IEV) {
-    // No-op for now
+    assert(!isa<ParmVarDecl>(this));
+    NonParmVarDeclBits.IsExpansionVariable = IEV;
   }
 
   /// Whether this variable is the implicit variable for a lambda init-capture.

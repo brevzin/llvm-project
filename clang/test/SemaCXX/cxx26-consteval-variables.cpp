@@ -5,6 +5,7 @@
 // Global consteval variables
 consteval int x = 42;
 static_assert(x == 42);
+using I = decltype(x);
 
 namespace ptr_ref {
     constexpr int const* p1 = &x; // expected-error {{constant expression}}

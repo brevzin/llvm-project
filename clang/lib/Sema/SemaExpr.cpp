@@ -18000,7 +18000,7 @@ ExprResult Sema::CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl) {
   /// in order to remove any arguments of consteval-only type nested in the
   /// argument expressions.
   ExprEvalContexts.back().ImmediateInvocationCandidates.emplace_back(Res, 0);
-  if (Res->getType()->isConstevalOnly())
+  if (Res->getType()->isConstevalOnly() && !isUnevaluatedContext() && !isImmediateFunctionContext() && !isConstantEvaluatedContext())
     ExprEvalContexts.back().ConstevalOnly.insert(Res);
 
   return Res;
@@ -20583,7 +20583,7 @@ MarkExprReferenced(Sema &SemaRef, SourceLocation Loc, Decl *D, Expr *E,
 void Sema::MarkSubstNonTypeTemplateParmExprReferenced(SubstNonTypeTemplateParmExpr *E) {
   // Check if the replacement expression refers to a consteval value
   // If so, mark this substitution as requiring constant evaluation
-  if (!isUnevaluatedContext() && !isImmediateFunctionContext()) {
+  if (!isUnevaluatedContext() && !isImmediateFunctionContext() && !isConstantEvaluatedContext()) {
     if (auto *DRE = dyn_cast<DeclRefExpr>(E->getReplacement())) {
       if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
         if (FD->isImmediateFunction()) {
@@ -20627,7 +20627,8 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
   }
 
   // Check for consteval variables
-  if (E->getDecl()) {
+  // Only track them if we're not in an unevaluated, immediate function, or constant-evaluated context
+  if (E->getDecl() && !isUnevaluatedContext() && !isImmediateFunctionContext() && !isConstantEvaluatedContext()) {
     if (auto *VD = dyn_cast<VarDecl>(E->getDecl())) {
       if (VD->isConsteval() || VD->getType()->isConstevalOnly()) {
         // Don't track expansion statement variables - they are iteration variables
