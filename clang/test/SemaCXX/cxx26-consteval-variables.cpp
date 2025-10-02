@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -std=c++26 -freflection -verify -verify-ignore-unexpected=note %s
+// RUN: %clang_cc1 -std=c++26 -freflection -fexpansion-statements -verify -verify-ignore-unexpected=note %s
 
 // Test for P3603R0: Allowing consteval variables
 
@@ -55,6 +55,34 @@ void local(int argc) {
     // OK: consteval variables can be captured and used in constant expressions
     auto f2 = [](int i) { return x + i; };
     static_assert(f2(1) == 43);
+}
+
+void expansion() {
+    struct Ptr { int const* p; };
+    static consteval int i = 0;
+
+    struct array {
+    private:
+        int elems[3];
+    public:
+        constexpr array(int x, int y, int z) : elems{x, y, z} { }
+        constexpr const int* begin() const { return elems; }
+        constexpr const int* end() const { return elems + 3; }
+    };
+
+    template for (consteval int x : {1, 2, 3}) {
+        static_assert(x < 10);
+        constexpr int const* p = &x; // expected-error 3 {{constant expression}}
+    }
+
+    template for (consteval auto p : Ptr{&i}) {
+
+    }
+
+    template for (consteval int e : array{1, 2, 3}) {
+        static_assert(e < 10);
+        constexpr int const* p = &e; // expected-error 3 {{constant expression}}
+    }
 }
 
 namespace N1 {

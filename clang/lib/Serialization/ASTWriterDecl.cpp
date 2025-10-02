@@ -1275,6 +1275,9 @@ void ASTDeclWriter::VisitVarDecl(VarDecl *D) {
       VarDeclBits.addBits(0, /*Width=*/3);
 
     VarDeclBits.addBit(D->isObjCForDecl());
+    // Don't serialize IsConsteval - it wasn't serialized before
+    // VarDeclBits.addBit(D->isConsteval());
+    // VarDeclBits.addBit(D->isExpansionVariable());
   }
 
   Record.push_back(VarDeclBits);

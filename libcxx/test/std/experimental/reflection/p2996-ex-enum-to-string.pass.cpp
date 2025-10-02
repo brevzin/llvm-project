@@ -50,6 +50,7 @@ constexpr std::optional<E> string_to_enum(std::string_view name) {
 
 int main() {
   enum Color { red, green, blue };
+  [[maybe_unused]] constexpr auto p = enum_to_string<Color>;
 
   static_assert(enum_to_string(Color::red) == "red");
 

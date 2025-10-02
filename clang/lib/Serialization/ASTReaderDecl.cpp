@@ -1639,6 +1639,9 @@ RedeclarableResult ASTDeclReader::VisitVarDeclImpl(VarDecl *VD) {
         VarDeclBits.getNextBits(/*Width*/ 3);
 
     VD->NonParmVarDeclBits.ObjCForDecl = VarDeclBits.getNextBit();
+    // Don't deserialize IsConsteval - it wasn't serialized before
+    // VD->NonParmVarDeclBits.IsConsteval = VarDeclBits.getNextBit();
+    // VD->NonParmVarDeclBits.IsExpansionVariable = VarDeclBits.getNextBit();
   }
 
   // If this variable has a deduced type, defer reading that type until we are

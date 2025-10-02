@@ -163,7 +163,12 @@ bool tryMakeCXXIterableExpansionSelectExpr(
 
     RangeVar = VarDecl::Create(S.Context, DC, Range->getBeginLoc(),
                                Range->getBeginLoc(), II, QT, TSI, SC_Auto);
-    if (ExpansionVar->isConstexpr())
+    RangeVar->setExpansionVariable(true);  // Mark as expansion variable
+    if (ExpansionVar->isConsteval()) {
+      RangeVar->setConsteval(true);
+      RangeVar->setConstexpr(true);
+    }
+    else if (ExpansionVar->isConstexpr())
       RangeVar->setConstexpr(true);
     else if (!LifetimeExtendTemps.empty()) {
       InitializedEntity Entity =
@@ -265,8 +270,13 @@ ExprResult makeCXXDestructurableExpansionSelectExpr(
                                                     Range->getBeginLoc(),
                                                     QT, TSI,
                                                     SC_Auto, Bindings);
+  DD->setExpansionVariable(true);  // Mark as expansion variable
   if (ExpansionVar->isConstexpr())
     DD->setConstexpr(true);
+  if (ExpansionVar->isConsteval()) {
+    DD->setConsteval(true);
+    DD->setConstexpr(true);
+  }
 
   if (!LifetimeExtendTemps.empty()) {
     InitializedEntity Entity = InitializedEntity::InitializeVariable(DD);
@@ -300,6 +310,9 @@ StmtResult Sema::ActOnCXXExpansionStmt(
   VarDecl *ExpansionVar = ExtractVarDecl(ExpansionVarStmt);
   if (!ExpansionVar)
     return StmtError();
+  
+  // Mark the expansion variable so it can be identified during instantiation
+  ExpansionVar->setExpansionVariable(true);
 
   ER = BuildCXXExpansionSelectExpr(Range, TParamRef, ExpansionVar,
                                    LifetimeExtendTemps);
@@ -327,6 +340,9 @@ StmtResult Sema::BuildCXXExpansionStmt(SourceLocation TemplateKWLoc,
   VarDecl *ExpansionVar = ExtractVarDecl(ExpansionVarStmt);
   if (!ExpansionVar)
     return StmtError();
+  
+  // Mark the expansion variable so it can be identified during instantiation
+  ExpansionVar->setExpansionVariable(true);
   Expr *Select = ExpansionVar->getInit();
   assert(Select);
 

@@ -1554,6 +1554,15 @@ public:
     assert(!isa<ParmVarDecl>(this));
     NonParmVarDeclBits.IsConsteval = IC;
   }
+  
+  /// Whether this variable is an expansion statement variable.
+  bool isExpansionVariable() const {
+    // Temporarily always return false to test if our bit field is causing issues
+    return false;
+  }
+  void setExpansionVariable(bool IEV) {
+    // No-op for now
+  }
 
   /// Whether this variable is the implicit variable for a lambda init-capture.
   bool isInitCapture() const {

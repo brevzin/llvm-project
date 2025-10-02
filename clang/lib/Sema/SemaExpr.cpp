@@ -20591,7 +20591,10 @@ void Sema::MarkSubstNonTypeTemplateParmExprReferenced(SubstNonTypeTemplateParmEx
         }
       } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
         if (VD->isConsteval() || VD->getType()->isConstevalOnly()) {
-          ExprEvalContexts.back().ConstevalOnly.insert(E);
+          // Don't track expansion statement variables
+          if (!VD->isExpansionVariable()) {
+            ExprEvalContexts.back().ConstevalOnly.insert(E);
+          }
         }
       }
     }
@@ -20623,15 +20626,13 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
     }
   }
 
-  // Check for consteval variables - they need to be tracked
-  // when not in constant-evaluated or immediate function contexts
-  if (!isUnevaluatedContext() && !isImmediateFunctionContext() &&
-      !isConstantEvaluatedContext() && !RebuildingImmediateInvocation) {
-    if (E->getDecl()) {
-      if (auto *VD = dyn_cast<VarDecl>(E->getDecl())) {
-        bool IsConsteval = VD->isConsteval();
-        bool IsConstevalOnly = VD->getType()->isConstevalOnly();
-        if (IsConsteval || IsConstevalOnly) {
+  // Check for consteval variables
+  if (E->getDecl()) {
+    if (auto *VD = dyn_cast<VarDecl>(E->getDecl())) {
+      if (VD->isConsteval() || VD->getType()->isConstevalOnly()) {
+        // Don't track expansion statement variables - they are iteration variables
+        // that exist only during compile-time expansion
+        if (!VD->isExpansionVariable()) {
           ExprEvalContexts.back().ConstevalOnly.insert(E);
         }
       }
