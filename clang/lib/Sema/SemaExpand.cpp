@@ -310,7 +310,7 @@ StmtResult Sema::ActOnCXXExpansionStmt(
   VarDecl *ExpansionVar = ExtractVarDecl(ExpansionVarStmt);
   if (!ExpansionVar)
     return StmtError();
-  
+
   // Mark the expansion variable so it can be identified during instantiation
   ExpansionVar->setExpansionVariable(true);
 
@@ -340,7 +340,7 @@ StmtResult Sema::BuildCXXExpansionStmt(SourceLocation TemplateKWLoc,
   VarDecl *ExpansionVar = ExtractVarDecl(ExpansionVarStmt);
   if (!ExpansionVar)
     return StmtError();
-  
+
   // Mark the expansion variable so it can be identified during instantiation
   ExpansionVar->setExpansionVariable(true);
   Expr *Select = ExpansionVar->getInit();

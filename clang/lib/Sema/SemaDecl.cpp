@@ -14788,8 +14788,6 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
     Diag(var->getLocation(), diag::err_constexpr_var_requires_const_init)
         << var;
 
-
-
   // Check whether the initializer is sufficiently constant.
   if ((getLangOpts().CPlusPlus || (getLangOpts().C23 && var->isConstexpr())) &&
       !type->isDependentType() && Init && !Init->isValueDependent() &&

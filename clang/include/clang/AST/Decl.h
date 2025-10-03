@@ -1101,7 +1101,7 @@ protected:
     /// Whether this variable is (C++26) consteval.
     LLVM_PREFERRED_TYPE(bool)
     unsigned IsConsteval : 1;
-    
+
     /// Whether this variable is an expansion statement variable (e.g., the
     /// iteration variable in a template for loop).
     LLVM_PREFERRED_TYPE(bool)
@@ -1559,7 +1559,7 @@ public:
     assert(!isa<ParmVarDecl>(this));
     NonParmVarDeclBits.IsConsteval = IC;
   }
-  
+
   /// Whether this variable is an expansion statement variable.
   bool isExpansionVariable() const {
     return isa<ParmVarDecl>(this) ? false : NonParmVarDeclBits.IsExpansionVariable;
