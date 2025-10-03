@@ -17924,20 +17924,31 @@ void Sema::MarkExpressionAsImmediateEscalating(Expr *E) {
 ExprResult Sema::CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl) {
   if (isUnevaluatedContext() || !E.isUsable() || !Decl ||
       !Decl->isImmediateFunction() || isAlwaysConstantEvaluatedContext() ||
-      isCheckingDefaultArgumentOrInitializer() ||
-      RebuildingImmediateInvocation || isImmediateFunctionContext())
+      isCheckingDefaultArgumentOrInitializer() || isImmediateFunctionContext())
     return E;
 
   /// Opportunistically remove the callee from ReferencesToConsteval if we can.
   /// It's OK if this fails; we'll also remove this in
   /// HandleImmediateInvocations, but catching it here allows us to avoid
   /// walking the AST looking for it in simple cases.
-  if (auto *Call = dyn_cast<CallExpr>(E.get()->IgnoreImplicit()))
+  if (auto *Call = dyn_cast<CallExpr>(E.get()->IgnoreImplicit())) {
     if (auto *DeclRef =
             dyn_cast<DeclRefExpr>(Call->getCallee()->IgnoreImplicit())) {
       ExprEvalContexts.back().ReferenceToConsteval.erase(DeclRef);
       ExprEvalContexts.back().ConstevalOnly.erase(DeclRef);
     }
+    
+    // Also remove consteval arguments from ConstevalOnly
+    for (auto *Arg : Call->arguments()) {
+      if (auto *DRE = dyn_cast<DeclRefExpr>(Arg->IgnoreImplicit())) {
+        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+          if (VD->isConsteval()) {
+            ExprEvalContexts.back().ConstevalOnly.erase(DRE);
+          }
+        }
+      }
+    }
+  }
 
   // C++23 [expr.const]/p16
   // An expression or conversion is immediate-escalating if it is not initially
@@ -18135,6 +18146,23 @@ static void RemoveNestedImmediateInvocation(
     ExprResult TransformDeclRefExpr(DeclRefExpr *E) {
       RefConsteval.erase(E);
       RemoveConstevalOnly(E);
+      
+      // Also remove all other references to the same consteval variable from ConstevalOnly
+      if (auto *VD = dyn_cast<VarDecl>(E->getDecl())) {
+        if (VD->isConsteval()) {
+          llvm::SmallVector<Expr*, 4> ToRemove;
+          for (auto *OtherE : ConstevalOnly) {
+            if (auto *OtherDRE = dyn_cast<DeclRefExpr>(OtherE)) {
+              if (OtherDRE->getDecl() == VD) {
+                ToRemove.push_back(OtherDRE);
+              }
+            }
+          }
+          for (auto *E : ToRemove)
+            ConstevalOnly.erase(E);
+        }
+      }
+      
       return E;
     }
     ExprResult TransformLambdaExpr(LambdaExpr *E) {
@@ -20628,12 +20656,20 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
 
   // Check for consteval variables
   // Only track them if we're not in an unevaluated, immediate function, or constant-evaluated context
-  if (E->getDecl() && !isUnevaluatedContext() && !isImmediateFunctionContext() && !isConstantEvaluatedContext()) {
+  if (E->getDecl() && !isUnevaluatedContext() && !isImmediateFunctionContext() && 
+      !isConstantEvaluatedContext()) {
     if (auto *VD = dyn_cast<VarDecl>(E->getDecl())) {
-      if (VD->isConsteval() || VD->getType()->isConstevalOnly()) {
-        // Don't track expansion statement variables - they are iteration variables
-        // that exist only during compile-time expansion
-        if (!VD->isExpansionVariable()) {
+      if ((VD->isConsteval() || VD->getType()->isConstevalOnly()) && !VD->isExpansionVariable()) {
+        // Don't track consteval variables declared inside expansion statements
+        // They are compile-time constants within the expansion context
+        bool InExpansionStmt = false;
+        for (DeclContext *DC = VD->getDeclContext(); DC; DC = DC->getParent()) {
+          if (isa<ExpansionStmtDecl>(DC)) {
+            InExpansionStmt = true;
+            break;
+          }
+        }
+        if (!InExpansionStmt) {
           ExprEvalContexts.back().ConstevalOnly.insert(E);
         }
       }

@@ -166,6 +166,9 @@ namespace N4 {
     constexpr info r1 = ^^int; //expected-error {{constant expression}}
     consteval info r2 = ^^int; // OK
 
+    consteval int size_of(info ) { return 0; }
+    int v = size_of(r2);
+
     struct M { info r; };
     constexpr auto m1 = M{.r=^^int}; // expected-error {{constant expression}}
     consteval auto m2 = M{.r=^^int}; // OK
@@ -176,6 +179,19 @@ namespace N4 {
     constexpr info* pr = nullptr; // OK
     constexpr M const* pm1 = &m2; // expected-error {{constant expression}}
     consteval M const* pm2 = &m2; // OK
+}
+
+namespace N5 {
+    void runtime(int ) { }
+    consteval int consteval_id(int i) { return i; }
+
+    void expansion_statement_interaction(int var) {
+        template for (int _ : {1, 2}) {
+            consteval int y = 10;
+            runtime(consteval_id(y));
+            int sum = y + var; // expected-error {{consteval-only}}
+        }
+    }
 }
 
 void lambda_capture() {

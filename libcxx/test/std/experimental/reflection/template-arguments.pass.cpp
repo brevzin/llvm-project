@@ -259,7 +259,7 @@ template <S &P> void fn_cls_ref() {
 }
 
 template <void(&P)()> void fn_fn_ref_param() {
-  static constexpr auto R = std::meta::reflect_function(P);
+  static consteval auto R = std::meta::reflect_function(P);
 
   static_assert(is_function(R));
   static_assert(type_of(R) == ^^void());
@@ -267,7 +267,7 @@ template <void(&P)()> void fn_fn_ref_param() {
 }
 
 template <void(*P)()> void fn_fn_ptr_param() {
-  static constexpr auto R = std::meta::reflect_constant(P);
+  static consteval auto R = std::meta::reflect_constant(P);
 
   static_assert(is_value(R));
   static_assert(!is_function(R));

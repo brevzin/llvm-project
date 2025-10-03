@@ -391,14 +391,14 @@ static_assert(is_variable(rp));
 //static_assert(!is_object(rp));
 static_assert(!is_value(rp));
 
-constexpr auto ro = object_of(rp);
+consteval auto ro = object_of(rp);
 static_assert(!is_variable(ro));
 static_assert(is_object(ro));
 static_assert(!is_value(ro));
 static_assert(ro == std::meta::reflect_object(p));
 static_assert(ro != std::meta::reflect_constant(&k));
 
-constexpr auto rv = constant_of(ro);
+consteval auto rv = constant_of(ro);
 static_assert(!is_variable(rv));
 static_assert(!is_object(rv));
 static_assert(is_value(rv));
@@ -417,8 +417,8 @@ namespace reflect_constants_of_class_types {
 struct S { int m; };
 constexpr S s{42};
 
-constexpr auto r1 = std::meta::reflect_constant(s);
-constexpr auto r2 = std::meta::reflect_object(s);
+consteval auto r1 = std::meta::reflect_constant(s);
+consteval auto r2 = std::meta::reflect_object(s);
 static_assert(is_object(r1) && is_object(r2));
 static_assert(r1 != r2);
 static_assert(r1 == constant_of(r2));
@@ -524,7 +524,7 @@ int main() {
                extract_ref_semantics::nonConstGlobal);
 
   // RUN: grep "updated-reflect-result-global: 13" %t.stdout
-  constexpr auto r = std::meta::reflect_object(
+  consteval auto r = std::meta::reflect_object(
         extract_ref_semantics::nonConstGlobal);
   static_assert(type_of(r) == ^^int);
   [:r:] = 13;
@@ -533,7 +533,7 @@ int main() {
 
   // RUN: grep "splice-value-reflection: 1" %t.stdout
   static constexpr std::pair<std::pair<int, bool>, int> p = {{1, true}, 2};
-  constexpr auto rvfirst = constant_of(std::meta::reflect_object(p.first));
+  consteval auto rvfirst = constant_of(std::meta::reflect_object(p.first));
   int v = [:rvfirst:].first;
   std::println("splice-value-reflection: {}", v);
 }
