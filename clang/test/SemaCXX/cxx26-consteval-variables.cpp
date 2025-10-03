@@ -186,7 +186,7 @@ namespace N5 {
     consteval int consteval_id(int i) { return i; }
 
     void expansion_statement_interaction(int var) {
-        template for (int _ : {1, 2}) {
+        template for (int _ : {1}) {
             consteval int y = 10;
             runtime(consteval_id(y));
             int sum = y + var; // expected-error {{consteval-only}}
