@@ -53,7 +53,10 @@ void local(int argc) {
     int a4 = g(x);
 
     // Error: constexpr functions don't create constant-evaluated contexts
-    int a5 = h(y);    // expected-error {{expressions involving consteval-only values}}
+    int a5 = h(y);     // expected-error {{expressions involving consteval-only values}}
+
+    int const& a6 = y; // expected-error {{expressions involving consteval}}
+    constexpr int const& a7 = y; // expected-error {{constant expression}}
 
     // OK: static_assert creates a constant-evaluated context
     static_assert(f(1) == 43);
@@ -171,8 +174,16 @@ namespace N4 {
     constexpr info r1 = ^^int; //expected-error {{constant expression}}
     consteval info r2 = ^^int; // OK
 
-    consteval int size_of(info ) { return 0; }
-    int v = size_of(r2);
+    constexpr int size_of1(info ) { return 0; }
+    consteval int size_of2(info ) { return 0; }
+
+    void test() {
+        int v1 = size_of1(r2); // expected-error {{constant-evaluated}}
+        int v2 = size_of2(r2);
+        int v3 = size_of1(^^int); // expected-error {{constant-evaluated}}
+        int v4 = size_of2(^^int);
+    }
+
 
     struct M { info r; };
     constexpr auto m1 = M{.r=^^int}; // expected-error {{constant expression}}
