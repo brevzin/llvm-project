@@ -15421,11 +15421,65 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
 
   // Opc is not a compound assignment if CompResultTy is null.
   if (CompResultTy.isNull()) {
+    ExprResult Result;
     if (ConvertHalfVec)
-      return convertHalfVecBinOp(*this, LHS, RHS, Opc, ResultTy, VK, OK, false,
-                                 OpLoc, CurFPFeatureOverrides());
-    return BinaryOperator::Create(Context, LHS.get(), RHS.get(), Opc, ResultTy,
-                                  VK, OK, OpLoc, CurFPFeatureOverrides());
+      Result = convertHalfVecBinOp(*this, LHS, RHS, Opc, ResultTy, VK, OK, false,
+                                   OpLoc, CurFPFeatureOverrides());
+    else
+      Result = BinaryOperator::Create(Context, LHS.get(), RHS.get(), Opc, ResultTy,
+                                      VK, OK, OpLoc, CurFPFeatureOverrides());
+    
+    // P3603: If this binary operation involves consteval variables that underwent
+    // lvalue-to-rvalue conversion, mark their DeclRefExprs as immediate escalating
+    // to prevent diagnostic errors
+    if (!isUnevaluatedContext() && !isImmediateFunctionContext() && 
+        !isConstantEvaluatedContext()) {
+      
+      auto CheckForConstevalVar = [&](Expr *E) {
+        if (auto *ICE = dyn_cast<ImplicitCastExpr>(E)) {
+          if (ICE->getCastKind() == CK_LValueToRValue) {
+            if (auto *DRE = dyn_cast<DeclRefExpr>(ICE->getSubExpr())) {
+              if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+                if (VD->isConsteval() && !VD->getType()->isConstevalOnly() && 
+                    !VD->isExpansionVariable()) {
+                  // Check if NOT in expansion statement
+                  bool InExpansionStmt = false;
+                  for (DeclContext *DC = VD->getDeclContext(); DC; DC = DC->getParent()) {
+                    if (isa<ExpansionStmtDecl>(DC)) {
+                      InExpansionStmt = true;
+                      break;
+                    }
+                  }
+                  if (!InExpansionStmt) {
+                    // Mark the DeclRefExpr as immediate escalating so it won't trigger errors
+                    DRE->setIsImmediateEscalating(true);
+                    // Also remove ALL DeclRefExprs for this variable from ConstevalOnly tracking
+                    auto &ConstevalSet = ExprEvalContexts.back().ConstevalOnly;
+                    for (auto It = ConstevalSet.begin(); It != ConstevalSet.end(); ) {
+                      if (auto *ConstevalDRE = dyn_cast<DeclRefExpr>(*It)) {
+                        if (ConstevalDRE->getDecl() == VD) {
+                          ConstevalDRE->setIsImmediateEscalating(true);
+                          It = ConstevalSet.erase(It);
+                        } else {
+                          ++It;
+                        }
+                      } else {
+                        ++It;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+      
+      CheckForConstevalVar(LHS.get());
+      CheckForConstevalVar(RHS.get());
+    }
+    
+    return Result;
   }
 
   // Handle compound assignments.
