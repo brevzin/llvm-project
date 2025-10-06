@@ -32,7 +32,7 @@ struct member_descriptor
 // returns std::array<member_descriptor, N>
 template <typename S>
 consteval auto get_layout() {
-  constexpr auto ctx = std::meta::access_context::current();
+  consteval auto ctx = std::meta::access_context::current();
   auto members = nonstatic_data_members_of(^^S, ctx);
   constexpr size_t sz = nonstatic_data_members_of(^^S, ctx).size();
   std::array<member_descriptor, sz> layout;

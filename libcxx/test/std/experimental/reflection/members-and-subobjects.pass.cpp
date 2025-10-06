@@ -117,9 +117,9 @@ static_assert(
 void usage_example() {
   constexpr auto getObj = []() consteval {
     Cls a {};
-    constexpr auto first =
+    consteval auto first =
         nonstatic_data_members_of(^^Cls, access_context::unchecked())[0];
-    constexpr auto second =
+    consteval auto second =
         nonstatic_data_members_of(^^Cls, access_context::unchecked())[1];
     a.[:first:] = 20;
     a.[:second:] = 1.4f;
@@ -140,10 +140,10 @@ void usage_example() {
                 ^^Cls::Inner);
 
   constexpr auto getInnerObj = []() consteval {
-    constexpr auto inner =
+    consteval auto inner =
         (members_of(^^Cls, access_context::unchecked()) |
          std::views::filter(std::meta::is_type)).front();
-    constexpr auto innerFirst =
+    consteval auto innerFirst =
         nonstatic_data_members_of(inner, access_context::unchecked())[0];
 
     Cls::Inner ic {};
@@ -440,7 +440,7 @@ static_assert(members_of(^^NS,
                           // ========================
 
 namespace out_of_line_declarations {
-constexpr auto ctx = std::meta::access_context::current();
+consteval auto ctx = std::meta::access_context::current();
 
 namespace NS1 {
 struct A;

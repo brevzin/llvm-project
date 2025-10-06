@@ -125,13 +125,13 @@ void do_swap_representations(T& lhs, T& rhs) {
   // data members --- still need to decide whether we support the latter
   if constexpr (std::is_class_v<T>) {
     // This implementation ensures that empty types do nothing
-    template for (constexpr auto base :
+    template for (consteval auto base :
                   define_static_array(
                       bases_of(^^T, std::meta::access_context::unchecked()))) {
       using Base = [:type_of(base):];
       do_swap_representations<Base>((Base &)lhs, (Base &)rhs);
     }
-    template for (constexpr auto mem :
+    template for (consteval auto mem :
                   define_static_array(
                       nonstatic_data_members_of(
                           ^^T, std::meta::access_context::unchecked()))) {
@@ -206,7 +206,7 @@ consteval auto fn() {
     return arr;
 }
 
-[[maybe_unused]] constexpr auto rs = fn();
+[[maybe_unused]] consteval auto rs = fn();
 }  // namespace array_with_default_initialized_reflections
 
                            // ======================
@@ -214,7 +214,7 @@ consteval auto fn() {
                            // ======================
 
 namespace compatible_with_blocks {
-constexpr auto block = std::meta::reflect_constant(^int() { return 4; });
+consteval auto block = std::meta::reflect_constant(^int() { return 4; });
 static_assert(type_of(block) == ^^int(^)());
 
 void run_test() {
@@ -281,7 +281,7 @@ using get_base_classes_t = [: [] {
 struct B { };
 struct D : B { };
 
-constexpr auto b = bases_of(^^D, std::meta::access_context::unchecked())[0];
+consteval auto b = bases_of(^^D, std::meta::access_context::unchecked())[0];
 static_assert(std::same_as<
     get_element_t<0, get_base_classes_t<Reflection<^^D>>>,
     Reflection<b>>);

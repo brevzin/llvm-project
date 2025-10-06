@@ -2617,7 +2617,7 @@ template <info R>  // Values of fundamental type.
     requires(is_value(R) && is_fundamental_type(type_of(R)))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
   string_t result;
-  constexpr info Ty = detail::__underlying_entity_of(type_of(R));
+  consteval info Ty = detail::__underlying_entity_of(type_of(R));
 
   if constexpr (Ty == ^^nullptr_t)
     result = string_constant("nullptr");
@@ -2741,7 +2741,7 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
   if constexpr (has_template_arguments(R)) {
     return render<template_of(R)>() + render_template_argument_list_of<R>();
   } else if constexpr (is_destructor(R)) {
-    constexpr info P = parent_of(R);
+    consteval info P = parent_of(R);
     return string_constant("~") +
            render<has_template_arguments(P) ? template_of(P) : P>();
   } else if constexpr (is_constructor(R)) {

@@ -23,7 +23,7 @@
 
 
 int main() {
-  constexpr std::array types = {^^int, ^^float, ^^double};
+  consteval std::array types = {^^int, ^^float, ^^double};
 
   // https://bugs.llvm.org/show_bug.cgi?id=25627
   constexpr std::array sizes = [=]{

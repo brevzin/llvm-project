@@ -24,10 +24,10 @@
 #include <vector>
 
 
-constexpr auto ctx = std::meta::access_context::unchecked();
+consteval auto ctx = std::meta::access_context::unchecked();
 
 template <int K>
-constexpr std::meta::info RVal = std::meta::reflect_constant(K);
+consteval std::meta::info RVal = std::meta::reflect_constant(K);
 
                                // ===============
                                // class_templates
@@ -38,7 +38,7 @@ namespace class_templates {
 template <typename T, auto V, template <typename, size_t> class C>
 struct Cls;
 static_assert(can_substitute(^^Cls, {^^int, RVal<1>, ^^std::array}));
-[[maybe_unused]] constexpr auto obj1 = substitute(^^Cls,
+[[maybe_unused]] consteval auto obj1 = substitute(^^Cls,
                                                   {^^int, RVal<1>,
                                                    ^^std::array});
 static_assert(!is_complete_type(^^Cls<int, 1, std::array>));
@@ -470,7 +470,7 @@ namespace bb_clang_p2996_issue_147_regression_test {
 template<int V> constexpr int my_int = V;
 template<int S> struct test {};
 
-constexpr auto r = substitute(^^test, {
+consteval auto r = substitute(^^test, {
   substitute(^^my_int, {std::meta::reflect_constant(0)})
 });
 }  // namespace bb_clang_p2996_issue_147_regression_test
@@ -485,7 +485,7 @@ template <typename T>
 auto fn1();
 
 static_assert(!can_substitute(^^fn1, {^^int}));
-constexpr auto r1 = substitute(^^fn1, {^^int});
+consteval auto r1 = substitute(^^fn1, {^^int});
   // expected-error@-1 {{must be initialized by a constant expression}} \
   // expected-note@-1 {{undeduced placeholder}}
 
@@ -495,7 +495,7 @@ auto fn2() {
   return 0;
 }
 
-constexpr auto r2 = substitute(^^fn2, {^^int});
+consteval auto r2 = substitute(^^fn2, {^^int});
   // expected-note@-1 {{requested here}}
 }  // namespace wording_example
 

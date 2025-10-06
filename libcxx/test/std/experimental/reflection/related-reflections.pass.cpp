@@ -18,7 +18,7 @@
 #include <experimental/meta>
 
 
-constexpr auto ctx = std::meta::access_context::current();
+consteval auto ctx = std::meta::access_context::current();
 
                                 // ============
                                 // find_type_of
@@ -40,8 +40,8 @@ static_assert(type_of(^^dtia) != ^^int_alias);
 static_assert(^^int_alias != ^^int);
 static_assert(^^int_alias != ^^int_alias_alias);
 
-constexpr auto a = data_member_spec(^^int, {});
-constexpr auto b = data_member_spec(^^int_alias, {});
+consteval auto a = data_member_spec(^^int, {});
+consteval auto b = data_member_spec(^^int_alias, {});
 
 static_assert(type_of(a) == ^^int);
 static_assert(type_of(b) != ^^int_alias);
@@ -176,7 +176,7 @@ struct S {
   };
 };
 
-static constexpr auto rm = ^^S::m;
+static consteval auto rm = ^^S::m;
 static_assert(type_of(rm) == ^^int);
 static_assert(is_union_type(parent_of(rm)));
 static_assert(is_union_type(parent_of(parent_of(rm))));

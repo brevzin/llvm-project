@@ -21,7 +21,7 @@
 #include <array>
 
 
-constexpr auto ctx = std::meta::access_context::unchecked();
+consteval auto ctx = std::meta::access_context::unchecked();
 
                                // ===============
                                // basic_functions
@@ -177,12 +177,12 @@ struct Cls {
   template <typename T> consteval Cls(T) : value(sizeof(T)) {}
 };
 
-constexpr auto ctor = 
+consteval auto ctor =
   (members_of(^^Cls, ctx) |
       std::views::filter(std::meta::is_constructor) |
       std::views::filter(std::meta::is_user_provided)).front();
 
-constexpr auto ctor_template =
+consteval auto ctor_template =
   (members_of(^^Cls, ctx) |
       std::views::filter(std::meta::is_constructor_template)).front();
 
@@ -211,13 +211,13 @@ namespace returning_references {
 const int K = 0;
 consteval const int &fn() { return K; }
 
-constexpr auto r = reflect_invoke(^^fn, {});
+consteval auto r = reflect_invoke(^^fn, {});
 static_assert(is_object(r) && !is_value(r));
 static_assert(type_of(r) == ^^const int);
 static_assert(!is_variable(r));
 static_assert(r != std::meta::reflect_constant(0));
 
-constexpr auto v = constant_of(r);
+consteval auto v = constant_of(r);
 static_assert(is_value(v) && !is_object(v));
 static_assert(type_of(v) == ^^int);
 static_assert(!is_variable(v));

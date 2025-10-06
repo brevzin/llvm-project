@@ -19,7 +19,7 @@
 #include <tuple>
 
 
-constexpr auto ctx = std::meta::access_context::current();
+consteval auto ctx = std::meta::access_context::current();
 
 struct type {};
 using alias = type;
@@ -41,7 +41,7 @@ namespace ns_alias = ns;
 enum Enum { A };
 enum class EnumCls { A };
 
-constexpr std::meta::info null_reflection;
+consteval std::meta::info null_reflection;
 static_assert(!is_type(null_reflection));
 static_assert(!is_complete_type(null_reflection));
 static_assert(!is_type_alias(null_reflection));
@@ -523,7 +523,7 @@ static_assert(!is_object(^^EnumCls::A));
 static_assert(is_enumerator(^^EnumCls::A));
 static_assert(!is_data_member_spec(^^EnumCls::A));
 
-constexpr auto dms = data_member_spec(^^int, {});
+consteval auto dms = data_member_spec(^^int, {});
 static_assert(!is_type(dms));
 static_assert(!is_complete_type(dms));
 static_assert(!is_type_alias(dms));
@@ -586,7 +586,7 @@ static_assert(is_structured_binding(^^z2));
 static_assert(!is_variable(^^x2));
 static_assert(!is_variable(^^y2));
 static_assert(!is_variable(^^z2));
-// "wrapped" type of each element is 
+// "wrapped" type of each element is
 //     std::tuple_element<I, std::tuple<int,int,int>>::type
 // where I is index of tuple field
 
