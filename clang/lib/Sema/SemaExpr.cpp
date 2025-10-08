@@ -20596,7 +20596,8 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
         ExprEvalContexts.back().ConstevalOnly.insert(E);
     } else if (E->getDecl()) {
       if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
-          VD && (VD->getType()->isConstevalOnly() || VD->isConsteval())) {
+          VD && !VD->getType()->getContainedAutoType()
+             && (VD->getType()->isConstevalOnly() || VD->isConsteval())) {
         ExprEvalContexts.back().ConstevalOnly.insert(E);
       }
     }
