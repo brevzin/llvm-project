@@ -3814,6 +3814,9 @@ public:
   ExprResult ParseStringLiteralExpression(bool AllowUserDefinedLiteral = false);
   ExprResult ParseUnevaluatedStringLiteralExpression();
 
+  /// ParseTemplateStringLiteral - Parse a template string literal like t"x={expr}"
+  ExprResult ParseTemplateStringLiteral();
+
 private:
   /// Whether the '>' token acts as an operator or not. This will be
   /// true except when we are parsing an expression within a C++
@@ -7686,7 +7689,7 @@ private:
   /// [GNU] asm-clobbers:
   ///         asm-string-literal
   ///         asm-clobbers ',' asm-string-literal
-  /// \endverbatim 
+  /// \endverbatim
   ///
   StmtResult ParseAsmStatement(bool &msAsm);
 

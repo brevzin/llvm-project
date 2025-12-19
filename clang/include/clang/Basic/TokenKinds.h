@@ -89,7 +89,7 @@ inline bool isAnyIdentifier(TokenKind K) {
 inline bool isStringLiteral(TokenKind K) {
   return K == tok::string_literal || K == tok::wide_string_literal ||
          K == tok::utf8_string_literal || K == tok::utf16_string_literal ||
-         K == tok::utf32_string_literal;
+         K == tok::utf32_string_literal || K == tok::template_string_literal;
 }
 
 /// Return true if this is a "literal" kind, like a numeric

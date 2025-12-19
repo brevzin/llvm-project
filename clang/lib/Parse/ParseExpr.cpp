@@ -27,7 +27,9 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/LocInfoType.h"
 #include "clang/Basic/PrettyStackTrace.h"
+#include "clang/Lex/Lexer.h"
 #include "clang/Lex/LiteralSupport.h"
+#include "clang/Lex/TemplateStringAnnotation.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
 #include "clang/Sema/DeclSpec.h"
@@ -1080,6 +1082,9 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::utf16_string_literal:
   case tok::utf32_string_literal:
     Res = ParseStringLiteralExpression(true);
+    break;
+  case tok::template_string_literal: // primary-expression: template-string-literal
+    Res = ParseTemplateStringLiteral();
     break;
   case tok::kw__Generic:   // primary-expression: generic-selection [C11 6.5.1]
     Res = ParseGenericSelectionExpression();
@@ -3085,6 +3090,87 @@ ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
   return Actions.ActOnStringLiteral(StringToks,
                                     AllowUserDefinedLiteral ? getCurScope()
                                                             : nullptr);
+}
+
+/// ParseTemplateStringLiteral - Parse a template string literal like t"x={expr}"
+ExprResult Parser::ParseTemplateStringLiteral() {
+  assert(Tok.is(tok::template_string_literal) && "Not a template string literal!");
+
+  // Get the string literal token
+  Token StringTok = Tok;
+  ConsumeAnyToken();
+
+  // Get the annotation data from the literal data pointer
+  const char *LiteralData = StringTok.getLiteralData();
+  if (!LiteralData) {
+    Diag(StringTok.getLocation(), diag::err_expected) << "template string annotation";
+    return ExprError();
+  }
+
+  // Cast to our annotation type
+  auto Annotation = std::unique_ptr<TemplateStringAnnotation const>(
+      reinterpret_cast<TemplateStringAnnotation const*>(LiteralData));
+
+  // Save the current token to restore later
+  Token SavedToken = Tok;
+
+  // Parse each pre-tokenized expression
+  SmallVector<ExprResult, 4> Exprs;
+  for (const auto &ExprTokens : Annotation->ExpressionTokens) {
+    if (ExprTokens.empty()) {
+      // Empty expression
+      Diag(StringTok.getLocation(), diag::err_expected) << "expression";
+      return ExprError();
+    }
+
+    // Copy tokens and update identifier info for raw identifiers
+    SmallVector<Token, 8> ProcessedTokens;
+    for (Token Tok : ExprTokens) {
+      // Handle identifiers - need to look them up
+      if (Tok.is(tok::raw_identifier)) {
+        // Convert raw identifier to proper identifier
+        IdentifierInfo *II = PP.LookUpIdentifierInfo(Tok);
+        Tok.setKind(II->getTokenID());
+      }
+      // Use the StringTok location for all tokens to avoid SourceManager issues
+      Tok.setLocation(StringTok.getLocation());
+      ProcessedTokens.push_back(Tok);
+    }
+
+    // Add an EOF token to mark the end of this expression
+    Token EofTok;
+    EofTok.startToken();
+    EofTok.setKind(tok::eof);
+    EofTok.setLocation(StringTok.getLocation());
+    ProcessedTokens.push_back(EofTok);
+
+    // Inject tokens for this expression
+    PP.EnterTokenStream(ProcessedTokens, /*DisableMacroExpansion=*/true,
+                        /*IsReinject=*/false);
+
+    ConsumeAnyToken();
+
+    // Parse the expression
+    ExprResult Expr = ParseAssignmentExpression();
+    if (Expr.isInvalid()) {
+      return ExprError();
+    }
+
+    Exprs.push_back(Expr);
+
+    // the next token is now the EoF we injected, so revert it back to the saved one
+    Tok = SavedToken;
+  }
+
+  // Get the format string from the annotation
+  StringLiteralParser Literal(Annotation->FormatString, PP);
+  StringRef FormatStr = Literal.GetString();
+
+  // Call Sema to create the template string
+  ExprResult Result = Actions.ActOnTemplateStringLiteral(StringTok.getLocation(),
+                                                         FormatStr, Exprs);
+
+  return Result;
 }
 
 ExprResult Parser::ParseGenericSelectionExpression() {

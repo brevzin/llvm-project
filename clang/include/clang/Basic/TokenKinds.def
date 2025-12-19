@@ -197,6 +197,9 @@ TOK(utf8_string_literal) // u8"foo"
 TOK(utf16_string_literal)// u"foo"
 TOK(utf32_string_literal)// U"foo"
 
+// Template String Literals.
+TOK(template_string_literal)// t"foo"
+
 // C99 6.4.6: Punctuators.
 PUNCTUATOR(l_square,            "[")
 PUNCTUATOR(r_square,            "]")

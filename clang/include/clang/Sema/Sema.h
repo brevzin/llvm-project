@@ -7276,6 +7276,10 @@ public:
 
   ExprResult ActOnUnevaluatedStringLiteral(ArrayRef<Token> StringToks);
 
+  /// ActOnTemplateStringLiteral - Create a template string literal expression
+  ExprResult ActOnTemplateStringLiteral(SourceLocation Loc, StringRef FormatStr,
+                                       ArrayRef<ExprResult> Exprs);
+
   /// ControllingExprOrType is either an opaque pointer coming out of a
   /// ParsedType or an Expr *. FIXME: it'd be better to split this interface
   /// into two so we don't take a void *, but that's awkward because one of
