@@ -733,6 +733,21 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   Res = ImplicitCastExpr::Create(Context, T, CK, E, nullptr, VK_PRValue,
                                  CurFPFeatureOverrides());
 
+  if (!isUnevaluatedContext() && !isConstantEvaluatedContext() &&
+      !isImmediateFunctionContext() &&
+      !isCheckingDefaultArgumentOrInitializer() &&
+      !RebuildingImmediateInvocation) {
+    if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+      if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+        if (VD->isConsteval() && VD->getInit() && !VD->getInit()->isValueDependent()) {
+          if (APValue *V = VD->evaluateValue(); V && APValueContainsConstevalOnlyValue(*V)) {
+            ExprEvalContexts.back().ConstevalOnly.insert(Res.get());
+          }
+        }
+      }
+    }
+  }
+
   // C11 6.3.2.1p2:
   //   ... if the lvalue has atomic type, the value has the non-atomic version
   //   of the type of the lvalue ...

@@ -14555,11 +14555,9 @@ StmtResult Sema::ActOnCXXForRangeIdentifier(Scope *S, SourceLocation IdentLoc,
                                                       : IdentLoc);
 }
 
-namespace {
-
 // Helper function to recursively check if an APValue contains consteval-only values
 // (reflection values or references to consteval variables)
-bool APValueContainsConstevalOnlyValue(const APValue &V) {
+bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
   // Direct reflection value
   if (V.isReflection())
     return true;
@@ -14613,8 +14611,6 @@ bool APValueContainsConstevalOnlyValue(const APValue &V) {
   }
 
   return false;
-}
-
 }
 
 void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {

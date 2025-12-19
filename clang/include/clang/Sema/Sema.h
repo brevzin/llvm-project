@@ -10379,6 +10379,8 @@ public:
                                               APValue &Value, CCEKind CCE,
                                               NamedDecl *Dest = nullptr);
 
+  bool APValueContainsConstevalOnlyValue(const APValue &V);
+
   /// EvaluateConvertedConstantExpression - Evaluate an Expression
   /// That is a converted constant expression
   /// (which was built with BuildConvertedConstantExpression)

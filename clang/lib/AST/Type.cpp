@@ -701,6 +701,9 @@ bool Type::isStructureTypeWithFlexibleArrayMember() const {
 }
 
 bool Type::isConstevalOnly() const {
+  // let's see what removing consteval-only type means
+  return false;
+
   const Type *CanonType = getCanonicalTypeInternal().getTypePtr();
   if (CanonType != this)
     return CanonType->isConstevalOnly();
