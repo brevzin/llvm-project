@@ -2351,6 +2351,9 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
     llvm::SmallVector<tok::TokenKind, 4> ExpectedBraces;
 
     while (true) {
+      bool StartOfLine;
+      SkipWhitespace(Result, BufferPtr, StartOfLine);
+
       if (*BufferPtr == ':' && ExpectedBraces.empty()) {
         // Done with the expression, skip the format specifiers now
         // Start a new string literal, including the colon

@@ -104,7 +104,7 @@ void test_complex_operators() {
   int a = 5, b = 3, c = 2;
 
   // Ternary operator
-  auto s13 = t"max={a > b ? a : b}";
+  auto s13 = t"max={(a > b ? a : b)}";
   static_assert(__builtin_strcmp(s13.fmt(), "max={}") == 0);
   static_assert((^^decltype(s13._0)) == (^^int&));
 
@@ -183,6 +183,12 @@ void test_mixed_braces() {
 
   auto s23 = t"{x}{{middle}}{x}";  // {x} then {{ then }} then {x}
   static_assert(__builtin_strcmp(s23.fmt(), "{}{{middle}}{}") == 0);
+}
+
+void test_trailing_whitespace() {
+  int x = 5;
+  auto s23 = t"x={x }, y={x}";
+  static_assert(__builtin_strcmp(s23.fmt(), "x={}, y={}") == 0);
 }
 
 // expected-no-diagnostics
