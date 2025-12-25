@@ -191,4 +191,11 @@ void test_trailing_whitespace() {
   static_assert(__builtin_strcmp(s23.fmt(), "x={}, y={}") == 0);
 }
 
+void test_trailing_eq() {
+  int x = 5;
+  static_assert(__builtin_strcmp(decltype(t"{x=}")::fmt(), "x={}") == 0);
+  static_assert(__builtin_strcmp(decltype(t"{x = }")::fmt(), "x = {}") == 0);
+  static_assert(__builtin_strcmp(decltype(t"{x + 1 = :#x}")::fmt(), "x + 1 = {:#x}") == 0);
+}
+
 // expected-no-diagnostics

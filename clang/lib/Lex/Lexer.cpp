@@ -2345,6 +2345,7 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
     /// 2. Expression part now we're at {., we've started a new expresion
     /// we just keep lexing tokens.
     BufferPtr = CurPtr;
+    const char* InitExpr = BufferPtr;
     llvm::errs() << "[DEBUG] New expression starting at " << *BufferPtr << '\n';
     llvm::SmallVector<Token, 8>& CurExpr = Annotation->ExpressionTokens.emplace_back();
 
@@ -2354,26 +2355,32 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
       bool StartOfLine;
       SkipWhitespace(Result, BufferPtr, StartOfLine);
 
-      if (*BufferPtr == ':' && ExpectedBraces.empty()) {
-        // Done with the expression, skip the format specifiers now
-        // Start a new string literal, including the colon
+      if (ExpectedBraces.empty() && (*BufferPtr == ':' || *BufferPtr == '}')) {
+        // Done with the expression. Skip the format-specifiers (if any)
+        // Start a new string literal, including the colon or close brace
         Start = BufferPtr;
         CurPtr = BufferPtr + 1;
-        int BraceDepth = 1;
-        while (BraceDepth > 0) {
-          char C = getAndAdvanceChar(CurPtr, Result);
-          if (C == '{') {
-            BraceDepth++;
-          } else if (C == '}') {
-            BraceDepth--;
+
+        if (!CurExpr.empty() && CurExpr.back().getKind() == tok::equal) {
+          // if the expression ends with a trailing equals, e.g. {x=}, add the
+          // full expression to the format string. We know the last piece right
+          // now ends with {", so can stick this in front of the {.
+          CurExpr.pop_back();
+          auto& LastLit = Annotation->FormatStringData.back();
+          LastLit.insert(LastLit.end() - 2, InitExpr, BufferPtr);
+        }
+
+        if (*BufferPtr == ':') {
+          int BraceDepth = 1;
+          while (BraceDepth > 0) {
+            char C = getAndAdvanceChar(CurPtr, Result);
+            if (C == '{') {
+              BraceDepth++;
+            } else if (C == '}') {
+              BraceDepth--;
+            }
           }
         }
-        break;
-      } else if (*BufferPtr == '}' && ExpectedBraces.empty()) {
-        // Done with the replacement-field entirely
-        // Start a new string literal, including the close brace
-        Start = BufferPtr;
-        CurPtr = BufferPtr + 1;
         break;
       } else {
         Token NextToken;
