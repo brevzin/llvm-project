@@ -22,37 +22,13 @@
 
 using namespace clang;
 
-ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
-                                            const TemplateStringAnnotation& Annotation,
-                                            ArrayRef<ExprResult> Exprs) {
+static CXXRecordDecl* CreateInterpolationsStruct(Sema &S,
+                                                 CXXRecordDecl *StructDecl)
+{
+  ASTContext &Context = S.Context;
+  SourceLocation Loc = StructDecl->getLocation();
+  QualType CharConstPtrType = Context.getPointerType(Context.getConstType(Context.CharTy));
 
-  // Get the format string from the annotation
-  StringLiteralParser Literal(Annotation.FormatString, PP);
-  StringRef FormatStr = Literal.GetString();
-
-  // Create an anonymous struct type with:
-  // - static constexpr char const* fmt() = "...";
-  // - decltype((expr)) _0, _1, ...
-
-  // Create the anonymous struct at namespace scope to allow static members
-  // Find the nearest namespace or translation unit context
-  DeclContext *DC = CurContext;
-  while (DC && !DC->isFileContext() && !DC->isNamespace())
-    DC = DC->getParent();
-  if (!DC)
-    DC = Context.getTranslationUnitDecl();
-
-  // Create a new record (struct) declaration
-  CXXRecordDecl *StructDecl = CXXRecordDecl::Create(
-      Context, TagTypeKind::Struct, DC, Loc, Loc,
-      /*Id=*/nullptr);
-
-  StructDecl->startDefinition();
-
-  QualType CharConstPtrType = Context.getPointerType(
-    Context.getConstType(Context.CharTy));
-
-  // Create nested interpolation struct
   CXXRecordDecl *InterpolationDecl = CXXRecordDecl::Create(
       Context, TagTypeKind::Struct, StructDecl, Loc, Loc,
       &Context.Idents.get("interpolation"));
@@ -99,9 +75,23 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
   InterpolationDecl->addDecl(IndexField);
 
   InterpolationDecl->completeDefinition();
-  StructDecl->addDecl(InterpolationDecl);
 
-  // Add the fmt static member function
+  return InterpolationDecl;
+}
+
+static VarDecl *CreateFmtVar(Sema &S,
+                             const TemplateStringAnnotation& Annotation,
+                             CXXRecordDecl* StructDecl)
+{
+  ASTContext &Context = S.Context;
+  SourceLocation Loc = StructDecl->getLocation();
+
+  QualType CharConstPtrType = Context.getPointerType(Context.getConstType(Context.CharTy));
+
+  // Get the format string from the annotation
+  StringLiteralParser Literal(Annotation.FormatString, S.getPreprocessor());
+  StringRef FormatStr = Literal.GetString();
+
   // Create the string literal for the format string
   QualType FmtStrTy = Context.getConstantArrayType(
       Context.CharTy.withConst(),
@@ -134,19 +124,24 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
   FmtVar->setInit(SFmtInit);
   FmtVar->setInitStyle(VarDecl::CInit);
   FmtVar->markUsed(Context);
+  return FmtVar;
+}
 
-  // Add the static data member to the struct
-  StructDecl->addDecl(FmtVar);
+static VarDecl *CreateStringsVar(Sema &S,
+                                 const TemplateStringAnnotation& Annotation,
+                                 CXXRecordDecl* StructDecl)
+{
+  ASTContext &Context = S.Context;
+  SourceLocation Loc = StructDecl->getLocation();
+  QualType CharConstPtrType = Context.getPointerType(Context.getConstType(Context.CharTy));
 
-  // Create static inline constexpr array of char const* named "strings"
-  // The array contains string literals from every other element of FormatString
   size_t NumStrings = (Annotation.FormatString.size() + 1) / 2;
 
   // Create string literals for each string piece
   SmallVector<Expr*, 8> StringLiterals;
   for (size_t I = 0; I < Annotation.FormatString.size(); I += 2) {
     // Get the string piece from FormatString
-    StringLiteralParser StrLiteral(Annotation.FormatString[I], PP);
+    StringLiteralParser StrLiteral(Annotation.FormatString[I], S.getPreprocessor());
     StringRef StrPiece = StrLiteral.GetString();
 
     // Create the string literal type
@@ -195,11 +190,18 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
   StringsVar->setInitStyle(VarDecl::CInit);
   StringsVar->markUsed(Context);
 
-  // Add the strings array to the struct
-  StructDecl->addDecl(StringsVar);
+  return StringsVar;
+}
 
-  // Create static inline constexpr array of interpolation structs
-  // static inline constexpr interpolation interpolations[N] = {...}
+static VarDecl *CreateInterpolationsVar(Sema &S,
+                                        const TemplateStringAnnotation &Annotation,
+                                        CXXRecordDecl* StructDecl,
+                                        CXXRecordDecl* InterpolationDecl)
+{
+  ASTContext &Context = S.Context;
+  SourceLocation Loc = StructDecl->getLocation();
+  QualType CharConstPtrType = Context.getPointerType(Context.getConstType(Context.CharTy));
+
   size_t NumInterpolations = Annotation.ExpressionTokens.size();
 
   // Get the type for the interpolation struct
@@ -211,13 +213,13 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
   for (size_t I = 0; I < NumInterpolations; ++I) {
     // Create string literal for the expression text
     auto tokens_to_string = [&](ArrayRef<Token> toks) -> std::string {
-      auto const& SM = getSourceManager();
+      auto const& SM = S.getSourceManager();
 
       auto const B = SM.getSpellingLoc(toks.front().getLocation());
       auto const EndTok = toks.back().getLocation();
-      auto const End = Lexer::getLocForEndOfToken(EndTok, 0, SM, getLangOpts());
+      auto const End = Lexer::getLocForEndOfToken(EndTok, 0, SM, S.getLangOpts());
 
-      auto const text = Lexer::getSourceText(CharSourceRange::getCharRange(B, End), SM, getLangOpts());
+      auto const text = Lexer::getSourceText(CharSourceRange::getCharRange(B, End), SM, S.getLangOpts());
 
       std::string out;
       llvm::raw_string_ostream os(out);
@@ -241,7 +243,7 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
         nullptr, VK_PRValue, FPOptionsOverride());
 
     // Create string literal for the format specifier
-    StringLiteralParser FmtLiteral(Annotation.FormatString[I * 2 + 1], PP);
+    StringLiteralParser FmtLiteral(Annotation.FormatString[I * 2 + 1], S.getPreprocessor());
     StringRef FmtText = FmtLiteral.GetString();
 
     QualType FmtStrTy = Context.getConstantArrayType(
@@ -257,6 +259,7 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
         nullptr, VK_PRValue, FPOptionsOverride());
 
     // Create the index value
+    QualType SizeTType = Context.getSizeType();
     IntegerLiteral *IndexLit = IntegerLiteral::Create(
         Context, llvm::APInt(Context.getTypeSize(SizeTType), I),
         SizeTType, Loc);
@@ -298,8 +301,48 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
   InterpolationsVar->setInit(InterpolationsArrayInit);
   InterpolationsVar->setInitStyle(VarDecl::CInit);
   InterpolationsVar->markUsed(Context);
+  return InterpolationsVar;
+}
 
-  // Add the interpolations array to the struct
+ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
+                                            const TemplateStringAnnotation& Annotation,
+                                            ArrayRef<ExprResult> Exprs) {
+  // Create an anonymous struct type with:
+  // - static constexpr char const* fmt() = "...";
+  // - decltype((expr)) _0, _1, ...
+
+  // Create the anonymous struct at namespace scope to allow static members
+  // Find the nearest namespace or translation unit context
+  DeclContext *DC = CurContext;
+  while (DC && !DC->isFileContext() && !DC->isNamespace())
+    DC = DC->getParent();
+  if (!DC)
+    DC = Context.getTranslationUnitDecl();
+
+  // Create a new record (struct) declaration
+  CXXRecordDecl *StructDecl = CXXRecordDecl::Create(
+      Context, TagTypeKind::Struct, DC, Loc, Loc,
+      /*Id=*/nullptr);
+
+  StructDecl->startDefinition();
+
+  // Create nested interpolation struct
+  CXXRecordDecl* InterpolationDecl = CreateInterpolationsStruct(*this, StructDecl);
+  StructDecl->addDecl(InterpolationDecl);
+
+  // Create static constexpr inline char const* fmt
+  // This is a string literal that is the full format specifier
+  VarDecl *FmtVar = CreateFmtVar(*this, Annotation, StructDecl);
+  StructDecl->addDecl(FmtVar);
+
+  // Create static inline constexpr array of char const* named "strings"
+  // The array contains string literals from every other element of FormatString
+  VarDecl *StringsVar = CreateStringsVar(*this, Annotation, StructDecl);
+  StructDecl->addDecl(StringsVar);
+
+  // Create static inline constexpr array of interpolation structs
+  // static inline constexpr interpolation interpolations[N] = {...}
+  VarDecl *InterpolationsVar = CreateInterpolationsVar(*this, Annotation, StructDecl, InterpolationDecl);
   StructDecl->addDecl(InterpolationsVar);
 
   // Add fields for each expression
