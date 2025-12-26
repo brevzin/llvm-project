@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Sema/Sema.h"
+#include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
@@ -39,6 +40,9 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc, StringRef Format
 
   StructDecl->startDefinition();
 
+  QualType CharConstPtrType = Context.getPointerType(
+    Context.getConstType(Context.CharTy));
+
   // Add the fmt static member function
   // Create the string literal for the format string
   QualType FmtStrTy = Context.getConstantArrayType(
@@ -49,46 +53,32 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc, StringRef Format
   StringLiteral *FmtLit = StringLiteral::Create(
       Context, FormatStr, StringLiteralKind::Ordinary, false, FmtStrTy, {Loc});
 
-  QualType CharPtrType = Context.getPointerType(
-      Context.getConstType(Context.CharTy));
+  // Create static constexpr inline data member fmt
+  // static inline constexpr char const* fmt = FmtLit;
+  VarDecl *FmtVar = VarDecl::Create(
+      Context, StructDecl, Loc, Loc,
+      &Context.Idents.get("fmt"),
+      CharConstPtrType,
+      Context.getTrivialTypeSourceInfo(CharConstPtrType, Loc),
+      SC_Static);
 
-  // Create a static constexpr member function that returns the format string
-  // Create function type: static constexpr const char* fmt()
-  FunctionProtoType::ExtProtoInfo EPI;
-  EPI.ExceptionSpec.Type = EST_BasicNoexcept;
-  QualType FuncType = Context.getFunctionType(CharPtrType, {}, EPI);
+  // Set as constexpr and inline
+  FmtVar->setConstexpr(true);
+  FmtVar->setInlineSpecified();
+  FmtVar->setImplicit(true);
+  FmtVar->setAccess(AS_public);
 
-  // Create the function declaration
-  DeclarationName FmtName(&Context.Idents.get("fmt"));
-  DeclarationNameInfo FmtNameInfo(FmtName, Loc);
-  CXXMethodDecl *FmtFunc = CXXMethodDecl::Create(
-      Context, StructDecl, Loc,
-      FmtNameInfo,
-      FuncType, Context.getTrivialTypeSourceInfo(FuncType, Loc),
-      SC_Static, /*UsesFPIntrin=*/false, /*isInline=*/true,
-      ConstexprSpecKind::Constexpr, Loc);
-
-  FmtFunc->setImplicit(true);
-  FmtFunc->setAccess(AS_public);
-
-  // Create the function body that returns the string literal
-  // Need to convert the string literal array to a pointer for the return type
-  ImplicitCastExpr *ArrayToPointer = ImplicitCastExpr::Create(
-      Context, CharPtrType, CK_ArrayToPointerDecay, FmtLit,
+  // Initialize with the same array-to-pointer conversion as the function
+  ImplicitCastExpr *SFmtInit = ImplicitCastExpr::Create(
+      Context, CharConstPtrType, CK_ArrayToPointerDecay, FmtLit,
       nullptr, VK_PRValue, FPOptionsOverride());
 
-  // Create a return statement
-  ReturnStmt *Return = ReturnStmt::Create(Context, Loc, ArrayToPointer, nullptr);
+  FmtVar->setInit(SFmtInit);
+  FmtVar->setInitStyle(VarDecl::CInit);
+  FmtVar->markUsed(Context);
 
-  // Create the compound statement (function body)
-  CompoundStmt *Body = CompoundStmt::Create(Context, Return, FPOptionsOverride(), Loc, Loc);
-  FmtFunc->setBody(Body);
-
-  // Mark the function as used and add it to the struct
-  FmtFunc->markUsed(Context);
-  FmtFunc->setIsUsed();
-
-  StructDecl->addDecl(FmtFunc);
+  // Add the static data member to the struct
+  StructDecl->addDecl(FmtVar);
 
   // Add fields for each expression
   SmallVector<FieldDecl*, 4> Fields;
@@ -121,6 +111,12 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc, StringRef Format
   }
 
   StructDecl->completeDefinition();
+
+  // Add the struct to the DeclContext so it gets emitted
+  DC->addDecl(StructDecl);
+
+  // Push the static data member to ensure it gets emitted
+  Consumer.HandleTopLevelDecl(DeclGroupRef(FmtVar));
 
   // Create the type for the struct
   QualType StructType = Context.getRecordType(StructDecl);
