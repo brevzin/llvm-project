@@ -2279,12 +2279,12 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
   llvm::errs() << "[DEBUG]: lexing new template string literal, starting at:" << std::string_view(CurPtr, 10) << '\n';
   // Create the annotation that will hold our data
   std::unique_ptr<TemplateStringAnnotation> Annotation(new TemplateStringAnnotation(getSourceLocation(BufferPtr)));
-  const char *Start = CurPtr;
 
   while (true) {
     // 1. String Literal part: we parse the literal piece up until the next {
     // which starts a new replacement-field or the close quote which ends the
     // whole thing
+    const char *Start = CurPtr;
     const char *NulCharacter = nullptr;
 
     char C;
@@ -2331,10 +2331,8 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
     std::vector<char>& Piece = Annotation->FormatStringData.emplace_back();
     Piece.reserve(CurPtr - Start + 1);
     Piece.push_back('"');
-    Piece.insert(Piece.end(), Start, CurPtr);
-    if (C != '"') {
-      Piece.push_back('"');
-    }
+    Piece.insert(Piece.end(), Start, CurPtr - 1);
+    Piece.push_back('"');
     llvm::errs() << "[DEBUG] Pushed back new piece: " << std::string_view(Piece.data(), Piece.size()) << '\n';
 
     if (C == '"') {
@@ -2364,10 +2362,10 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
         if (!CurExpr.empty() && CurExpr.back().getKind() == tok::equal) {
           // if the expression ends with a trailing equals, e.g. {x=}, add the
           // full expression to the format string. We know the last piece right
-          // now ends with {", so can stick this in front of the {.
+          // now ends with ", so can stick this in front of the ".
           CurExpr.pop_back();
           auto& LastLit = Annotation->FormatStringData.back();
-          LastLit.insert(LastLit.end() - 2, InitExpr, BufferPtr);
+          LastLit.insert(LastLit.end() - 1, InitExpr, BufferPtr);
         }
 
         if (*BufferPtr == ':') {
@@ -2381,6 +2379,15 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
             }
           }
         }
+
+
+        std::vector<char>& Piece = Annotation->FormatStringData.emplace_back();
+        Piece.reserve(CurPtr - Start + 3);
+        Piece.push_back('"');
+        Piece.push_back('{');
+        Piece.insert(Piece.end(), Start, CurPtr);
+        Piece.push_back('"');
+        llvm::errs() << "[DEBUG] Pushed back new piece from replacement: " << std::string_view(Piece.data(), Piece.size()) << '\n';
         break;
       } else {
         Token NextToken;
