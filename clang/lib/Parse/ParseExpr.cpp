@@ -3166,13 +3166,10 @@ ExprResult Parser::ParseTemplateStringLiteral() {
     Tok = SavedToken;
   }
 
-  // Get the format string from the annotation
-  StringLiteralParser Literal(Annotation->FormatString, PP);
-  StringRef FormatStr = Literal.GetString();
-
   // Call Sema to create the template string
   ExprResult Result = Actions.ActOnTemplateStringLiteral(StringTok.getLocation(),
-                                                         FormatStr, Exprs);
+                                                         *Annotation,
+                                                         Exprs);
 
   return Result;
 }

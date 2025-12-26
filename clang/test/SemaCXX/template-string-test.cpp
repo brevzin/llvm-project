@@ -1,5 +1,12 @@
 // RUN: %clang_cc1 -std=c++26 -freflection -fsyntax-only -verify %s
 
+using size_t = decltype(sizeof(0));
+
+template <class T, size_t N>
+constexpr size_t array_size(T(&)[N]) {
+  return N;
+}
+
 // Test basic template string with local variables
 void test_local_vars() {
   int x = 42;
@@ -8,6 +15,21 @@ void test_local_vars() {
   auto s1 = t"x={x}, y={y}";
   // Check that we get the format string
   static_assert(__builtin_strcmp(s1.fmt, "x={}, y={}") == 0);
+
+  // Check that we get the right strings
+  static_assert(array_size(s1.strings) == 3);
+  static_assert(__builtin_strcmp(s1.strings[0], "x=") == 0);
+  static_assert(__builtin_strcmp(s1.strings[1], ", y=") == 0);
+  static_assert(__builtin_strcmp(s1.strings[2], "") == 0);
+
+  // And the right interpolations
+  static_assert(array_size(s1.interpolations) == 2);
+  static_assert(__builtin_strcmp(s1.interpolations[0].expression, "x") == 0);
+  static_assert(__builtin_strcmp(s1.interpolations[0].fmt, "{}") == 0);
+  static_assert(s1.interpolations[0].index == 0);
+  static_assert(__builtin_strcmp(s1.interpolations[1].expression, "y") == 0);
+  static_assert(__builtin_strcmp(s1.interpolations[1].fmt, "{}") == 0);
+  static_assert(s1.interpolations[1].index == 1);
 
   // Check that the fields have the right values
   static_assert((^^decltype(s1._0)) == (^^int&));
@@ -19,8 +41,22 @@ void test_expressions() {
   int a = 10;
   int b = 20;
 
-  auto s2 = t"sum={a+b}, product={a*b}";
+  auto s2 = t"sum={a+b}, product={a * b}";
   static_assert(__builtin_strcmp(s2.fmt, "sum={}, product={}") == 0);
+
+  static_assert(array_size(s2.strings) == 3);
+  static_assert(__builtin_strcmp(s2.strings[0], "sum=") == 0);
+  static_assert(__builtin_strcmp(s2.strings[1], ", product=") == 0);
+  static_assert(__builtin_strcmp(s2.strings[2], "") == 0);
+
+  static_assert(array_size(s2.interpolations) == 2);
+  static_assert(__builtin_strcmp(s2.interpolations[0].expression, "a+b") == 0);
+  static_assert(__builtin_strcmp(s2.interpolations[0].fmt, "{}") == 0);
+  static_assert(s2.interpolations[0].index == 0);
+  static_assert(__builtin_strcmp(s2.interpolations[1].expression, "a * b") == 0);
+  static_assert(__builtin_strcmp(s2.interpolations[1].fmt, "{}") == 0);
+  static_assert(s2.interpolations[1].index == 1);
+
   static_assert((^^decltype(s2._0)) == (^^int));
   static_assert((^^decltype(s2._1)) == (^^int));
 }
@@ -58,6 +94,8 @@ void test_fmt_specifiers() {
   int i = 42;
   auto s7 = t"{i:#x}";
   static_assert(__builtin_strcmp(s7.fmt, "{:#x}") == 0);
+  static_assert(__builtin_strcmp(s7.interpolations[0].expression, "i") == 0);
+  static_assert(__builtin_strcmp(s7.interpolations[0].fmt, "{:#x}") == 0);
 }
 
 // Test parentheses

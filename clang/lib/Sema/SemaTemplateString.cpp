@@ -15,12 +15,21 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/Basic/SourceManager.h"
+#include "clang/Lex/Lexer.h"
+#include "clang/Lex/LiteralSupport.h"
+#include "clang/Lex/TemplateStringAnnotation.h"
 
 using namespace clang;
 
+ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
+                                            const TemplateStringAnnotation& Annotation,
+                                            ArrayRef<ExprResult> Exprs) {
 
-ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc, StringRef FormatStr,
-                                           ArrayRef<ExprResult> Exprs) {
+  // Get the format string from the annotation
+  StringLiteralParser Literal(Annotation.FormatString, PP);
+  StringRef FormatStr = Literal.GetString();
+
   // Create an anonymous struct type with:
   // - static constexpr char const* fmt() = "...";
   // - decltype((expr)) _0, _1, ...
@@ -42,6 +51,55 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc, StringRef Format
 
   QualType CharConstPtrType = Context.getPointerType(
     Context.getConstType(Context.CharTy));
+
+  // Create nested interpolation struct
+  CXXRecordDecl *InterpolationDecl = CXXRecordDecl::Create(
+      Context, TagTypeKind::Struct, StructDecl, Loc, Loc,
+      &Context.Idents.get("interpolation"));
+
+  InterpolationDecl->startDefinition();
+
+  // Add fields to interpolation struct
+  QualType SizeTType = Context.getSizeType();
+
+  // char const* expression;
+  FieldDecl *ExpressionField = FieldDecl::Create(
+      Context, InterpolationDecl, Loc, Loc,
+      &Context.Idents.get("expression"),
+      CharConstPtrType,
+      Context.getTrivialTypeSourceInfo(CharConstPtrType, Loc),
+      /*BitWidth=*/nullptr,
+      /*Mutable=*/false,
+      ICIS_NoInit);
+  ExpressionField->setAccess(AS_public);
+  InterpolationDecl->addDecl(ExpressionField);
+
+  // char const* fmt;
+  FieldDecl *FmtField = FieldDecl::Create(
+      Context, InterpolationDecl, Loc, Loc,
+      &Context.Idents.get("fmt"),
+      CharConstPtrType,
+      Context.getTrivialTypeSourceInfo(CharConstPtrType, Loc),
+      /*BitWidth=*/nullptr,
+      /*Mutable=*/false,
+      ICIS_NoInit);
+  FmtField->setAccess(AS_public);
+  InterpolationDecl->addDecl(FmtField);
+
+  // size_t index;
+  FieldDecl *IndexField = FieldDecl::Create(
+      Context, InterpolationDecl, Loc, Loc,
+      &Context.Idents.get("index"),
+      SizeTType,
+      Context.getTrivialTypeSourceInfo(SizeTType, Loc),
+      /*BitWidth=*/nullptr,
+      /*Mutable=*/false,
+      ICIS_NoInit);
+  IndexField->setAccess(AS_public);
+  InterpolationDecl->addDecl(IndexField);
+
+  InterpolationDecl->completeDefinition();
+  StructDecl->addDecl(InterpolationDecl);
 
   // Add the fmt static member function
   // Create the string literal for the format string
@@ -80,6 +138,170 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc, StringRef Format
   // Add the static data member to the struct
   StructDecl->addDecl(FmtVar);
 
+  // Create static inline constexpr array of char const* named "strings"
+  // The array contains string literals from every other element of FormatString
+  size_t NumStrings = (Annotation.FormatString.size() + 1) / 2;
+
+  // Create string literals for each string piece
+  SmallVector<Expr*, 8> StringLiterals;
+  for (size_t I = 0; I < Annotation.FormatString.size(); I += 2) {
+    // Get the string piece from FormatString
+    StringLiteralParser StrLiteral(Annotation.FormatString[I], PP);
+    StringRef StrPiece = StrLiteral.GetString();
+
+    // Create the string literal type
+    QualType StrTy = Context.getConstantArrayType(
+        Context.CharTy.withConst(),
+        llvm::APInt(32, StrPiece.size() + 1),
+        nullptr, ArraySizeModifier::Normal, 0);
+
+    // Create the string literal
+    StringLiteral *StrLit = StringLiteral::Create(
+        Context, StrPiece, StringLiteralKind::Ordinary, false, StrTy, {Loc});
+
+    // Convert array to pointer
+    ImplicitCastExpr *ArrayToPtr = ImplicitCastExpr::Create(
+        Context, CharConstPtrType, CK_ArrayToPointerDecay, StrLit,
+        nullptr, VK_PRValue, FPOptionsOverride());
+
+    StringLiterals.push_back(ArrayToPtr);
+  }
+
+  // Create the array type: char const* [N]
+  QualType ArrayType = Context.getConstantArrayType(
+      CharConstPtrType,
+      llvm::APInt(32, NumStrings),
+      nullptr, ArraySizeModifier::Normal, 0);
+
+  // Create the initializer list for the array
+  InitListExpr *ArrayInit = new (Context) InitListExpr(
+      Context, Loc, StringLiterals, Loc);
+  ArrayInit->setType(ArrayType);
+
+  // Create the static data member: static inline constexpr char const* strings[N] = {...}
+  VarDecl *StringsVar = VarDecl::Create(
+      Context, StructDecl, Loc, Loc,
+      &Context.Idents.get("strings"),
+      ArrayType,
+      Context.getTrivialTypeSourceInfo(ArrayType, Loc),
+      SC_Static);
+
+  // Set as constexpr and inline
+  StringsVar->setConstexpr(true);
+  StringsVar->setInlineSpecified();
+  StringsVar->setImplicit(true);
+  StringsVar->setAccess(AS_public);
+  StringsVar->setInit(ArrayInit);
+  StringsVar->setInitStyle(VarDecl::CInit);
+  StringsVar->markUsed(Context);
+
+  // Add the strings array to the struct
+  StructDecl->addDecl(StringsVar);
+
+  // Create static inline constexpr array of interpolation structs
+  // static inline constexpr interpolation interpolations[N] = {...}
+  size_t NumInterpolations = Annotation.ExpressionTokens.size();
+
+  // Get the type for the interpolation struct
+  QualType InterpolationType = Context.getRecordType(InterpolationDecl);
+
+  // Create array of interpolation initializers
+  SmallVector<Expr*, 8> InterpolationInits;
+
+  for (size_t I = 0; I < NumInterpolations; ++I) {
+    // Create string literal for the expression text
+    auto tokens_to_string = [&](ArrayRef<Token> toks) -> std::string {
+      auto const& SM = getSourceManager();
+
+      auto const B = SM.getSpellingLoc(toks.front().getLocation());
+      auto const EndTok = toks.back().getLocation();
+      auto const End = Lexer::getLocForEndOfToken(EndTok, 0, SM, getLangOpts());
+
+      auto const text = Lexer::getSourceText(CharSourceRange::getCharRange(B, End), SM, getLangOpts());
+
+      std::string out;
+      llvm::raw_string_ostream os(out);
+      os.write_escaped(text, /*UseHexEscapes=*/true);
+      os.flush();
+      return out;
+    };
+
+    std::string ExprText = tokens_to_string(Annotation.ExpressionTokens[I]);
+
+    QualType ExprStrTy = Context.getConstantArrayType(
+        Context.CharTy.withConst(),
+        llvm::APInt(32, ExprText.size() + 1),
+        nullptr, ArraySizeModifier::Normal, 0);
+
+    StringLiteral *ExprStrLit = StringLiteral::Create(
+        Context, ExprText, StringLiteralKind::Ordinary, false, ExprStrTy, {Loc});
+
+    ImplicitCastExpr *ExprToPtr = ImplicitCastExpr::Create(
+        Context, CharConstPtrType, CK_ArrayToPointerDecay, ExprStrLit,
+        nullptr, VK_PRValue, FPOptionsOverride());
+
+    // Create string literal for the format specifier
+    StringLiteralParser FmtLiteral(Annotation.FormatString[I * 2 + 1], PP);
+    StringRef FmtText = FmtLiteral.GetString();
+
+    QualType FmtStrTy = Context.getConstantArrayType(
+        Context.CharTy.withConst(),
+        llvm::APInt(32, FmtText.size() + 1),
+        nullptr, ArraySizeModifier::Normal, 0);
+
+    StringLiteral *FmtStrLit = StringLiteral::Create(
+        Context, FmtText, StringLiteralKind::Ordinary, false, FmtStrTy, {Loc});
+
+    ImplicitCastExpr *FmtToPtr = ImplicitCastExpr::Create(
+        Context, CharConstPtrType, CK_ArrayToPointerDecay, FmtStrLit,
+        nullptr, VK_PRValue, FPOptionsOverride());
+
+    // Create the index value
+    IntegerLiteral *IndexLit = IntegerLiteral::Create(
+        Context, llvm::APInt(Context.getTypeSize(SizeTType), I),
+        SizeTType, Loc);
+
+    // Create initializer list for this interpolation struct
+    SmallVector<Expr*, 3> FieldInits = {ExprToPtr, FmtToPtr, IndexLit};
+
+    InitListExpr *InterpolationInit = new (Context) InitListExpr(
+        Context, Loc, FieldInits, Loc);
+    InterpolationInit->setType(InterpolationType);
+
+    InterpolationInits.push_back(InterpolationInit);
+  }
+
+  // Create the array type: interpolation[N]
+  QualType InterpolationArrayType = Context.getConstantArrayType(
+      InterpolationType,
+      llvm::APInt(32, NumInterpolations),
+      nullptr, ArraySizeModifier::Normal, 0);
+
+  // Create the initializer list for the array
+  InitListExpr *InterpolationsArrayInit = new (Context) InitListExpr(
+      Context, Loc, InterpolationInits, Loc);
+  InterpolationsArrayInit->setType(InterpolationArrayType);
+
+  // Create the static data member: static inline constexpr interpolation interpolations[N] = {...}
+  VarDecl *InterpolationsVar = VarDecl::Create(
+      Context, StructDecl, Loc, Loc,
+      &Context.Idents.get("interpolations"),
+      InterpolationArrayType,
+      Context.getTrivialTypeSourceInfo(InterpolationArrayType, Loc),
+      SC_Static);
+
+  // Set as constexpr and inline
+  InterpolationsVar->setConstexpr(true);
+  InterpolationsVar->setInlineSpecified();
+  InterpolationsVar->setImplicit(true);
+  InterpolationsVar->setAccess(AS_public);
+  InterpolationsVar->setInit(InterpolationsArrayInit);
+  InterpolationsVar->setInitStyle(VarDecl::CInit);
+  InterpolationsVar->markUsed(Context);
+
+  // Add the interpolations array to the struct
+  StructDecl->addDecl(InterpolationsVar);
+
   // Add fields for each expression
   SmallVector<FieldDecl*, 4> Fields;
   for (size_t I = 0; I < Exprs.size(); ++I) {
@@ -115,8 +337,10 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc, StringRef Format
   // Add the struct to the DeclContext so it gets emitted
   DC->addDecl(StructDecl);
 
-  // Push the static data member to ensure it gets emitted
+  // Push the static data members to ensure they get emitted
   Consumer.HandleTopLevelDecl(DeclGroupRef(FmtVar));
+  Consumer.HandleTopLevelDecl(DeclGroupRef(StringsVar));
+  Consumer.HandleTopLevelDecl(DeclGroupRef(InterpolationsVar));
 
   // Create the type for the struct
   QualType StructType = Context.getRecordType(StructDecl);
