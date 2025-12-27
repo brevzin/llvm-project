@@ -346,7 +346,7 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
   StructDecl->addDecl(InterpolationsVar);
 
   // Add fields for each expression
-  SmallVector<FieldDecl*, 4> Fields;
+  SmallVector<Decl*, 4> FieldDecls;
   for (size_t I = 0; I < Exprs.size(); ++I) {
     if (Exprs[I].isInvalid())
       return ExprError();
@@ -372,10 +372,14 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
 
     Field->setAccess(AS_public);
     StructDecl->addDecl(Field);
-    Fields.push_back(Field);
+    FieldDecls.push_back(Field);
   }
 
-  StructDecl->completeDefinition();
+  // Properly process the fields and complete the class definition
+  // This will determine special member functions based on field types
+  ActOnFields(/*S=*/nullptr, Loc, StructDecl, FieldDecls, Loc, Loc,
+              ParsedAttributesView{});
+  CheckCompletedCXXClass(/*S=*/nullptr, StructDecl);
 
   // Add the struct to the DeclContext so it gets emitted
   DC->addDecl(StructDecl);
@@ -403,7 +407,11 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
 
   // Create a compound literal (C99) or CXXTemporaryObjectExpr (C++)
   // For now, we'll use a compound literal
-  return new (Context) CompoundLiteralExpr(
+  Expr *CompoundLit = new (Context) CompoundLiteralExpr(
       Loc, Context.getTrivialTypeSourceInfo(StructType, Loc),
       StructType, VK_PRValue, InitList, false);
+
+  // Wrap in CXXBindTemporaryExpr if the type has a non-trivial destructor
+  // This ensures proper cleanup and generation of the destructor
+  return MaybeBindToTemporary(CompoundLit);
 }
