@@ -27,9 +27,11 @@ void test_local_vars() {
   static_assert(__builtin_strcmp(s1.interpolations[0].expression, "x") == 0);
   static_assert(__builtin_strcmp(s1.interpolations[0].fmt, "{}") == 0);
   static_assert(s1.interpolations[0].index == 0);
+  static_assert(s1.interpolations[0].count == 1);
   static_assert(__builtin_strcmp(s1.interpolations[1].expression, "y") == 0);
   static_assert(__builtin_strcmp(s1.interpolations[1].fmt, "{}") == 0);
   static_assert(s1.interpolations[1].index == 1);
+  static_assert(s1.interpolations[1].count == 1);
 
   // Check that the fields have the right values
   static_assert((^^decltype(s1._0)) == (^^int&));
@@ -53,9 +55,11 @@ void test_expressions() {
   static_assert(__builtin_strcmp(s2.interpolations[0].expression, "a+b") == 0);
   static_assert(__builtin_strcmp(s2.interpolations[0].fmt, "{}") == 0);
   static_assert(s2.interpolations[0].index == 0);
+  static_assert(s2.interpolations[0].count == 1);
   static_assert(__builtin_strcmp(s2.interpolations[1].expression, "a * b") == 0);
   static_assert(__builtin_strcmp(s2.interpolations[1].fmt, "{}") == 0);
   static_assert(s2.interpolations[1].index == 1);
+  static_assert(s2.interpolations[1].count == 1);
 
   static_assert((^^decltype(s2._0)) == (^^int));
   static_assert((^^decltype(s2._1)) == (^^int));
@@ -234,6 +238,25 @@ void test_trailing_eq() {
   static_assert(__builtin_strcmp(decltype(t"{x=}")::fmt, "x={}") == 0);
   static_assert(__builtin_strcmp(decltype(t"{x = }")::fmt, "x = {}") == 0);
   static_assert(__builtin_strcmp(decltype(t"{x + 1 = :#x}")::fmt, "x + 1 = {:#x}") == 0);
+}
+
+void test_nested() {
+  int var = 5;
+  int width = 10;
+  auto s24 = t"{var:*^{width}} vs {var:{:x}{}}";
+  static_assert(__builtin_strcmp(s24.fmt, "{:*^{}} vs {:{:x}{}}") == 0);
+  static_assert(array_size(s24.strings) == 3);
+  static_assert(array_size(s24.interpolations) == 2);
+
+  static_assert(__builtin_strcmp(s24.interpolations[0].fmt, "{:*^{}}") == 0);
+  static_assert(__builtin_strcmp(s24.interpolations[0].expression, "var") == 0);
+  static_assert(s24.interpolations[0].index == 0);
+  static_assert(s24.interpolations[0].count == 2);
+
+  static_assert(__builtin_strcmp(s24.interpolations[1].fmt, "{:{:x}{}}") == 0);
+  static_assert(__builtin_strcmp(s24.interpolations[1].expression, "var") == 0);
+  static_assert(s24.interpolations[1].index == 2);
+  static_assert(s24.interpolations[1].count == 1);
 }
 
 // expected-no-diagnostics

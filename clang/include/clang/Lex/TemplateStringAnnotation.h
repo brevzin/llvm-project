@@ -29,10 +29,15 @@ struct TemplateStringAnnotation {
   llvm::SmallVector<std::vector<char>, 8> FormatStringData;
   std::vector<Token> FormatString;
 
+  /// Vector containing the indices to the start expression for each interpolation
+  /// Typically will be like [0, 1, 2] but if there are nested expressions, there
+  // may be gaps.
+  llvm::SmallVector<size_t, 8> Interpolations;
+
   /// Tokens for each expression in the template string
   /// These are grouped by expression - each inner vector contains
   /// all tokens for one expression
-  llvm::SmallVector<llvm::SmallVector<Token, 8>, 4> ExpressionTokens;
+  llvm::SmallVector<llvm::SmallVector<Token, 8>, 8> ExpressionTokens;
 
   /// Source location of the original template string literal
   SourceLocation Loc;

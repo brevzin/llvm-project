@@ -23,6 +23,9 @@ auto test_function(F f) -> void {
     check_eq(f(t"{x=}"), "x=42");
     check_eq(f(t"{x = }"), "x = 42");
     check_eq(f(t"{x=:#x}"), "x=0x2a");
+
+    int width = 10;
+    check_eq(f(t"{x:*^{width}}"), "****42****");
 }
 
 int main(int, char**) {

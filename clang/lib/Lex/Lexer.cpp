@@ -2342,74 +2342,89 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
 
     /// 2. Expression part now we're at {., we've started a new expresion
     /// we just keep lexing tokens.
-    BufferPtr = CurPtr;
-    const char* InitExpr = BufferPtr;
+    const char* InitExpr = CurPtr;
     // llvm::errs() << "[DEBUG] New expression starting at " << *BufferPtr << '\n';
-    llvm::SmallVector<Token, 8>& CurExpr = Annotation->ExpressionTokens.emplace_back();
 
-    llvm::SmallVector<tok::TokenKind, 4> ExpectedBraces;
+    auto LexExpression = [&]() -> auto& {
+      BufferPtr = CurPtr;
+      llvm::SmallVector<Token, 8>& CurExpr = Annotation->ExpressionTokens.emplace_back();
+      llvm::SmallVector<tok::TokenKind, 4> ExpectedBraces;
 
-    while (true) {
-      bool StartOfLine;
-      SkipWhitespace(Result, BufferPtr, StartOfLine);
-
-      if (ExpectedBraces.empty() && (*BufferPtr == ':' || *BufferPtr == '}')) {
-        // Done with the expression. Skip the format-specifiers (if any)
-        // Start a new string literal, including the colon or close brace
-        Start = BufferPtr;
-        CurPtr = BufferPtr + 1;
-
-        if (!CurExpr.empty() && CurExpr.back().getKind() == tok::equal) {
-          // if the expression ends with a trailing equals, e.g. {x=}, add the
-          // full expression to the format string. We know the last piece right
-          // now ends with ", so can stick this in front of the ".
-          CurExpr.pop_back();
-          auto& LastLit = Annotation->FormatStringData.back();
-          LastLit.insert(LastLit.end() - 1, InitExpr, BufferPtr);
-        }
-
-        if (*BufferPtr == ':') {
-          int BraceDepth = 1;
-          while (BraceDepth > 0) {
-            char C = getAndAdvanceChar(CurPtr, Result);
-            if (C == '{') {
-              BraceDepth++;
-            } else if (C == '}') {
-              BraceDepth--;
-            }
-          }
-        }
-
-
-        std::vector<char>& Piece = Annotation->FormatStringData.emplace_back();
-        Piece.reserve(CurPtr - Start + 3);
-        Piece.push_back('"');
-        Piece.push_back('{');
-        Piece.insert(Piece.end(), Start, CurPtr);
-        Piece.push_back('"');
-        // llvm::errs() << "[DEBUG] Pushed back new piece from replacement: " << std::string_view(Piece.data(), Piece.size()) << '\n';
-        break;
-      } else {
-        Token NextToken;
-        if (Lex(NextToken)) {
-          CurExpr.push_back(NextToken);
-
-          // Keep track of all the braces
-          tok::TokenKind Kind = NextToken.getKind();
-          if (Kind == tok::l_paren) {
-            ExpectedBraces.push_back(tok::r_paren);
-          } else if (Kind == tok::l_brace) {
-            ExpectedBraces.push_back(tok::r_brace);
-          } else if (Kind == tok::l_square) {
-            ExpectedBraces.push_back(tok::r_square);
-          } else if (!ExpectedBraces.empty() && Kind == ExpectedBraces.back()) {
-            ExpectedBraces.pop_back();
-          }
+      while (true) {
+        bool StartOfLine;
+        SkipWhitespace(Result, BufferPtr, StartOfLine);
+        if (ExpectedBraces.empty() && (*BufferPtr == ':' || *BufferPtr == '}')) {
+          CurPtr = BufferPtr;
+          return CurExpr;
         } else {
-          // TODO: error?
+          Token NextToken;
+          if (Lex(NextToken)) {
+            CurExpr.push_back(NextToken);
+
+            // Keep track of all the braces
+            tok::TokenKind Kind = NextToken.getKind();
+            if (Kind == tok::l_paren) {
+              ExpectedBraces.push_back(tok::r_paren);
+            } else if (Kind == tok::l_brace) {
+              ExpectedBraces.push_back(tok::r_brace);
+            } else if (Kind == tok::l_square) {
+              ExpectedBraces.push_back(tok::r_square);
+            } else if (!ExpectedBraces.empty() && Kind == ExpectedBraces.back()) {
+              ExpectedBraces.pop_back();
+            }
+          } else {
+            // TODO: error?
+          }
         }
       }
+    };
+
+    Annotation->Interpolations.push_back(Annotation->ExpressionTokens.size());
+    auto& CurExpr = LexExpression();
+
+    // Done with the expression. Skip the format-specifiers (if any)
+    // Start a new string literal, including the colon or close brace
+    std::vector<char>& InterpFmt = Annotation->FormatStringData.emplace_back();
+    InterpFmt.push_back('"');
+    InterpFmt.push_back('{');
+
+    if (!CurExpr.empty() && CurExpr.back().getKind() == tok::equal) {
+      // if the expression ends with a trailing equals, e.g. {x=}, add the
+      // full expression to the format string. We know the last piece right
+      // now ends with ", so can stick this in front of the ".
+      CurExpr.pop_back();
+      auto& LastLit = Annotation->FormatStringData.back();
+      LastLit.insert(LastLit.end() - 1, InitExpr, BufferPtr);
     }
+
+    // CurPtr is now either : or }. If :, there are format specifiers, skip ahead to the }
+    if (*CurPtr == ':') {
+      ++CurPtr;
+      InterpFmt.push_back(':');
+      int BraceDepth = 1;
+      while (BraceDepth > 0) {
+        char C = getAndAdvanceChar(CurPtr, Result);
+        InterpFmt.push_back(C);
+        if (C == '{') {
+          BraceDepth++;
+
+          unsigned int SizeTmp;
+          char NextC = getCharAndSize(CurPtr, SizeTmp);
+          if (NextC != '}' && NextC != ':') {
+            // we have a nested expression here that we need to lex
+            LexExpression();
+          }
+
+        } else if (C == '}') {
+          BraceDepth--;
+        }
+      }
+    } else {
+      ++CurPtr;
+      InterpFmt.push_back('}');
+    }
+
+    InterpFmt.push_back('"');
   }
 
   // 3. Update the format string in the annotation

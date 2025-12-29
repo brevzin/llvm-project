@@ -63,16 +63,19 @@ static CXXRecordDecl* CreateInterpolationsStruct(Sema &S,
   InterpolationDecl->addDecl(FmtField);
 
   // size_t index;
-  FieldDecl *IndexField = FieldDecl::Create(
-      Context, InterpolationDecl, Loc, Loc,
-      &Context.Idents.get("index"),
-      SizeTType,
-      Context.getTrivialTypeSourceInfo(SizeTType, Loc),
-      /*BitWidth=*/nullptr,
-      /*Mutable=*/false,
-      ICIS_NoInit);
-  IndexField->setAccess(AS_public);
-  InterpolationDecl->addDecl(IndexField);
+  // size_t count;
+  for (char const* name : {"index", "count"}) {
+    FieldDecl *IndexField = FieldDecl::Create(
+        Context, InterpolationDecl, Loc, Loc,
+        &Context.Idents.get(name),
+        SizeTType,
+        Context.getTrivialTypeSourceInfo(SizeTType, Loc),
+        /*BitWidth=*/nullptr,
+        /*Mutable=*/false,
+        ICIS_NoInit);
+    IndexField->setAccess(AS_public);
+    InterpolationDecl->addDecl(IndexField);
+  }
 
   InterpolationDecl->completeDefinition();
 
@@ -202,13 +205,19 @@ static VarDecl *CreateInterpolationsVar(Sema &S,
   SourceLocation Loc = StructDecl->getLocation();
   QualType CharConstPtrType = Context.getPointerType(Context.getConstType(Context.CharTy));
 
-  size_t NumInterpolations = Annotation.ExpressionTokens.size();
+  size_t NumInterpolations = Annotation.Interpolations.size();
 
   // Get the type for the interpolation struct
   QualType InterpolationType = Context.getRecordType(InterpolationDecl);
 
   // Create array of interpolation initializers
   SmallVector<Expr*, 8> InterpolationInits;
+
+  auto CreateIntegerLit = [&, SizeTType = Context.getSizeType()](size_t I){
+    return IntegerLiteral::Create(
+        Context, llvm::APInt(Context.getTypeSize(SizeTType), I),
+        SizeTType, Loc);
+  };
 
   for (size_t I = 0; I < NumInterpolations; ++I) {
     // Create string literal for the expression text
@@ -228,7 +237,12 @@ static VarDecl *CreateInterpolationsVar(Sema &S,
       return out;
     };
 
-    std::string ExprText = tokens_to_string(Annotation.ExpressionTokens[I]);
+    size_t CurIndex = Annotation.Interpolations[I];
+    size_t NextIndex = (I + 1 < Annotation.Interpolations.size())
+        ? Annotation.Interpolations[I + 1]
+        : Annotation.ExpressionTokens.size();
+
+    std::string ExprText = tokens_to_string(Annotation.ExpressionTokens[CurIndex]);
 
     QualType ExprStrTy = Context.getConstantArrayType(
         Context.CharTy.withConst(),
@@ -258,14 +272,12 @@ static VarDecl *CreateInterpolationsVar(Sema &S,
         Context, CharConstPtrType, CK_ArrayToPointerDecay, FmtStrLit,
         nullptr, VK_PRValue, FPOptionsOverride());
 
-    // Create the index value
-    QualType SizeTType = Context.getSizeType();
-    IntegerLiteral *IndexLit = IntegerLiteral::Create(
-        Context, llvm::APInt(Context.getTypeSize(SizeTType), I),
-        SizeTType, Loc);
+    // Create the index and count values
+    IntegerLiteral *IndexLit = CreateIntegerLit(CurIndex);
+    IntegerLiteral *CountLit = CreateIntegerLit(NextIndex - CurIndex);
 
     // Create initializer list for this interpolation struct
-    SmallVector<Expr*, 3> FieldInits = {ExprToPtr, FmtToPtr, IndexLit};
+    Expr* FieldInits[] = {ExprToPtr, FmtToPtr, IndexLit, CountLit};
 
     InitListExpr *InterpolationInit = new (Context) InitListExpr(
         Context, Loc, FieldInits, Loc);
