@@ -37,9 +37,9 @@ format(_S&& __s) {
 
 template <output_iterator<const char&> _OutIt, template_string _S>
 _LIBCPP_ALWAYS_INLINE _LIBCPP_HIDE_FROM_ABI _OutIt
-format_to(_OutIt __out_it, _S __s) {
+format_to(_OutIt __out_it, _S&& __s) {
     auto& [...__parts] = __s;
-  return std::format_to(std::move(__out_it), __s.fmt, __parts...);
+    return std::format_to(std::move(__out_it), __s.fmt, __parts...);
 }
 
 

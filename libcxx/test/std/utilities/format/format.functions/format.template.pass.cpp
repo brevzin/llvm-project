@@ -1,5 +1,8 @@
 #include <format>
+#include <ostream>
+#include <print>
 #include <string_view>
+#include <sstream>
 
 #include "test_macros.h"
 #include "assert_macros.h"
@@ -24,7 +27,7 @@ auto test_function(F f) -> void {
 
 int main(int, char**) {
     // std::format
-    test_function([](auto&& m){ return std::format(m); });
+    test_function([](auto&& s){ return std::format(s); });
 
     // std::format_to
     char buffer[1000];
@@ -32,4 +35,17 @@ int main(int, char**) {
         auto out = std::format_to(buffer, s);
         return std::string_view(buffer, out - buffer);
     });
+
+    // std::print
+    test_function([&](auto&& s){
+        std::stringstream sstr;
+        std::print(sstr, s);
+        return sstr.str();
+    });
+
+    // quick test for std::println
+    int x = 42;
+    std::stringstream sstr;
+    std::println(sstr, t"Got {x}");
+    check_eq(sstr.str(), "Got 42\n");
 }
