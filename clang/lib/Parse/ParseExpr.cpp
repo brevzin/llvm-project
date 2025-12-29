@@ -3111,9 +3111,9 @@ ExprResult Parser::ParseTemplateStringLiteral() {
   auto Annotation = std::unique_ptr<TemplateStringAnnotation const>(
       reinterpret_cast<TemplateStringAnnotation const*>(LiteralData));
 
-  llvm::errs() << "[DEBUG] ParseTemplateStringLiteral with "
-               << Annotation->FormatString.size() << " string literals and "
-               << Annotation->ExpressionTokens.size() << " expressions.\n";
+  // llvm::errs() << "[DEBUG] ParseTemplateStringLiteral with "
+  //              << Annotation->FormatString.size() << " string literals and "
+  //              << Annotation->ExpressionTokens.size() << " expressions.\n";
 
   // Save the current token to restore later
   Token SavedToken = Tok;

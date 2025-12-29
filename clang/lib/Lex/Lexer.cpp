@@ -2276,7 +2276,7 @@ bool Lexer::LexStringLiteral(Token &Result, const char *CurPtr,
 /// after having lexed t". This extracts expressions from {expr} fields and
 /// tokenizes them for later parsing.
 bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
-  llvm::errs() << "[DEBUG]: lexing new template string literal, starting at:" << std::string_view(CurPtr, 10) << '\n';
+  // llvm::errs() << "[DEBUG]: lexing new template string literal, starting at:" << std::string_view(CurPtr, 10) << '\n';
   // Create the annotation that will hold our data
   std::unique_ptr<TemplateStringAnnotation> Annotation(new TemplateStringAnnotation(getSourceLocation(BufferPtr)));
 
@@ -2333,7 +2333,7 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
     Piece.push_back('"');
     Piece.insert(Piece.end(), Start, CurPtr - 1);
     Piece.push_back('"');
-    llvm::errs() << "[DEBUG] Pushed back new piece: " << std::string_view(Piece.data(), Piece.size()) << '\n';
+    // llvm::errs() << "[DEBUG] Pushed back new piece: " << std::string_view(Piece.data(), Piece.size()) << '\n';
 
     if (C == '"') {
       // all done now
@@ -2344,7 +2344,7 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
     /// we just keep lexing tokens.
     BufferPtr = CurPtr;
     const char* InitExpr = BufferPtr;
-    llvm::errs() << "[DEBUG] New expression starting at " << *BufferPtr << '\n';
+    // llvm::errs() << "[DEBUG] New expression starting at " << *BufferPtr << '\n';
     llvm::SmallVector<Token, 8>& CurExpr = Annotation->ExpressionTokens.emplace_back();
 
     llvm::SmallVector<tok::TokenKind, 4> ExpectedBraces;
@@ -2387,7 +2387,7 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
         Piece.push_back('{');
         Piece.insert(Piece.end(), Start, CurPtr);
         Piece.push_back('"');
-        llvm::errs() << "[DEBUG] Pushed back new piece from replacement: " << std::string_view(Piece.data(), Piece.size()) << '\n';
+        // llvm::errs() << "[DEBUG] Pushed back new piece from replacement: " << std::string_view(Piece.data(), Piece.size()) << '\n';
         break;
       } else {
         Token NextToken;
@@ -2413,7 +2413,7 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
   }
 
   // 3. Update the format string in the annotation
-  llvm::errs() << "[DEBUG] Done, CurPtr is now '" << *CurPtr << "'\n";
+  // llvm::errs() << "[DEBUG] Done, CurPtr is now '" << *CurPtr << "'\n";
   for (std::vector<char>& Piece : Annotation->FormatStringData) {
     Token Tok;
     Tok.startToken();
