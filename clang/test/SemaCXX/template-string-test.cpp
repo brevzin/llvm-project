@@ -257,6 +257,24 @@ void test_nested() {
   static_assert(__builtin_strcmp(s24.interpolations[1].expression, "var") == 0);
   static_assert(s24.interpolations[1].index == 2);
   static_assert(s24.interpolations[1].count == 1);
+
+  // check that :> (digraph for ]) is properly handled
+  auto s25 = t"{var:>{width}}";
+  static_assert(__builtin_strcmp(s25.fmt, "{:>{}}") == 0);
+
+}
+
+void test_macro_expansion() {
+  #define SINGLE 42
+  #define MULTIPLE 5 + 5
+
+  auto answer = []{ return 42; };
+  #define RES (answer())
+  auto s26 = t"a={SINGLE} b={MULTIPLE} c={RES}";
+  static_assert(__builtin_strcmp(s26.fmt, "a={} b={} c={}") == 0);
+  static_assert((^^decltype(s26._0)) == (^^int));
+  static_assert((^^decltype(s26._1)) == (^^int));
+  static_assert((^^decltype(s26._2)) == (^^int));
 }
 
 // expected-no-diagnostics
