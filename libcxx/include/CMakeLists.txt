@@ -404,6 +404,7 @@ set(files
   __format/parser_std_format_spec.h
   __format/range_default_formatter.h
   __format/range_formatter.h
+  __format/template_string.h
   __format/unicode.h
   __format/width_estimation_table.h
   __format/write_escaped.h
