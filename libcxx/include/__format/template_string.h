@@ -28,12 +28,20 @@ concept __template_string = requires {
 template <class S>
 concept template_string = __template_string<remove_cvref_t<S>>;
 
-template <template_string S>
+template <template_string _S>
 [[nodiscard]] _LIBCPP_ALWAYS_INLINE _LIBCPP_HIDE_FROM_ABI string
-format(S&& s) {
-    auto& [...parts] = s;
-    return std::format(s.fmt, parts...);
+format(_S&& __s) {
+    auto& [...__parts] = __s;
+    return std::format(__s.fmt, __parts...);
 }
+
+template <output_iterator<const char&> _OutIt, template_string _S>
+_LIBCPP_ALWAYS_INLINE _LIBCPP_HIDE_FROM_ABI _OutIt
+format_to(_OutIt __out_it, _S __s) {
+    auto& [...__parts] = __s;
+  return std::format_to(std::move(__out_it), __s.fmt, __parts...);
+}
+
 
 #endif // _LIBCPP_STD_VER >= 26
 

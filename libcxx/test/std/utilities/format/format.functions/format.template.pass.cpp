@@ -12,11 +12,24 @@ auto check_eq(std::string_view actual, std::string_view expected) -> void {
             "Exected output ", expected, "\nActual output  ", actual, '\n'));
 }
 
-int main(int, char**) {
+template <class F>
+auto test_function(F f) -> void {
     int x = 42;
-    check_eq(std::format(t"Got {x}"), "Got 42");
-    check_eq(std::format(t"Got {x:#x}"), "Got 0x2a");
-    check_eq(std::format(t"{x=}"), "x=42");
-    check_eq(std::format(t"{x = }"), "x = 42");
-    check_eq(std::format(t"{x=:#x}"), "x=0x2a");
+    check_eq(f(t"Got {x}"), "Got 42");
+    check_eq(f(t"Got {x:#x}"), "Got 0x2a");
+    check_eq(f(t"{x=}"), "x=42");
+    check_eq(f(t"{x = }"), "x = 42");
+    check_eq(f(t"{x=:#x}"), "x=0x2a");
+}
+
+int main(int, char**) {
+    // std::format
+    test_function([](auto&& m){ return std::format(m); });
+
+    // std::format_to
+    char buffer[1000];
+    test_function([&](auto&& s){
+        auto out = std::format_to(buffer, s);
+        return std::string_view(buffer, out - buffer);
+    });
 }
