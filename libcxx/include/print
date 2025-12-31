@@ -380,25 +380,25 @@ _LIBCPP_HIDE_FROM_ABI void println(format_string<_Args...> __fmt, _Args&&... __a
 template <template_string _S>
 _LIBCPP_HIDE_FROM_ABI void print(FILE* __stream, _S&& __s) {
   auto& [...__parts] = __s;
-  return std::print(__stream, __s.fmt, __parts...);
+  return std::print(__stream, __s.fmt(), __parts...);
 }
 
 template <template_string _S>
 _LIBCPP_HIDE_FROM_ABI void print(_S&& __s) {
   auto& [...__parts] = __s;
-  return std::print(__s.fmt, __parts...);
+  return std::print(__s.fmt(), __parts...);
 }
 
 template <template_string _S>
 _LIBCPP_HIDE_FROM_ABI void println(_S&& __s) {
   auto& [...__parts] = __s;
-  return std::println(__s.fmt, __parts...);
+  return std::println(__s.fmt(), __parts...);
 }
 
 template <template_string _S>
 _LIBCPP_HIDE_FROM_ABI void println(FILE* __stream, _S&& __s) {
   auto& [...__parts] = __s;
-  return std::println(__stream, __s.fmt, __parts...);
+  return std::println(__stream, __s.fmt(), __parts...);
 }
 
 #  endif // _LIBCPP_STD_VER >= 26

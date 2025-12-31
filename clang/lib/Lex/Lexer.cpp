@@ -2351,7 +2351,13 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
 
       while (true) {
         Token NextToken;
-        PP->Lex(NextToken);
+        /// We need to invoke the Preprocesor here to ensure that macro expansion
+        /// works, but... we might not have a Preprocessor
+        if (PP) {
+          PP->Lex(NextToken);
+        } else {
+          Lex(NextToken);
+        }
         tok::TokenKind Kind = NextToken.getKind();
 
         /// check to see if we've reached the end of our expression — looking
