@@ -16509,6 +16509,27 @@ TreeTransform<Derived>::SkipLambdaBody(LambdaExpr *E, Stmt *S) {
   return S;
 }
 
+template <typename Derived>
+ExprResult TreeTransform<Derived>::TransformTemplateStringLiteralExpr(
+    TemplateStringLiteralExpr *E) {
+  bool ArgumentChanged = false;
+  SmallVector<Expr *, 8> TransformedExprs;
+  if (getDerived().TransformExprs(
+          const_cast<Expr **>(E->getExprs().data()), E->getNumExprs(),
+          /*IsCall=*/false, TransformedExprs, &ArgumentChanged))
+    return ExprError();
+
+  if (!getDerived().AlwaysRebuild() && !ArgumentChanged)
+    return E;
+
+  CXXRecordDecl *NewStruct = getSema().BuildTemplateStringStruct(
+      E->getBeginLoc(), E->getData(), TransformedExprs);
+
+  return TemplateStringLiteralExpr::Create(getSema().Context, NewStruct,
+                                           E->getData(), TransformedExprs,
+                                           E->getBeginLoc());
+}
+
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCXXUnresolvedConstructExpr(

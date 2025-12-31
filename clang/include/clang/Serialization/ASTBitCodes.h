@@ -2034,6 +2034,7 @@ enum StmtCode {
 
   STMT_MS_DEPENDENT_EXISTS, // MSDependentExistsStmt
   EXPR_LAMBDA,              // LambdaExpr
+  EXPR_TEMPLATE_STRING_LITERAL, // TemplateStringLiteralExpr
   STMT_COROUTINE_BODY,
   STMT_CORETURN,
   EXPR_COAWAIT,

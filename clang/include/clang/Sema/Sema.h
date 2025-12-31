@@ -190,6 +190,7 @@ class TemplateInstantiationCallback;
 class TemplatePartialOrderingContext;
 class TemplateSpecCandidateSet;
 class TemplateStringAnnotation;
+struct TemplateStringLiteralData;
 class Token;
 class TypeConstraint;
 class TypoCorrectionConsumer;
@@ -7281,6 +7282,12 @@ public:
   ExprResult ActOnTemplateStringLiteral(SourceLocation Loc,
                                         const TemplateStringAnnotation& Annotation,
                                         ArrayRef<ExprResult> Exprs);
+
+  /// BuildTemplateStringStruct - Build the anonymous struct type for a
+  /// template string literal with the given processed data and expressions.
+  CXXRecordDecl *BuildTemplateStringStruct(SourceLocation Loc,
+                                           TemplateStringLiteralData *Data,
+                                           ArrayRef<Expr *> Exprs);
 
   /// ControllingExprOrType is either an opaque pointer coming out of a
   /// ParsedType or an Expr *. FIXME: it'd be better to split this interface

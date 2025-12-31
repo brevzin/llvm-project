@@ -674,6 +674,7 @@ namespace clang {
     ExpectedStmt VisitMemberExpr(MemberExpr *E);
     ExpectedStmt VisitCallExpr(CallExpr *E);
     ExpectedStmt VisitLambdaExpr(LambdaExpr *LE);
+    ExpectedStmt VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E);
     ExpectedStmt VisitInitListExpr(InitListExpr *E);
     ExpectedStmt VisitCXXStdInitializerListExpr(CXXStdInitializerListExpr *E);
     ExpectedStmt VisitCXXInheritedCtorInitExpr(CXXInheritedCtorInitExpr *E);
@@ -8861,6 +8862,27 @@ ExpectedStmt ASTNodeImporter::VisitLambdaExpr(LambdaExpr *E) {
                             ToEndLoc, E->containsUnexpandedParameterPack());
 }
 
+ExpectedStmt ASTNodeImporter::VisitTemplateStringLiteralExpr(
+    TemplateStringLiteralExpr *E) {
+  auto ToStructOrErr = import(E->getStringStruct());
+  if (!ToStructOrErr)
+    return ToStructOrErr.takeError();
+
+  Error Err = Error::success();
+  auto ToLoc = importChecked(Err, E->getBeginLoc());
+  if (Err)
+    return std::move(Err);
+
+  SmallVector<Expr *, 8> ToExprs(E->getNumExprs());
+  if (Error Err = ImportContainerChecked(E->getExprs(), ToExprs))
+    return std::move(Err);
+
+  TemplateStringLiteralData *Data =
+      new (Importer.getToContext()) TemplateStringLiteralData(*E->getData());
+
+  return TemplateStringLiteralExpr::Create(
+      Importer.getToContext(), *ToStructOrErr, Data, ToExprs, ToLoc);
+}
 
 ExpectedStmt ASTNodeImporter::VisitInitListExpr(InitListExpr *E) {
   Error Err = Error::success();

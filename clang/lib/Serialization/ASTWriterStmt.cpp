@@ -16,6 +16,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprOpenMP.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Serialization/ASTReader.h"
@@ -1961,6 +1962,31 @@ void ASTStmtWriter::VisitLambdaExpr(LambdaExpr *E) {
   // LambdaExpr only stores a copy of the Stmt *.
 
   Code = serialization::EXPR_LAMBDA;
+}
+
+void ASTStmtWriter::VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->getNumExprs());
+  Record.AddDeclRef(E->getStringStruct());
+  Record.AddSourceLocation(E->getBeginLoc());
+
+  TemplateStringLiteralData *Data = E->getData();
+  Record.push_back(Data->StringPieces.size());
+  for (const auto &Piece : Data->StringPieces)
+    Record.AddString(Piece);
+  Record.push_back(Data->Interpolations.size());
+  for (const auto &Interp : Data->Interpolations) {
+    Record.AddString(Interp.ExpressionText);
+    Record.AddString(Interp.FormatSpecifier);
+    Record.push_back(Interp.ExpressionIndex);
+    Record.push_back(Interp.ExpressionCount);
+  }
+  Record.AddString(Data->FormatString);
+
+  for (Expr *Init : E->getExprs())
+    Record.AddStmt(Init);
+
+  Code = serialization::EXPR_TEMPLATE_STRING_LITERAL;
 }
 
 void ASTStmtWriter::VisitCXXStdInitializerListExpr(CXXStdInitializerListExpr *E) {

@@ -2177,6 +2177,119 @@ public:
   const_child_range children() const;
 };
 
+/// Stores processed data for a template string literal that can persist in the
+/// AST (unlike TemplateStringAnnotation which contains raw Tokens).
+struct TemplateStringLiteralData {
+  /// The processed string pieces (already parsed from tokens).
+  /// For t"Hello {x} world", this would be ["Hello ", " world"].
+  llvm::SmallVector<std::string, 4> StringPieces;
+
+  /// For each interpolation, stores the expression text and format specifier.
+  struct InterpolationData {
+    std::string ExpressionText;
+    std::string FormatSpecifier;
+    size_t ExpressionIndex;
+    size_t ExpressionCount;
+  };
+  llvm::SmallVector<InterpolationData, 4> Interpolations;
+
+  /// The combined format string (for fmt() method).
+  std::string FormatString;
+};
+
+/// A C++ template string literal expression, which produces an instance of
+/// an anonymous struct containing the interpolated expressions.
+///
+/// Example:
+/// \code
+/// int x = 42;
+/// auto ts = t"The value is {x}";
+/// // ts has type like: struct { int _0; static consteval ... };
+/// \endcode
+class TemplateStringLiteralExpr final
+    : public Expr,
+      private llvm::TrailingObjects<TemplateStringLiteralExpr, Expr *> {
+  friend class ASTStmtReader;
+  friend class ASTStmtWriter;
+  friend TrailingObjects;
+
+  /// The anonymous struct type for this template string.
+  CXXRecordDecl *StringStruct;
+
+  /// The processed annotation data.
+  TemplateStringLiteralData *Data;
+
+  /// Number of field initializer expressions.
+  unsigned NumExprs;
+
+  /// Source location of the template string literal.
+  SourceLocation Loc;
+
+  TemplateStringLiteralExpr(QualType T, CXXRecordDecl *StringStruct,
+                            TemplateStringLiteralData *Data,
+                            ArrayRef<Expr *> Exprs, SourceLocation Loc);
+
+  TemplateStringLiteralExpr(EmptyShell Empty, unsigned NumExprs);
+
+  size_t numTrailingObjects(OverloadToken<Expr *>) const { return NumExprs; }
+
+public:
+  static TemplateStringLiteralExpr *
+  Create(const ASTContext &C, CXXRecordDecl *StringStruct,
+         TemplateStringLiteralData *Data, ArrayRef<Expr *> Exprs,
+         SourceLocation Loc);
+
+  static TemplateStringLiteralExpr *CreateEmpty(const ASTContext &C,
+                                                unsigned NumExprs);
+
+  /// Retrieve the anonymous struct type for this template string.
+  CXXRecordDecl *getStringStruct() const { return StringStruct; }
+
+  /// Retrieve the processed annotation data.
+  TemplateStringLiteralData *getData() const { return Data; }
+
+  /// Get the number of field initializer expressions.
+  unsigned getNumExprs() const { return NumExprs; }
+
+  /// Get the field initializer expressions.
+  ArrayRef<Expr *> getExprs() const {
+    return {getTrailingObjects(), NumExprs};
+  }
+
+  /// Get a mutable view of the field initializer expressions.
+  MutableArrayRef<Expr *> getExprs() {
+    return {getTrailingObjects(), NumExprs};
+  }
+
+  Expr *getExpr(unsigned I) {
+    assert(I < NumExprs && "Index out of bounds");
+    return getTrailingObjects()[I];
+  }
+
+  const Expr *getExpr(unsigned I) const {
+    assert(I < NumExprs && "Index out of bounds");
+    return getTrailingObjects()[I];
+  }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return Loc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return Loc; }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == TemplateStringLiteralExprClass;
+  }
+
+  child_range children() {
+    return child_range(reinterpret_cast<Stmt **>(getTrailingObjects()),
+                       reinterpret_cast<Stmt **>(getTrailingObjects() +
+                                                 NumExprs));
+  }
+
+  const_child_range children() const {
+    auto Children = const_cast<TemplateStringLiteralExpr *>(this)->children();
+    return const_child_range(Children.begin(), Children.end());
+  }
+};
+
 /// An expression "T()" which creates an rvalue of a non-class type T.
 /// For non-void T, the rvalue is value-initialized.
 /// See (C++98 [5.2.3p2]).

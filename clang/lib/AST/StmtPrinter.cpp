@@ -2444,6 +2444,26 @@ void StmtPrinter::VisitLambdaExpr(LambdaExpr *Node) {
     PrintRawCompoundStmt(Node->getCompoundStmtBody());
 }
 
+void StmtPrinter::VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E) {
+  OS << "t\"";
+  TemplateStringLiteralData *Data = E->getData();
+  ArrayRef<Expr *> Exprs = E->getExprs();
+  
+  size_t ExprIdx = 0;
+  for (size_t i = 0; i < Data->StringPieces.size(); ++i) {
+    OS << Data->StringPieces[i];
+    if (i < Data->Interpolations.size()) {
+      OS << "${";
+      if (ExprIdx < Exprs.size())
+        PrintExpr(Exprs[ExprIdx++]);
+      if (!Data->Interpolations[i].FormatSpecifier.empty())
+        OS << ":" << Data->Interpolations[i].FormatSpecifier;
+      OS << "}";
+    }
+  }
+  OS << "\"";
+}
+
 void StmtPrinter::VisitCXXScalarValueInitExpr(CXXScalarValueInitExpr *Node) {
   if (TypeSourceInfo *TSInfo = Node->getTypeSourceInfo())
     TSInfo->getType().print(OS, Policy);

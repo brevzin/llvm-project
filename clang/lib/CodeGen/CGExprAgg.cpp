@@ -24,6 +24,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/StmtVisitor.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
@@ -202,6 +203,7 @@ public:
   void VisitCXXConstructExpr(const CXXConstructExpr *E);
   void VisitCXXInheritedCtorInitExpr(const CXXInheritedCtorInitExpr *E);
   void VisitLambdaExpr(LambdaExpr *E);
+  void VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E);
   void VisitCXXStdInitializerListExpr(CXXStdInitializerListExpr *E);
   void VisitExprWithCleanups(ExprWithCleanups *E);
   void VisitCXXScalarValueInitExpr(CXXScalarValueInitExpr *E);
@@ -1533,6 +1535,35 @@ AggExprEmitter::VisitLambdaExpr(LambdaExpr *E) {
       if (DtorKind)
         CGF.pushDestroyAndDeferDeactivation(NormalAndEHCleanup, LV.getAddress(),
                                             CurField->getType(),
+                                            CGF.getDestroyer(DtorKind), false);
+    }
+  }
+}
+
+void AggExprEmitter::VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E) {
+  AggValueSlot Slot = EnsureSlot(E->getType());
+  LValue SlotLV = CGF.MakeAddrLValue(Slot.getAddress(), E->getType());
+
+  CodeGenFunction::CleanupDeactivationScope scope(CGF);
+
+  CXXRecordDecl *Record = E->getStringStruct();
+  ArrayRef<Expr *> Exprs = E->getExprs();
+  unsigned ExprIdx = 0;
+
+  for (FieldDecl *Field : Record->fields()) {
+    if (ExprIdx >= Exprs.size())
+      break;
+
+    LValue LV = CGF.EmitLValueForFieldInitialization(SlotLV, Field);
+    EmitInitializationToLValue(Exprs[ExprIdx], LV);
+    ++ExprIdx;
+
+    if (QualType::DestructionKind DtorKind =
+            Field->getType().isDestructedType()) {
+      assert(LV.isSimple());
+      if (DtorKind)
+        CGF.pushDestroyAndDeferDeactivation(NormalAndEHCleanup, LV.getAddress(),
+                                            Field->getType(),
                                             CGF.getDestroyer(DtorKind), false);
     }
   }

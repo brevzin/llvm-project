@@ -1427,6 +1427,41 @@ LambdaExpr::const_child_range LambdaExpr::children() const {
                            getStoredStmts() + capture_size() + 1);
 }
 
+TemplateStringLiteralExpr::TemplateStringLiteralExpr(
+    QualType T, CXXRecordDecl *StringStruct, TemplateStringLiteralData *Data,
+    ArrayRef<Expr *> Exprs, SourceLocation Loc)
+    : Expr(TemplateStringLiteralExprClass, T, VK_PRValue, OK_Ordinary),
+      StringStruct(StringStruct), Data(Data), NumExprs(Exprs.size()), Loc(Loc) {
+  Expr **Stored = getTrailingObjects();
+  for (unsigned I = 0, N = Exprs.size(); I != N; ++I)
+    Stored[I] = Exprs[I];
+
+  setDependence(computeDependence(this));
+}
+
+TemplateStringLiteralExpr::TemplateStringLiteralExpr(EmptyShell Empty,
+                                                     unsigned NumExprs)
+    : Expr(TemplateStringLiteralExprClass, Empty), StringStruct(nullptr),
+      Data(nullptr), NumExprs(NumExprs) {}
+
+TemplateStringLiteralExpr *TemplateStringLiteralExpr::Create(
+    const ASTContext &C, CXXRecordDecl *StringStruct,
+    TemplateStringLiteralData *Data, ArrayRef<Expr *> Exprs,
+    SourceLocation Loc) {
+  QualType T = C.getTypeDeclType(StringStruct);
+  unsigned Size = totalSizeToAlloc<Expr *>(Exprs.size());
+  void *Mem = C.Allocate(Size);
+  return new (Mem)
+      TemplateStringLiteralExpr(T, StringStruct, Data, Exprs, Loc);
+}
+
+TemplateStringLiteralExpr *
+TemplateStringLiteralExpr::CreateEmpty(const ASTContext &C, unsigned NumExprs) {
+  unsigned Size = totalSizeToAlloc<Expr *>(NumExprs);
+  void *Mem = C.Allocate(Size);
+  return new (Mem) TemplateStringLiteralExpr(EmptyShell(), NumExprs);
+}
+
 ExprWithCleanups::ExprWithCleanups(Expr *subexpr,
                                    bool CleanupsHaveSideEffects,
                                    ArrayRef<CleanupObject> objects)

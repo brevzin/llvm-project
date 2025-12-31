@@ -25,6 +25,7 @@
 
 namespace clang {
 class QualType;
+class TemplateStringLiteralExpr;
 
 namespace interp {
 
@@ -180,6 +181,7 @@ public:
   bool VisitTypeTraitExpr(const TypeTraitExpr *E);
   bool VisitArrayTypeTraitExpr(const ArrayTypeTraitExpr *E);
   bool VisitLambdaExpr(const LambdaExpr *E);
+  bool VisitTemplateStringLiteralExpr(const TemplateStringLiteralExpr *E);
   bool VisitPredefinedExpr(const PredefinedExpr *E);
   bool VisitCXXThrowExpr(const CXXThrowExpr *E);
   bool VisitCXXReinterpretCastExpr(const CXXReinterpretCastExpr *E);

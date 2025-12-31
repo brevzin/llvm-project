@@ -465,6 +465,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::CXXInheritedCtorInitExprClass:
   case Expr::CXXTemporaryObjectExprClass:
   case Expr::LambdaExprClass:
+  case Expr::TemplateStringLiteralExprClass:
   case Expr::CXXStdInitializerListExprClass:
     return Cl::CL_ClassTemporary;
 

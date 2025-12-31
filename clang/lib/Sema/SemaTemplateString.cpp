@@ -87,176 +87,152 @@ static CXXRecordDecl* CreateInterpolationsStruct(Sema &S)
 }
 
 static CXXMethodDecl *CreateFmtFunction(Sema &S,
-                                        const TemplateStringAnnotation& Annotation,
-                                        CXXRecordDecl* StructDecl)
-{
+                                        TemplateStringLiteralData *Data,
+                                        CXXRecordDecl *StructDecl,
+                                        SourceLocation Loc) {
   ASTContext &Context = S.Context;
-  SourceLocation Loc = StructDecl->getLocation();
+  QualType CharConstPtrType =
+      Context.getPointerType(Context.getConstType(Context.CharTy));
 
-  QualType CharConstPtrType = Context.getPointerType(Context.getConstType(Context.CharTy));
-
-  StringLiteralParser Literal(Annotation.FormatString, S.getPreprocessor());
-  StringRef FormatStr = Literal.GetString();
+  StringRef FormatStr = Data->FormatString;
 
   QualType FmtStrTy = Context.getConstantArrayType(
-      Context.CharTy.withConst(),
-      llvm::APInt(32, FormatStr.size() + 1),
+      Context.CharTy.withConst(), llvm::APInt(32, FormatStr.size() + 1),
       nullptr, ArraySizeModifier::Normal, 0);
 
   StringLiteral *FmtLit = StringLiteral::Create(
       Context, FormatStr, StringLiteralKind::Ordinary, false, FmtStrTy, {Loc});
 
   ImplicitCastExpr *FmtPtr = ImplicitCastExpr::Create(
-      Context, CharConstPtrType, CK_ArrayToPointerDecay, FmtLit,
-      nullptr, VK_PRValue, FPOptionsOverride());
+      Context, CharConstPtrType, CK_ArrayToPointerDecay, FmtLit, nullptr,
+      VK_PRValue, FPOptionsOverride());
 
-  QualType FuncType = Context.getFunctionType(
-      CharConstPtrType, {}, FunctionProtoType::ExtProtoInfo());
+  QualType FuncType = Context.getFunctionType(CharConstPtrType, {},
+                                              FunctionProtoType::ExtProtoInfo());
 
   CXXMethodDecl *FmtFunc = CXXMethodDecl::Create(
       Context, StructDecl, Loc,
-      DeclarationNameInfo(Context.DeclarationNames.getIdentifier(
-          &Context.Idents.get("fmt")), Loc),
-      FuncType,
-      Context.getTrivialTypeSourceInfo(FuncType, Loc),
-      SC_Static,
+      DeclarationNameInfo(
+          Context.DeclarationNames.getIdentifier(&Context.Idents.get("fmt")),
+          Loc),
+      FuncType, Context.getTrivialTypeSourceInfo(FuncType, Loc), SC_Static,
       /*UsesFPIntrin=*/false,
-      /*isInline=*/true,
-      ConstexprSpecKind::Consteval,
-      Loc);
+      /*isInline=*/true, ConstexprSpecKind::Consteval, Loc);
 
   FmtFunc->setImplicit(true);
   FmtFunc->setAccess(AS_public);
 
   ReturnStmt *Return = ReturnStmt::Create(Context, Loc, FmtPtr, nullptr);
-  FmtFunc->setBody(CompoundStmt::Create(Context, {Return}, FPOptionsOverride(), Loc, Loc));
+  FmtFunc->setBody(
+      CompoundStmt::Create(Context, {Return}, FPOptionsOverride(), Loc, Loc));
 
   return FmtFunc;
 }
 
 static CXXMethodDecl *CreateStringFunction(Sema &S,
-                                           const TemplateStringAnnotation& Annotation,
-                                           CXXRecordDecl* StructDecl)
-{
+                                           TemplateStringLiteralData *Data,
+                                           CXXRecordDecl *StructDecl,
+                                           SourceLocation Loc) {
   ASTContext &Context = S.Context;
-  SourceLocation Loc = StructDecl->getLocation();
-  QualType CharConstPtrType = Context.getPointerType(Context.getConstType(Context.CharTy));
+  QualType CharConstPtrType =
+      Context.getPointerType(Context.getConstType(Context.CharTy));
   QualType SizeTType = Context.getSizeType();
 
-  size_t NumStrings = (Annotation.FormatString.size() + 1) / 2;
+  size_t NumStrings = Data->StringPieces.size();
 
-  auto CreateIntegerLit = [&](size_t I){
+  auto CreateIntegerLit = [&](size_t I) {
     return IntegerLiteral::Create(
-        Context, llvm::APInt(Context.getTypeSize(SizeTType), I),
-        SizeTType, Loc);
+        Context, llvm::APInt(Context.getTypeSize(SizeTType), I), SizeTType,
+        Loc);
   };
 
-  QualType FuncType = Context.getFunctionType(
-      CharConstPtrType, {SizeTType}, FunctionProtoType::ExtProtoInfo());
+  QualType FuncType = Context.getFunctionType(CharConstPtrType, {SizeTType},
+                                              FunctionProtoType::ExtProtoInfo());
 
   CXXMethodDecl *StringFunc = CXXMethodDecl::Create(
       Context, StructDecl, Loc,
-      DeclarationNameInfo(Context.DeclarationNames.getIdentifier(
-          &Context.Idents.get("string")), Loc),
-      FuncType,
-      Context.getTrivialTypeSourceInfo(FuncType, Loc),
-      SC_Static,
+      DeclarationNameInfo(
+          Context.DeclarationNames.getIdentifier(&Context.Idents.get("string")),
+          Loc),
+      FuncType, Context.getTrivialTypeSourceInfo(FuncType, Loc), SC_Static,
       /*UsesFPIntrin=*/false,
-      /*isInline=*/true,
-      ConstexprSpecKind::Consteval,
-      Loc);
+      /*isInline=*/true, ConstexprSpecKind::Consteval, Loc);
 
   StringFunc->setImplicit(true);
   StringFunc->setAccess(AS_public);
 
   ParmVarDecl *NParam = ParmVarDecl::Create(
-      Context, StringFunc, Loc, Loc,
-      &Context.Idents.get("n"),
-      SizeTType,
-      Context.getTrivialTypeSourceInfo(SizeTType, Loc),
-      SC_None, nullptr);
+      Context, StringFunc, Loc, Loc, &Context.Idents.get("n"), SizeTType,
+      Context.getTrivialTypeSourceInfo(SizeTType, Loc), SC_None, nullptr);
   NParam->setScopeInfo(0, 0);
   StringFunc->setParams({NParam});
 
   DeclRefExpr *NRef = DeclRefExpr::Create(
       Context, NestedNameSpecifierLoc(), Loc, NParam, false,
-      DeclarationNameInfo(NParam->getDeclName(), Loc),
-      SizeTType, VK_LValue);
+      DeclarationNameInfo(NParam->getDeclName(), Loc), SizeTType, VK_LValue);
 
   ImplicitCastExpr *NValue = ImplicitCastExpr::Create(
-      Context, SizeTType, CK_LValueToRValue, NRef,
-      nullptr, VK_PRValue, FPOptionsOverride());
+      Context, SizeTType, CK_LValueToRValue, NRef, nullptr, VK_PRValue,
+      FPOptionsOverride());
 
-  SmallVector<Stmt*, 8> BodyStmts;
+  SmallVector<Stmt *, 8> BodyStmts;
   for (size_t I = 0; I < NumStrings; ++I) {
-    StringLiteralParser StrLiteral(Annotation.FormatString[I * 2], S.getPreprocessor());
-    StringRef StrPiece = StrLiteral.GetString();
+    StringRef StrPiece = Data->StringPieces[I];
 
     QualType StrTy = Context.getConstantArrayType(
-        Context.CharTy.withConst(),
-        llvm::APInt(32, StrPiece.size() + 1),
+        Context.CharTy.withConst(), llvm::APInt(32, StrPiece.size() + 1),
         nullptr, ArraySizeModifier::Normal, 0);
 
     StringLiteral *StrLit = StringLiteral::Create(
         Context, StrPiece, StringLiteralKind::Ordinary, false, StrTy, {Loc});
 
     ImplicitCastExpr *StrToPtr = ImplicitCastExpr::Create(
-        Context, CharConstPtrType, CK_ArrayToPointerDecay, StrLit,
-        nullptr, VK_PRValue, FPOptionsOverride());
+        Context, CharConstPtrType, CK_ArrayToPointerDecay, StrLit, nullptr,
+        VK_PRValue, FPOptionsOverride());
 
     ReturnStmt *Return = ReturnStmt::Create(Context, Loc, StrToPtr, nullptr);
 
     IntegerLiteral *ILit = CreateIntegerLit(I);
     BinaryOperator *Cond = BinaryOperator::Create(
-        Context, NValue, ILit, BO_EQ, Context.BoolTy, VK_PRValue, OK_Ordinary, Loc, FPOptionsOverride());
+        Context, NValue, ILit, BO_EQ, Context.BoolTy, VK_PRValue, OK_Ordinary,
+        Loc, FPOptionsOverride());
 
-    IfStmt *If = IfStmt::Create(Context, Loc, IfStatementKind::Ordinary,
-                                nullptr, nullptr, Cond, Loc, Loc, Return, Loc, nullptr);
+    IfStmt *If =
+        IfStmt::Create(Context, Loc, IfStatementKind::Ordinary, nullptr,
+                       nullptr, Cond, Loc, Loc, Return, Loc, nullptr);
     BodyStmts.push_back(If);
   }
 
-  CXXNullPtrLiteralExpr *NullExpr = new (Context) CXXNullPtrLiteralExpr(CharConstPtrType, Loc);
-  ReturnStmt *DefaultReturn = ReturnStmt::Create(Context, Loc, NullExpr, nullptr);
+  CXXNullPtrLiteralExpr *NullExpr =
+      new (Context) CXXNullPtrLiteralExpr(CharConstPtrType, Loc);
+  ReturnStmt *DefaultReturn =
+      ReturnStmt::Create(Context, Loc, NullExpr, nullptr);
   BodyStmts.push_back(DefaultReturn);
 
-  StringFunc->setBody(CompoundStmt::Create(Context, BodyStmts, FPOptionsOverride(), Loc, Loc));
+  StringFunc->setBody(
+      CompoundStmt::Create(Context, BodyStmts, FPOptionsOverride(), Loc, Loc));
 
   return StringFunc;
 }
 
-static CXXMethodDecl *CreateInterpolationFunction(Sema &S,
-                                                  const TemplateStringAnnotation &Annotation,
-                                                  CXXRecordDecl* StructDecl)
-{
+static CXXMethodDecl *
+CreateInterpolationFunction(Sema &S, TemplateStringLiteralData *Data,
+                            CXXRecordDecl *StructDecl,
+                            SourceLocation Loc) {
   ASTContext &Context = S.Context;
-  SourceLocation Loc = StructDecl->getLocation();
-  QualType CharConstPtrType = Context.getPointerType(Context.getConstType(Context.CharTy));
+  QualType CharConstPtrType =
+      Context.getPointerType(Context.getConstType(Context.CharTy));
   QualType SizeTType = Context.getSizeType();
 
-  size_t NumInterpolations = Annotation.Interpolations.size();
+  size_t NumInterpolations = Data->Interpolations.size();
 
-  QualType InterpolationType = Context.getRecordType(CreateInterpolationsStruct(S));
+  QualType InterpolationType =
+      Context.getRecordType(CreateInterpolationsStruct(S));
 
-  auto CreateIntegerLit = [&](size_t I){
+  auto CreateIntegerLit = [&](size_t I) {
     return IntegerLiteral::Create(
-        Context, llvm::APInt(Context.getTypeSize(SizeTType), I),
-        SizeTType, Loc);
-  };
-
-  auto tokens_to_string = [&](ArrayRef<Token> toks) -> std::string {
-    auto const& SM = S.getSourceManager();
-
-    auto const B = SM.getSpellingLoc(toks.front().getLocation());
-    auto const EndTok = toks.back().getLocation();
-    auto const End = Lexer::getLocForEndOfToken(EndTok, 0, SM, S.getLangOpts());
-
-    auto const text = Lexer::getSourceText(CharSourceRange::getCharRange(B, End), SM, S.getLangOpts());
-
-    std::string out;
-    llvm::raw_string_ostream os(out);
-    os.write_escaped(text, /*UseHexEscapes=*/true);
-    os.flush();
-    return out;
+        Context, llvm::APInt(Context.getTypeSize(SizeTType), I), SizeTType,
+        Loc);
   };
 
   QualType FuncType = Context.getFunctionType(
@@ -265,165 +241,206 @@ static CXXMethodDecl *CreateInterpolationFunction(Sema &S,
   CXXMethodDecl *InterpolationFunc = CXXMethodDecl::Create(
       Context, StructDecl, Loc,
       DeclarationNameInfo(Context.DeclarationNames.getIdentifier(
-          &Context.Idents.get("interpolation")), Loc),
-      FuncType,
-      Context.getTrivialTypeSourceInfo(FuncType, Loc),
-      SC_Static,
+                              &Context.Idents.get("interpolation")),
+                          Loc),
+      FuncType, Context.getTrivialTypeSourceInfo(FuncType, Loc), SC_Static,
       /*UsesFPIntrin=*/false,
-      /*isInline=*/true,
-      ConstexprSpecKind::Consteval,
-      Loc);
+      /*isInline=*/true, ConstexprSpecKind::Consteval, Loc);
 
   InterpolationFunc->setImplicit(true);
   InterpolationFunc->setAccess(AS_public);
 
   ParmVarDecl *NParam = ParmVarDecl::Create(
-      Context, InterpolationFunc, Loc, Loc,
-      &Context.Idents.get("n"),
-      SizeTType,
-      Context.getTrivialTypeSourceInfo(SizeTType, Loc),
-      SC_None, nullptr);
+      Context, InterpolationFunc, Loc, Loc, &Context.Idents.get("n"), SizeTType,
+      Context.getTrivialTypeSourceInfo(SizeTType, Loc), SC_None, nullptr);
   NParam->setScopeInfo(0, 0);
   InterpolationFunc->setParams({NParam});
 
   DeclRefExpr *NRef = DeclRefExpr::Create(
       Context, NestedNameSpecifierLoc(), Loc, NParam, false,
-      DeclarationNameInfo(NParam->getDeclName(), Loc),
-      SizeTType, VK_LValue);
+      DeclarationNameInfo(NParam->getDeclName(), Loc), SizeTType, VK_LValue);
 
   ImplicitCastExpr *NValue = ImplicitCastExpr::Create(
-      Context, SizeTType, CK_LValueToRValue, NRef,
-      nullptr, VK_PRValue, FPOptionsOverride());
+      Context, SizeTType, CK_LValueToRValue, NRef, nullptr, VK_PRValue,
+      FPOptionsOverride());
 
-  SmallVector<Stmt*, 8> BodyStmts;
+  SmallVector<Stmt *, 8> BodyStmts;
   for (size_t I = 0; I < NumInterpolations; ++I) {
-    size_t CurIndex = Annotation.Interpolations[I];
-    size_t NextIndex = (I + 1 < Annotation.Interpolations.size())
-        ? Annotation.Interpolations[I + 1]
-        : Annotation.ExpressionTokens.size();
-
-    std::string ExprText = tokens_to_string(Annotation.ExpressionTokens[CurIndex]);
+    const auto &Interp = Data->Interpolations[I];
 
     QualType ExprStrTy = Context.getConstantArrayType(
         Context.CharTy.withConst(),
-        llvm::APInt(32, ExprText.size() + 1),
-        nullptr, ArraySizeModifier::Normal, 0);
+        llvm::APInt(32, Interp.ExpressionText.size() + 1), nullptr,
+        ArraySizeModifier::Normal, 0);
 
-    StringLiteral *ExprStrLit = StringLiteral::Create(
-        Context, ExprText, StringLiteralKind::Ordinary, false, ExprStrTy, {Loc});
+    StringLiteral *ExprStrLit =
+        StringLiteral::Create(Context, Interp.ExpressionText,
+                              StringLiteralKind::Ordinary, false, ExprStrTy, {Loc});
 
     ImplicitCastExpr *ExprToPtr = ImplicitCastExpr::Create(
-        Context, CharConstPtrType, CK_ArrayToPointerDecay, ExprStrLit,
-        nullptr, VK_PRValue, FPOptionsOverride());
-
-    StringLiteralParser FmtLiteral(Annotation.FormatString[I * 2 + 1], S.getPreprocessor());
-    StringRef FmtText = FmtLiteral.GetString();
+        Context, CharConstPtrType, CK_ArrayToPointerDecay, ExprStrLit, nullptr,
+        VK_PRValue, FPOptionsOverride());
 
     QualType FmtStrTy = Context.getConstantArrayType(
         Context.CharTy.withConst(),
-        llvm::APInt(32, FmtText.size() + 1),
-        nullptr, ArraySizeModifier::Normal, 0);
+        llvm::APInt(32, Interp.FormatSpecifier.size() + 1), nullptr,
+        ArraySizeModifier::Normal, 0);
 
-    StringLiteral *FmtStrLit = StringLiteral::Create(
-        Context, FmtText, StringLiteralKind::Ordinary, false, FmtStrTy, {Loc});
+    StringLiteral *FmtStrLit =
+        StringLiteral::Create(Context, Interp.FormatSpecifier,
+                              StringLiteralKind::Ordinary, false, FmtStrTy, {Loc});
 
     ImplicitCastExpr *FmtToPtr = ImplicitCastExpr::Create(
-        Context, CharConstPtrType, CK_ArrayToPointerDecay, FmtStrLit,
-        nullptr, VK_PRValue, FPOptionsOverride());
+        Context, CharConstPtrType, CK_ArrayToPointerDecay, FmtStrLit, nullptr,
+        VK_PRValue, FPOptionsOverride());
 
-    IntegerLiteral *IndexLit = CreateIntegerLit(CurIndex);
-    IntegerLiteral *CountLit = CreateIntegerLit(NextIndex - CurIndex);
+    IntegerLiteral *IndexLit = CreateIntegerLit(Interp.ExpressionIndex);
+    IntegerLiteral *CountLit = CreateIntegerLit(Interp.ExpressionCount);
 
-    Expr* FieldInits[] = {ExprToPtr, FmtToPtr, IndexLit, CountLit};
+    Expr *FieldInits[] = {ExprToPtr, FmtToPtr, IndexLit, CountLit};
 
-    InitListExpr *InterpolationInit = new (Context) InitListExpr(
-        Context, Loc, FieldInits, Loc);
+    InitListExpr *InterpolationInit =
+        new (Context) InitListExpr(Context, Loc, FieldInits, Loc);
     InterpolationInit->setType(InterpolationType);
 
-    ReturnStmt *Return = ReturnStmt::Create(Context, Loc, InterpolationInit, nullptr);
+    ReturnStmt *Return =
+        ReturnStmt::Create(Context, Loc, InterpolationInit, nullptr);
 
     IntegerLiteral *ILit = CreateIntegerLit(I);
     BinaryOperator *Cond = BinaryOperator::Create(
-        Context, NValue, ILit, BO_EQ, Context.BoolTy, VK_PRValue, OK_Ordinary, Loc, FPOptionsOverride());
+        Context, NValue, ILit, BO_EQ, Context.BoolTy, VK_PRValue, OK_Ordinary,
+        Loc, FPOptionsOverride());
 
-    IfStmt *If = IfStmt::Create(Context, Loc, IfStatementKind::Ordinary,
-                                nullptr, nullptr, Cond, Loc, Loc, Return, Loc, nullptr);
+    IfStmt *If =
+        IfStmt::Create(Context, Loc, IfStatementKind::Ordinary, nullptr,
+                       nullptr, Cond, Loc, Loc, Return, Loc, nullptr);
     BodyStmts.push_back(If);
   }
 
-  CXXNullPtrLiteralExpr *NullExpr1 = new (Context) CXXNullPtrLiteralExpr(CharConstPtrType, Loc);
-  CXXNullPtrLiteralExpr *NullExpr2 = new (Context) CXXNullPtrLiteralExpr(CharConstPtrType, Loc);
-  Expr* EmptyInits[] = {NullExpr1, NullExpr2, CreateIntegerLit(0), CreateIntegerLit(0)};
-  InitListExpr *EmptyInit = new (Context) InitListExpr(Context, Loc, EmptyInits, Loc);
+  CXXNullPtrLiteralExpr *NullExpr1 =
+      new (Context) CXXNullPtrLiteralExpr(CharConstPtrType, Loc);
+  CXXNullPtrLiteralExpr *NullExpr2 =
+      new (Context) CXXNullPtrLiteralExpr(CharConstPtrType, Loc);
+  Expr *EmptyInits[] = {NullExpr1, NullExpr2, CreateIntegerLit(0),
+                        CreateIntegerLit(0)};
+  InitListExpr *EmptyInit =
+      new (Context) InitListExpr(Context, Loc, EmptyInits, Loc);
   EmptyInit->setType(InterpolationType);
-  ReturnStmt *DefaultReturn = ReturnStmt::Create(Context, Loc, EmptyInit, nullptr);
+  ReturnStmt *DefaultReturn =
+      ReturnStmt::Create(Context, Loc, EmptyInit, nullptr);
   BodyStmts.push_back(DefaultReturn);
 
-  InterpolationFunc->setBody(CompoundStmt::Create(Context, BodyStmts, FPOptionsOverride(), Loc, Loc));
+  InterpolationFunc->setBody(
+      CompoundStmt::Create(Context, BodyStmts, FPOptionsOverride(), Loc, Loc));
 
   return InterpolationFunc;
 }
 
-static CXXMethodDecl *CreateNumInterpolationsFunction(Sema &S,
-                                                      const TemplateStringAnnotation &Annotation,
-                                                      CXXRecordDecl* StructDecl)
-{
+static CXXMethodDecl *
+CreateNumInterpolationsFunction(Sema &S, TemplateStringLiteralData *Data,
+                                CXXRecordDecl *StructDecl,
+                                SourceLocation Loc) {
   ASTContext &Context = S.Context;
-  SourceLocation Loc = StructDecl->getLocation();
   QualType SizeTType = Context.getSizeType();
 
-  size_t NumInterpolations = Annotation.Interpolations.size();
+  size_t NumInterpolations = Data->Interpolations.size();
 
   IntegerLiteral *NumLit = IntegerLiteral::Create(
       Context, llvm::APInt(Context.getTypeSize(SizeTType), NumInterpolations),
       SizeTType, Loc);
 
-  QualType FuncType = Context.getFunctionType(
-      SizeTType, {}, FunctionProtoType::ExtProtoInfo());
+  QualType FuncType = Context.getFunctionType(SizeTType, {},
+                                              FunctionProtoType::ExtProtoInfo());
 
   CXXMethodDecl *NumFunc = CXXMethodDecl::Create(
       Context, StructDecl, Loc,
       DeclarationNameInfo(Context.DeclarationNames.getIdentifier(
-          &Context.Idents.get("num_interpolations")), Loc),
-      FuncType,
-      Context.getTrivialTypeSourceInfo(FuncType, Loc),
-      SC_Static,
+                              &Context.Idents.get("num_interpolations")),
+                          Loc),
+      FuncType, Context.getTrivialTypeSourceInfo(FuncType, Loc), SC_Static,
       /*UsesFPIntrin=*/false,
-      /*isInline=*/true,
-      ConstexprSpecKind::Consteval,
-      Loc);
+      /*isInline=*/true, ConstexprSpecKind::Consteval, Loc);
 
   NumFunc->setImplicit(true);
   NumFunc->setAccess(AS_public);
 
   ReturnStmt *Return = ReturnStmt::Create(Context, Loc, NumLit, nullptr);
-  NumFunc->setBody(CompoundStmt::Create(Context, {Return}, FPOptionsOverride(), Loc, Loc));
+  NumFunc->setBody(
+      CompoundStmt::Create(Context, {Return}, FPOptionsOverride(), Loc, Loc));
 
   return NumFunc;
 }
 
-ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
-                                            const TemplateStringAnnotation& Annotation,
-                                            ArrayRef<ExprResult> Exprs) {
-  for (auto const& E : Exprs) {
-    if (E.isInvalid())
-      return ExprError();
+static TemplateStringLiteralData *
+CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
+  ASTContext &Context = S.Context;
+  auto MakeStringLiteral = [&](ArrayRef<Token> StringToks){
+    StringLiteralParser SLP(StringToks, S.getPreprocessor());
+    return std::string(SLP.GetString());
+  };
+
+  auto *Data = new (Context) TemplateStringLiteralData();
+
+  size_t NumStrings = (Annotation.FormatString.size() + 1) / 2;
+  for (size_t I = 0; I < NumStrings; ++I) {
+    Data->StringPieces.push_back(MakeStringLiteral(Annotation.FormatString[I * 2]));
   }
 
+  Data->FormatString = MakeStringLiteral(Annotation.FormatString);
+
+  auto tokens_to_string = [&](ArrayRef<Token> toks) -> std::string {
+    auto const &SM = S.getSourceManager();
+    auto const B = SM.getSpellingLoc(toks.front().getLocation());
+    auto const EndTok = toks.back().getLocation();
+    auto const End =
+        Lexer::getLocForEndOfToken(EndTok, 0, SM, S.getLangOpts());
+    auto const text =
+        Lexer::getSourceText(CharSourceRange::getCharRange(B, End), SM,
+                             S.getLangOpts());
+    std::string out;
+    llvm::raw_string_ostream os(out);
+    os.write_escaped(text, /*UseHexEscapes=*/true);
+    return out;
+  };
+
+  size_t NumInterpolations = Annotation.Interpolations.size();
+  for (size_t I = 0; I < NumInterpolations; ++I) {
+    size_t CurIndex = Annotation.Interpolations[I];
+    size_t NextIndex = (I + 1 < NumInterpolations)
+                           ? Annotation.Interpolations[I + 1]
+                           : Annotation.ExpressionTokens.size();
+
+
+    TemplateStringLiteralData::InterpolationData Interp;
+    Interp.ExpressionText =
+        tokens_to_string(Annotation.ExpressionTokens[CurIndex]);
+    Interp.FormatSpecifier = MakeStringLiteral(Annotation.FormatString[I * 2 + 1]);
+    Interp.ExpressionIndex = CurIndex;
+    Interp.ExpressionCount = NextIndex - CurIndex;
+
+    Data->Interpolations.push_back(std::move(Interp));
+  }
+
+  return Data;
+}
+
+CXXRecordDecl *Sema::BuildTemplateStringStruct(
+    SourceLocation Loc, TemplateStringLiteralData *Data,
+    ArrayRef<Expr *> Exprs) {
   CXXRecordDecl *StructDecl = CXXRecordDecl::Create(
       Context, TagTypeKind::Struct, CurContext, Loc, Loc,
       /*Id=*/nullptr);
 
   StructDecl->startDefinition();
 
-  StructDecl->addDecl(CreateFmtFunction(*this, Annotation, StructDecl));
-  StructDecl->addDecl(CreateStringFunction(*this, Annotation, StructDecl));
-  StructDecl->addDecl(CreateInterpolationFunction(*this, Annotation, StructDecl));
-  StructDecl->addDecl(CreateNumInterpolationsFunction(*this, Annotation, StructDecl));
+  StructDecl->addDecl(CreateFmtFunction(*this, Data, StructDecl, Loc));
+  StructDecl->addDecl(CreateStringFunction(*this, Data, StructDecl, Loc));
+  StructDecl->addDecl(CreateInterpolationFunction(*this, Data, StructDecl, Loc));
+  StructDecl->addDecl(CreateNumInterpolationsFunction(*this, Data, StructDecl, Loc));
 
-  SmallVector<Decl*, 4> FieldDecls;
+  SmallVector<Decl *, 4> FieldDecls;
   for (size_t I = 0; I < Exprs.size(); ++I) {
-    Expr *E = Exprs[I].get();
+    Expr *E = Exprs[I];
 
     QualType FieldType;
     if (E->isTypeDependent() || E->isValueDependent() ||
@@ -439,13 +456,10 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
     FieldName += std::to_string(I);
 
     FieldDecl *Field = FieldDecl::Create(
-        Context, StructDecl, Loc, Loc,
-        &Context.Idents.get(FieldName),
-        FieldType,
-        Context.getTrivialTypeSourceInfo(FieldType, Loc),
+        Context, StructDecl, Loc, Loc, &Context.Idents.get(FieldName),
+        FieldType, Context.getTrivialTypeSourceInfo(FieldType, Loc),
         /*BitWidth=*/nullptr,
-        /*Mutable=*/false,
-        ICIS_NoInit);
+        /*Mutable=*/false, ICIS_NoInit);
 
     Field->setAccess(AS_public);
     StructDecl->addDecl(Field);
@@ -456,39 +470,26 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
               ParsedAttributesView{});
   CheckCompletedCXXClass(/*S=*/nullptr, StructDecl);
 
-  // Apparently not actually needed?
-  // CurContext->addDecl(StructDecl);
+  return StructDecl;
+}
 
-  QualType StructType = Context.getRecordType(StructDecl);
-  TypeSourceInfo *StructTSI = Context.getTrivialTypeSourceInfo(StructType, Loc);
-
-  SmallVector<Expr*, 4> InitExprs;
-  for (auto E : Exprs) {
-    InitExprs.push_back(E.get());
+ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
+                                            const TemplateStringAnnotation& Annotation,
+                                            ArrayRef<ExprResult> Exprs) {
+  for (auto const& E : Exprs) {
+    if (E.isInvalid())
+      return ExprError();
   }
 
-  InitListExpr *InitList = new (Context) InitListExpr(Context, Loc, InitExprs, Loc);
-  InitList->setType(StructType);
-
-  Expr *FunctionalCast = CXXFunctionalCastExpr::Create(
-      Context, StructType, VK_PRValue, StructTSI, CK_NoOp,
-      InitList, /*Path=*/nullptr, CurFPFeatureOverrides(), Loc, Loc);
-
-  DeclStmt *StructDeclStmt = new (Context) DeclStmt(DeclGroupRef(StructDecl), Loc, Loc);
-
-  Stmt *Stmts[] = {StructDeclStmt, FunctionalCast};
-  CompoundStmt *Compound = CompoundStmt::Create(Context, Stmts, FPOptionsOverride(), Loc, Loc);
-
-  unsigned TemplateDepth = 0;
-  for (DeclContext *DC = CurContext; DC; DC = DC->getParent()) {
-    if (auto *ESD = dyn_cast<ExpansionStmtDecl>(DC)) {
-      TemplateDepth = ESD->getTemplateDepth();
-      break;
-    }
-    if (DC->isFileContext())
-      break;
+  SmallVector<Expr *, 4> ExprPtrs;
+  for (auto &E : Exprs) {
+    ExprPtrs.push_back(E.get());
   }
 
-  Expr *Result = new (Context) StmtExpr(Compound, StructType, Loc, Loc, TemplateDepth);
+  TemplateStringLiteralData *Data = CreateTemplateStringData(*this, Annotation);
+  CXXRecordDecl *StructDecl = BuildTemplateStringStruct(Loc, Data, ExprPtrs);
+
+  Expr *Result = TemplateStringLiteralExpr::Create(Context, StructDecl, Data,
+                                                   ExprPtrs, Loc);
   return MaybeBindToTemporary(Result);
 }

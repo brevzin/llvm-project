@@ -871,6 +871,13 @@ ExprDependence clang::computeDependence(LambdaExpr *E,
   return D;
 }
 
+ExprDependence clang::computeDependence(TemplateStringLiteralExpr *E) {
+  auto D = toExprDependenceForImpliedType(E->getType()->getDependence());
+  for (Expr *Child : E->getExprs())
+    D |= Child->getDependence();
+  return D;
+}
+
 ExprDependence clang::computeDependence(CXXUnresolvedConstructExpr *E) {
   auto D = ExprDependence::ValueInstantiation;
   D |= toExprDependenceAsWritten(E->getTypeAsWritten()->getDependence());

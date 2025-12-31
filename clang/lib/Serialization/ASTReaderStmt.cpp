@@ -1954,6 +1954,36 @@ void ASTStmtReader::VisitLambdaExpr(LambdaExpr *E) {
   // declaration.
 }
 
+void ASTStmtReader::VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E) {
+  VisitExpr(E);
+  unsigned NumExprs = Record.readInt();
+  (void)NumExprs;
+  assert(NumExprs == E->NumExprs);
+  E->StringStruct = readDeclAs<CXXRecordDecl>();
+  E->Loc = readSourceLocation();
+
+  E->Data = new (Record.getContext()) TemplateStringLiteralData();
+  unsigned NumPieces = Record.readInt();
+  E->Data->StringPieces.reserve(NumPieces);
+  for (unsigned I = 0; I < NumPieces; ++I)
+    E->Data->StringPieces.push_back(Record.readString());
+  unsigned NumInterp = Record.readInt();
+  E->Data->Interpolations.reserve(NumInterp);
+  for (unsigned I = 0; I < NumInterp; ++I) {
+    TemplateStringLiteralData::InterpolationData Interp;
+    Interp.ExpressionText = Record.readString();
+    Interp.FormatSpecifier = Record.readString();
+    Interp.ExpressionIndex = Record.readInt();
+    Interp.ExpressionCount = Record.readInt();
+    E->Data->Interpolations.push_back(std::move(Interp));
+  }
+  E->Data->FormatString = Record.readString();
+
+  Expr **Exprs = E->getTrailingObjects();
+  for (unsigned I = 0; I < E->NumExprs; ++I)
+    Exprs[I] = Record.readSubExpr();
+}
+
 void
 ASTStmtReader::VisitCXXStdInitializerListExpr(CXXStdInitializerListExpr *E) {
   VisitExpr(E);
@@ -4541,6 +4571,12 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case EXPR_LAMBDA: {
       unsigned NumCaptures = Record[ASTStmtReader::NumExprFields];
       S = LambdaExpr::CreateDeserialized(Context, NumCaptures);
+      break;
+    }
+
+    case EXPR_TEMPLATE_STRING_LITERAL: {
+      unsigned NumExprs = Record[ASTStmtReader::NumExprFields];
+      S = TemplateStringLiteralExpr::CreateEmpty(Context, NumExprs);
       break;
     }
 
