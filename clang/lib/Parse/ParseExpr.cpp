@@ -3119,7 +3119,7 @@ ExprResult Parser::ParseTemplateStringLiteral() {
   Token SavedToken = Tok;
 
   // Parse each pre-tokenized expression
-  SmallVector<ExprResult, 4> Exprs;
+  SmallVector<Expr*, 4> Exprs;
   for (const auto &ExprTokens : Annotation->ExpressionTokens) {
     if (ExprTokens.empty()) {
       // Empty expression
@@ -3160,7 +3160,7 @@ ExprResult Parser::ParseTemplateStringLiteral() {
       return ExprError();
     }
 
-    Exprs.push_back(Expr);
+    Exprs.push_back(Expr.get());
 
     // the next token is now the EoF we injected, so revert it back to the saved one
     Tok = SavedToken;

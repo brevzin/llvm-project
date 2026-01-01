@@ -27,7 +27,6 @@ struct TemplateStringAnnotation {
   /// Format String Pieces. For something like t"The value is {x}.", there will
   /// be two pieces: "The value is {" and "}.".
   llvm::SmallVector<std::vector<char>, 8> FormatStringData;
-  std::vector<Token> FormatString;
 
   /// Vector containing the indices to the start expression for each interpolation
   /// Typically will be like [0, 1, 2] but if there are nested expressions, there

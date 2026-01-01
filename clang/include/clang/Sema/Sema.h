@@ -7281,7 +7281,7 @@ public:
   /// ActOnTemplateStringLiteral - Create a template string literal expression
   ExprResult ActOnTemplateStringLiteral(SourceLocation Loc,
                                         const TemplateStringAnnotation& Annotation,
-                                        ArrayRef<ExprResult> Exprs);
+                                        ArrayRef<Expr*> Exprs);
 
   /// BuildTemplateStringStruct - Build the anonymous struct type for a
   /// template string literal with the given processed data and expressions.

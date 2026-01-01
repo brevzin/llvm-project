@@ -2463,17 +2463,7 @@ bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
     InterpFmt.push_back('"');
   }
 
-  // 3. Update the format string in the annotation
   // llvm::errs() << "[DEBUG] Done, CurPtr is now '" << *CurPtr << "'\n";
-  for (std::vector<char>& Piece : Annotation->FormatStringData) {
-    Token Tok;
-    Tok.startToken();
-    Tok.setLength(Piece.size());
-    Tok.setLocation({});
-    Tok.setKind(tok::string_literal);
-    Tok.setLiteralData(Piece.data());
-    Annotation->FormatString.push_back(Tok);
-  }
 
   // Create the token
   FormTokenWithChars(Result, CurPtr, tok::template_string_literal);

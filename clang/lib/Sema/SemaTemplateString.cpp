@@ -374,6 +374,18 @@ CreateNumInterpolationsFunction(Sema &S, TemplateStringLiteralData *Data,
 static TemplateStringLiteralData *
 CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
   ASTContext &Context = S.Context;
+
+  llvm::SmallVector<Token, 8> FormatStrings;
+  for (std::vector<char> const& Piece : Annotation.FormatStringData) {
+    Token Tok;
+    Tok.startToken();
+    Tok.setLength(Piece.size());
+    Tok.setLocation({});
+    Tok.setKind(tok::string_literal);
+    Tok.setLiteralData(Piece.data());
+    FormatStrings.push_back(Tok);
+  }
+
   auto MakeStringLiteral = [&](ArrayRef<Token> StringToks){
     StringLiteralParser SLP(StringToks, S.getPreprocessor());
     return std::string(SLP.GetString());
@@ -381,12 +393,12 @@ CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
 
   auto *Data = new (Context) TemplateStringLiteralData();
 
-  size_t NumStrings = (Annotation.FormatString.size() + 1) / 2;
+  size_t NumStrings = (FormatStrings.size() + 1) / 2;
   for (size_t I = 0; I < NumStrings; ++I) {
-    Data->StringPieces.push_back(MakeStringLiteral(Annotation.FormatString[I * 2]));
+    Data->StringPieces.push_back(MakeStringLiteral(FormatStrings[I * 2]));
   }
 
-  Data->FormatString = MakeStringLiteral(Annotation.FormatString);
+  Data->FormatString = MakeStringLiteral(FormatStrings);
 
   auto Stringify = [&](ArrayRef<Token> toks) -> std::string {
     auto const &SM = S.getSourceManager();
@@ -410,7 +422,7 @@ CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
 
     TemplateStringLiteralData::InterpolationData Interp;
     Interp.ExpressionText = Stringify(Annotation.ExpressionTokens[CurIndex]);
-    Interp.FormatSpecifier = MakeStringLiteral(Annotation.FormatString[I * 2 + 1]);
+    Interp.FormatSpecifier = MakeStringLiteral(FormatStrings[I * 2 + 1]);
     Interp.ExpressionIndex = CurIndex;
     Interp.ExpressionCount = NextIndex - CurIndex;
 
@@ -471,21 +483,11 @@ CXXRecordDecl *Sema::BuildTemplateStringStruct(
 
 ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
                                             const TemplateStringAnnotation& Annotation,
-                                            ArrayRef<ExprResult> Exprs) {
-  for (auto const& E : Exprs) {
-    if (E.isInvalid())
-      return ExprError();
-  }
-
-  SmallVector<Expr *, 4> ExprPtrs;
-  for (auto &E : Exprs) {
-    ExprPtrs.push_back(E.get());
-  }
-
+                                            ArrayRef<Expr*> Exprs) {
   TemplateStringLiteralData *Data = CreateTemplateStringData(*this, Annotation);
-  CXXRecordDecl *StructDecl = BuildTemplateStringStruct(Loc, Data, ExprPtrs);
+  CXXRecordDecl *StructDecl = BuildTemplateStringStruct(Loc, Data, Exprs);
 
   Expr *Result = TemplateStringLiteralExpr::Create(Context, StructDecl, Data,
-                                                   ExprPtrs, Loc);
+                                                   Exprs, Loc);
   return MaybeBindToTemporary(Result);
 }
