@@ -390,8 +390,8 @@ CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
 
   auto tokens_to_string = [&](ArrayRef<Token> toks) -> std::string {
     auto const &SM = S.getSourceManager();
-    auto const B = SM.getSpellingLoc(toks.front().getLocation());
-    auto const EndTok = toks.back().getLocation();
+    auto const B = SM.getExpansionLoc(toks.front().getLocation());
+    auto const EndTok = SM.getExpansionLoc(toks.back().getLocation());
     auto const End =
         Lexer::getLocForEndOfToken(EndTok, 0, SM, S.getLangOpts());
     auto const text =

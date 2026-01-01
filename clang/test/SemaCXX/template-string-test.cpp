@@ -266,6 +266,10 @@ void test_macro_expansion() {
   static_assert((^^decltype(s26._0)) == (^^int));
   static_assert((^^decltype(s26._1)) == (^^int));
   static_assert((^^decltype(s26._2)) == (^^int));
+  static_assert(s26.num_interpolations() == 3);
+  static_assert(__builtin_strcmp(s26.interpolation(0).expression, "SINGLE") == 0);
+  static_assert(__builtin_strcmp(s26.interpolation(1).expression, "MULTIPLE") == 0);
+  static_assert(__builtin_strcmp(s26.interpolation(2).expression, "RES") == 0);
 }
 
 namespace N {
