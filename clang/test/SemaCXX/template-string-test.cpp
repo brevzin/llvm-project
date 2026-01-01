@@ -289,4 +289,11 @@ void test_expansion_statement() {
   N::test_impl(t"{x}, {y}");
 }
 
+void test_escape_expression() {
+  char c = 'x';
+  auto s27 = t"{c == '"' or c == '"'}";
+  static_assert(s27.num_interpolations() == 1);
+  static_assert(__builtin_strcmp(s27.interpolation(0).expression, "c == '\"' or c == '\"'") == 0);
+}
+
 // expected-no-diagnostics

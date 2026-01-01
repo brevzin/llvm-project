@@ -388,7 +388,7 @@ CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
 
   Data->FormatString = MakeStringLiteral(Annotation.FormatString);
 
-  auto tokens_to_string = [&](ArrayRef<Token> toks) -> std::string {
+  auto Stringify = [&](ArrayRef<Token> toks) -> std::string {
     auto const &SM = S.getSourceManager();
     auto const B = SM.getExpansionLoc(toks.front().getLocation());
     auto const EndTok = SM.getExpansionLoc(toks.back().getLocation());
@@ -397,10 +397,7 @@ CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
     auto const text =
         Lexer::getSourceText(CharSourceRange::getCharRange(B, End), SM,
                              S.getLangOpts());
-    std::string out;
-    llvm::raw_string_ostream os(out);
-    os.write_escaped(text, /*UseHexEscapes=*/true);
-    return out;
+    return std::string(text);
   };
 
   size_t NumInterpolations = Annotation.Interpolations.size();
@@ -412,8 +409,7 @@ CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
 
 
     TemplateStringLiteralData::InterpolationData Interp;
-    Interp.ExpressionText =
-        tokens_to_string(Annotation.ExpressionTokens[CurIndex]);
+    Interp.ExpressionText = Stringify(Annotation.ExpressionTokens[CurIndex]);
     Interp.FormatSpecifier = MakeStringLiteral(Annotation.FormatString[I * 2 + 1]);
     Interp.ExpressionIndex = CurIndex;
     Interp.ExpressionCount = NextIndex - CurIndex;
