@@ -2278,7 +2278,8 @@ bool Lexer::LexStringLiteral(Token &Result, const char *CurPtr,
 bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
   // llvm::errs() << "[DEBUG]: lexing new template string literal, starting at:" << std::string_view(CurPtr, 10) << '\n';
   // Create the annotation that will hold our data
-  std::unique_ptr<TemplateStringAnnotation> Annotation(new TemplateStringAnnotation(getSourceLocation(BufferPtr)));
+  std::unique_ptr<TemplateStringAnnotation> Annotation(new TemplateStringAnnotation);
+  Annotation->Loc = getSourceLocation(BufferPtr);
 
   while (true) {
     // 1. String Literal part: we parse the literal piece up until the next {

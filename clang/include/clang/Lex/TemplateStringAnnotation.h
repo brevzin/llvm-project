@@ -40,9 +40,6 @@ struct TemplateStringAnnotation {
 
   /// Source location of the original template string literal
   SourceLocation Loc;
-
-  TemplateStringAnnotation(SourceLocation L)
-      : Loc(L) {}
 };
 
 } // end namespace clang

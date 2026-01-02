@@ -296,4 +296,28 @@ void test_escape_expression() {
   static_assert(__builtin_strcmp(s27.interpolation(0).expression, "c == '\"' or c == '\"'") == 0);
 }
 
+void test_concatenation() {
+  int x = 1;
+  int y = 2;
+  int z = 3;
+
+  auto check_matches_base = [](auto const& s){
+    // as compared to t"x={x} and y={y:>{z}}""
+    static_assert(__builtin_strcmp(s.fmt(), "x={} and y={:>{}}") == 0);
+    static_assert(s.num_interpolations() == 2);
+    static_assert(__builtin_strcmp(s.interpolation(0).fmt, "{}") == 0);
+    static_assert(__builtin_strcmp(s.interpolation(0).expression, "x") == 0);
+    static_assert(s.interpolation(0).index == 0);
+    static_assert(s.interpolation(0).count == 1);
+    static_assert(__builtin_strcmp(s.interpolation(1).fmt, "{:>{}}") == 0);
+    static_assert(__builtin_strcmp(s.interpolation(1).expression, "y") == 0);
+    static_assert(s.interpolation(1).index == 1);
+    static_assert(s.interpolation(1).count == 2);
+
+  };
+
+  check_matches_base(t"x={x}" t" and y={y:>{z}}");
+  check_matches_base(t"x={x}" t" and " t"y={y:>{z}}");
+}
+
 // expected-no-diagnostics

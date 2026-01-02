@@ -3100,16 +3100,38 @@ ExprResult Parser::ParseTemplateStringLiteral() {
   Token StringTok = Tok;
   ConsumeAnyToken();
 
-  // Get the annotation data from the literal data pointer
-  const char *LiteralData = StringTok.getLiteralData();
-  if (!LiteralData) {
-    Diag(StringTok.getLocation(), diag::err_expected) << "template string annotation";
-    return ExprError();
-  }
-
-  // Cast to our annotation type
-  auto Annotation = std::unique_ptr<TemplateStringAnnotation const>(
+  auto AnnotationOf = [](Token const& T)  {
+    const char *LiteralData = T.getLiteralData();
+    assert(LiteralData && "template string missing literal");
+    return std::unique_ptr<TemplateStringAnnotation const>(
       reinterpret_cast<TemplateStringAnnotation const*>(LiteralData));
+  };
+
+  SourceLocation Loc = StringTok.getLocation();
+  TemplateStringAnnotation Annotation = *AnnotationOf(StringTok);
+
+  // Consume other template string literals
+  while (Tok.is(tok::template_string_literal)) {
+    auto Next = AnnotationOf(Tok);
+    ConsumeAnyToken();
+
+    // the 1st string piece appends to the end of the last string piece of the
+    // previous one. the other pieces just get appended).
+    // Last is "xxx" and First is "yyy" (incl quotes). Need to produce "xxxyyy"
+    auto& Last = Annotation.FormatStringData.back();
+    const auto& First = Next->FormatStringData.front();
+    Last.insert(Last.end() - 1, First.begin() + 1, First.end() - 1);
+    Annotation.FormatStringData.append(Next->FormatStringData.begin() + 1,
+                                       Next->FormatStringData.end());
+
+    // the Interpolations start offset by the amount of currente xpressions
+    for (size_t I : Next->Interpolations) {
+      Annotation.Interpolations.push_back(I + Annotation.ExpressionTokens.size());
+    }
+
+    // And the ExpressionTokens just append
+    Annotation.ExpressionTokens.append(Next->ExpressionTokens);
+  }
 
   // llvm::errs() << "[DEBUG] ParseTemplateStringLiteral with "
   //              << Annotation->FormatString.size() << " string literals and "
@@ -3120,7 +3142,7 @@ ExprResult Parser::ParseTemplateStringLiteral() {
 
   // Parse each pre-tokenized expression
   SmallVector<Expr*, 4> Exprs;
-  for (const auto &ExprTokens : Annotation->ExpressionTokens) {
+  for (const auto &ExprTokens : Annotation.ExpressionTokens) {
     if (ExprTokens.empty()) {
       // Empty expression
       Diag(StringTok.getLocation(), diag::err_expected) << "expression";
@@ -3167,9 +3189,7 @@ ExprResult Parser::ParseTemplateStringLiteral() {
   }
 
   // Call Sema to create the template string
-  ExprResult Result = Actions.ActOnTemplateStringLiteral(StringTok.getLocation(),
-                                                         *Annotation,
-                                                         Exprs);
+  ExprResult Result = Actions.ActOnTemplateStringLiteral(Loc,Annotation, Exprs);
 
   return Result;
 }
