@@ -3077,6 +3077,22 @@ ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
   SmallVector<Token, 4> StringToks;
 
   do {
+    if (Tok.is(tok::template_string_literal)) {
+      // this will never be the first one
+      TemplateStringAnnotation A;
+      A.Loc = StringToks.front().getLocation();
+
+      StringLiteralParser Literal(StringToks, PP);
+      StringRef Str = Literal.GetString();
+      auto& Data = A.FormatStringData.emplace_back();
+      Data.reserve(Str.size() + 2);
+      Data.push_back('"');
+      Data.insert(Data.end(), Str.begin(), Str.end());
+      Data.push_back('"');
+
+      // don't consume this token yet, this function will handle it
+      return ParseTemplateStringLiteralExpression(A);
+    }
     StringToks.push_back(Tok);
     ConsumeAnyToken();
   } while (tokenIsLikeStringLiteral(Tok, getLangOpts()));
@@ -3093,22 +3109,27 @@ ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
 }
 
 /// ParseTemplateStringLiteral - Parse a template string literal like t"x={expr}"
+static std::unique_ptr<TemplateStringAnnotation const>
+TemplateStringAnnotationOf(Token const& T)
+{
+  assert(T.is(tok::template_string_literal) && "Not a template string literal.");
+  const char *LiteralData = T.getLiteralData();
+  assert(LiteralData && "template string missing literal");
+  return std::unique_ptr<TemplateStringAnnotation const>(
+    reinterpret_cast<TemplateStringAnnotation const*>(LiteralData));
+}
+
 ExprResult Parser::ParseTemplateStringLiteral() {
   assert(Tok.is(tok::template_string_literal) && "Not a template string literal!");
-
-  // Get the string literal token
   Token StringTok = Tok;
   ConsumeAnyToken();
+  return ParseTemplateStringLiteralExpression(*TemplateStringAnnotationOf(StringTok));
+}
 
-  auto AnnotationOf = [](Token const& T)  {
-    const char *LiteralData = T.getLiteralData();
-    assert(LiteralData && "template string missing literal");
-    return std::unique_ptr<TemplateStringAnnotation const>(
-      reinterpret_cast<TemplateStringAnnotation const*>(LiteralData));
-  };
-
-  SourceLocation Loc = StringTok.getLocation();
-  TemplateStringAnnotation Annotation = *AnnotationOf(StringTok);
+ExprResult Parser::ParseTemplateStringLiteralExpression(TemplateStringAnnotation const& Init)
+{
+  SourceLocation Loc = Init.Loc;
+  TemplateStringAnnotation Annotation = Init;
 
   auto AppendString = [&](StringRef Str){
     auto& Last = Annotation.FormatStringData.back();
@@ -3118,7 +3139,7 @@ ExprResult Parser::ParseTemplateStringLiteral() {
   // Consume other template string literals
   while (tokenIsLikeStringLiteral(Tok, getLangOpts())) {
     if (Tok.is(tok::template_string_literal)) {
-      auto Next = AnnotationOf(Tok);
+      auto Next = TemplateStringAnnotationOf(Tok);
       ConsumeAnyToken();
 
       // the 1st string piece appends to the end of the last string piece of the
@@ -3156,7 +3177,7 @@ ExprResult Parser::ParseTemplateStringLiteral() {
   for (const auto &ExprTokens : Annotation.ExpressionTokens) {
     if (ExprTokens.empty()) {
       // Empty expression
-      Diag(StringTok.getLocation(), diag::err_expected) << "expression";
+      Diag(Loc, diag::err_expected) << "expression";
       return ExprError();
     }
 
@@ -3170,7 +3191,7 @@ ExprResult Parser::ParseTemplateStringLiteral() {
         Tok.setKind(II->getTokenID());
       }
       // Use the StringTok location for all tokens to avoid SourceManager issues
-      Tok.setLocation(StringTok.getLocation());
+      Tok.setLocation(Loc);
       ProcessedTokens.push_back(Tok);
     }
 
@@ -3178,7 +3199,7 @@ ExprResult Parser::ParseTemplateStringLiteral() {
     Token EofTok;
     EofTok.startToken();
     EofTok.setKind(tok::eof);
-    EofTok.setLocation(StringTok.getLocation());
+    EofTok.setLocation(Loc);
     ProcessedTokens.push_back(EofTok);
 
     // Inject tokens for this expression

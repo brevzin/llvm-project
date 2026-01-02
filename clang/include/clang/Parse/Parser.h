@@ -53,6 +53,7 @@ struct OMPTraitProperty;
 struct OMPTraitSelector;
 struct OMPTraitSet;
 class OMPTraitInfo;
+class TemplateStringAnnotation;
 
 enum class AnnotatedNameKind {
   /// Annotation has failed and emitted an error.
@@ -3861,6 +3862,8 @@ private:
 
   ExprResult ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
                                           bool Unevaluated);
+
+  ExprResult ParseTemplateStringLiteralExpression(TemplateStringAnnotation const& Annot);
 
   /// This routine is called when the '@' is seen and consumed.
   /// Current token is an Identifier and is not a 'try'. This
