@@ -318,6 +318,8 @@ void test_concatenation() {
 
   check_matches_base(t"x={x}" t" and y={y:>{z}}");
   check_matches_base(t"x={x}" t" and " t"y={y:>{z}}");
+  check_matches_base(t"x={x}" " and " t"y={y:>{z}}");
+  check_matches_base(t"x={x}" " and " "y=" t"{y:>{z}}");
 }
 
 // expected-no-diagnostics

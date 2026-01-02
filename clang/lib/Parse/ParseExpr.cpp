@@ -3110,27 +3110,38 @@ ExprResult Parser::ParseTemplateStringLiteral() {
   SourceLocation Loc = StringTok.getLocation();
   TemplateStringAnnotation Annotation = *AnnotationOf(StringTok);
 
-  // Consume other template string literals
-  while (Tok.is(tok::template_string_literal)) {
-    auto Next = AnnotationOf(Tok);
-    ConsumeAnyToken();
-
-    // the 1st string piece appends to the end of the last string piece of the
-    // previous one. the other pieces just get appended).
-    // Last is "xxx" and First is "yyy" (incl quotes). Need to produce "xxxyyy"
+  auto AppendString = [&](StringRef Str){
     auto& Last = Annotation.FormatStringData.back();
-    const auto& First = Next->FormatStringData.front();
-    Last.insert(Last.end() - 1, First.begin() + 1, First.end() - 1);
-    Annotation.FormatStringData.append(Next->FormatStringData.begin() + 1,
-                                       Next->FormatStringData.end());
+    Last.insert(Last.end() - 1, Str.begin(), Str.end());
+  };
 
-    // the Interpolations start offset by the amount of currente xpressions
-    for (size_t I : Next->Interpolations) {
-      Annotation.Interpolations.push_back(I + Annotation.ExpressionTokens.size());
+  // Consume other template string literals
+  while (tokenIsLikeStringLiteral(Tok, getLangOpts())) {
+    if (Tok.is(tok::template_string_literal)) {
+      auto Next = AnnotationOf(Tok);
+      ConsumeAnyToken();
+
+      // the 1st string piece appends to the end of the last string piece of the
+      // previous one. the other pieces just get appended).
+      // Last is "xxx" and Str is "yyy" (incl quotes). Need to produce "xxxyyy"
+      auto& First = Next->FormatStringData.front();
+      AppendString(StringRef(First.data() + 1, First.size() - 2));
+      Annotation.FormatStringData.append(Next->FormatStringData.begin() + 1,
+                                        Next->FormatStringData.end());
+
+      // the Interpolations start offset by the amount of currente xpressions
+      for (size_t I : Next->Interpolations) {
+        Annotation.Interpolations.push_back(I + Annotation.ExpressionTokens.size());
+      }
+
+      // And the ExpressionTokens just append
+      Annotation.ExpressionTokens.append(Next->ExpressionTokens);
+    } else {
+      // this is just a string literal piece, so this appends onto the end
+      StringLiteralParser Literal(Tok, PP);
+      AppendString(Literal.GetString());
+      ConsumeAnyToken();
     }
-
-    // And the ExpressionTokens just append
-    Annotation.ExpressionTokens.append(Next->ExpressionTokens);
   }
 
   // llvm::errs() << "[DEBUG] ParseTemplateStringLiteral with "
