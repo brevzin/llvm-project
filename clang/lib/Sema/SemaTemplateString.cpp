@@ -11,6 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Sema/Sema.h"
+#include "clang/Sema/Lookup.h"
+#include "clang/Sema/Overload.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
@@ -490,4 +492,59 @@ ExprResult Sema::ActOnTemplateStringLiteral(SourceLocation Loc,
   Expr *Result = TemplateStringLiteralExpr::Create(Context, StructDecl, Data,
                                                    Exprs, Loc);
   return MaybeBindToTemporary(Result);
+}
+
+ExprResult Sema::ActOnTemplateStringUDL(Expr *TemplateStringExpr,
+                                         IdentifierInfo *UDSuffix,
+                                         SourceLocation UDSuffixLoc,
+                                         Scope *S) {
+  DeclarationName OpName =
+      Context.DeclarationNames.getCXXLiteralOperatorName(UDSuffix);
+  DeclarationNameInfo OpNameInfo(OpName, UDSuffixLoc);
+  OpNameInfo.setCXXLiteralOperatorNameLoc(UDSuffixLoc);
+
+  LookupResult R(*this, OpName, UDSuffixLoc, LookupOrdinaryName);
+  LookupName(R, S);
+
+  // Perform overload resolution.
+  Expr *Args[] = {TemplateStringExpr};
+  OverloadCandidateSet CandidateSet(UDSuffixLoc,
+                                    OverloadCandidateSet::CSK_Normal);
+  AddNonMemberOperatorCandidates(R.asUnresolvedSet(), Args, CandidateSet,
+                                 /*TemplateArgs=*/nullptr);
+
+  OverloadCandidateSet::iterator Best;
+  switch (CandidateSet.BestViableFunction(*this, UDSuffixLoc, Best)) {
+  case OR_Success:
+  case OR_Deleted:
+    break;
+  case OR_No_Viable_Function:
+    CandidateSet.NoteCandidates(
+        PartialDiagnosticAt(UDSuffixLoc,
+                            PDiag(diag::err_ovl_no_viable_function_in_call)
+                                << R.getLookupName()),
+        *this, OCD_AllCandidates, Args);
+    return ExprError();
+  case OR_Ambiguous:
+    CandidateSet.NoteCandidates(
+        PartialDiagnosticAt(UDSuffixLoc,
+                            PDiag(diag::err_ovl_ambiguous_call)
+                                << R.getLookupName()),
+        *this, OCD_AmbiguousCandidates, Args);
+    return ExprError();
+  }
+
+  FunctionDecl *FD = Best->Function;
+  if (DiagnoseUseOfDecl(Best->FoundDecl, UDSuffixLoc))
+    return ExprError();
+  if (Best->FoundDecl != FD && DiagnoseUseOfDecl(FD, UDSuffixLoc))
+    return ExprError();
+
+  ExprResult Fn = BuildDeclRefExpr(FD, FD->getType(), VK_LValue, UDSuffixLoc);
+  if (Fn.isInvalid())
+    return ExprError();
+
+  // Build a regular CallExpr instead of UserDefinedLiteral, since
+  // UserDefinedLiteral doesn't support template string parameter types.
+  return BuildResolvedCallExpr(Fn.get(), FD, UDSuffixLoc, Args, UDSuffixLoc);
 }

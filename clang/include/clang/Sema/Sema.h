@@ -7283,6 +7283,13 @@ public:
                                         const TemplateStringAnnotation& Annotation,
                                         ArrayRef<Expr*> Exprs);
 
+  /// ActOnTemplateStringUDL - Handle a user-defined literal suffix on a
+  /// template string literal, e.g. t"x={x}"_udl.
+  ExprResult ActOnTemplateStringUDL(Expr *TemplateStringExpr,
+                                     IdentifierInfo *UDSuffix,
+                                     SourceLocation UDSuffixLoc,
+                                     Scope *S);
+
   /// BuildTemplateStringStruct - Build the anonymous struct type for a
   /// template string literal with the given processed data and expressions.
   CXXRecordDecl *BuildTemplateStringStruct(SourceLocation Loc,

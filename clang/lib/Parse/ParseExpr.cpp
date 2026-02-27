@@ -3221,7 +3221,17 @@ ExprResult Parser::ParseTemplateStringLiteralExpression(TemplateStringAnnotation
   }
 
   // Call Sema to create the template string
-  ExprResult Result = Actions.ActOnTemplateStringLiteral(Loc,Annotation, Exprs);
+  ExprResult Result = Actions.ActOnTemplateStringLiteral(Loc, Annotation, Exprs);
+  if (Result.isInvalid())
+    return ExprError();
+
+  // Check for UDL suffix (any identifier following the template string)
+  if (Tok.is(tok::identifier)) {
+    IdentifierInfo *UDSuffix = Tok.getIdentifierInfo();
+    SourceLocation UDSuffixLoc = ConsumeToken();
+    Result = Actions.ActOnTemplateStringUDL(Result.get(), UDSuffix,
+                                             UDSuffixLoc, getCurScope());
+  }
 
   return Result;
 }

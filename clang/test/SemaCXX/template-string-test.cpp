@@ -323,4 +323,25 @@ void test_concatenation() {
   check_matches_base("x=" t"{x}" " and " "y=" t"{y:>{z}}");
 }
 
-// expected-no-diagnostics
+constexpr auto operator""_one(auto&&) -> int { return 1; }
+
+template <class S>
+constexpr auto operator""_first(S&& s) -> int {
+  auto& [a, ...exprs] = s;
+  return a;
+}
+
+// this is a bad diagnostic, but I don't want to add a new one
+auto operator""_wrong1(auto, auto) -> int; // expected-error {{non-template literal operator must have one or two parameters}}
+auto operator""_wrong2(auto...) -> int; // expected-error {{non-template literal operator must have one or two parameters}}
+auto operator""_wrong3(auto, auto...) -> int; // expected-error {{non-template literal operator must have one or two parameters}}
+
+void test_udl() {
+  static_assert(t"one"_one == 1);
+
+  static constexpr int two = 2;
+  static_assert(t"v={two}"_first == 2);
+
+  // this form is only considered for template literals
+  "oops"_one; // expected-error {{no matching literal operator}}
+}

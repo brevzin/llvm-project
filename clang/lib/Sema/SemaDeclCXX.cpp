@@ -17148,14 +17148,19 @@ bool Sema::CheckLiteralOperatorDeclaration(FunctionDecl *FnDecl) {
   //
   // C++20 also allows template <SomeClass T> type operator "" name().
   if (TpDecl) {
-    if (FnDecl->param_size() != 0) {
-      Diag(FnDecl->getLocation(),
-           diag::err_literal_operator_template_with_params);
+    if (FnDecl->param_size() == 0) {
+      // template <char...> operator""_x() or
+      // template <SomeClass T> operator""_x() etc.
+      if (checkLiteralOperatorTemplateParameterList(*this, TpDecl))
+        return true;
+    } else if (FnDecl->param_size() == 1 &&
+               !FnDecl->getParamDecl(0)->isParameterPack()) {
+      // template<class S> operator""_x(S&&) or operator""_x(auto&&)
+      // — allowed for template string UDLs.
+    } else {
+      Diag(FnDecl->getLocation(), diag::err_literal_operator_bad_param_count);
       return true;
     }
-
-    if (checkLiteralOperatorTemplateParameterList(*this, TpDecl))
-      return true;
 
   } else if (FnDecl->param_size() == 1) {
     const ParmVarDecl *Param = FnDecl->getParamDecl(0);
