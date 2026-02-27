@@ -46,8 +46,12 @@ int main(int, char**) {
         return sstr.str();
     });
 
-    // quick test for std::println
+    // operator""
+    using namespace std::literals;
     int x = 42;
+    check_eq(t"Got {x}"s, "Got 42");
+
+    // quick test for std::println
     std::stringstream sstr;
     std::println(sstr, t"Got {x}");
     check_eq(sstr.str(), "Got 42\n");

@@ -38,6 +38,19 @@ format_to(_OutIt __out_it, _S&& __s) {
     return std::format_to(std::move(__out_it), __s.fmt(), __parts...);
 }
 
+inline namespace literals {
+inline namespace string_literals {
+
+template<template_string _S>
+inline _LIBCPP_HIDE_FROM_ABI constexpr string
+operator""s(_S&& __s) {
+    auto& [...__parts] = __s;
+    return std::format(__s.fmt(), __parts...);
+}
+
+}
+}
+
 
 #endif // _LIBCPP_STD_VER >= 26
 
