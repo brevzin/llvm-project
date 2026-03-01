@@ -2,6 +2,7 @@
 #define _LIBCPP___FORMAT_TEMPLATE_STRING_H
 
 #include <__format/format_functions.h>
+#include <__format/template_string_fwd.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #  pragma GCC system_header
@@ -13,16 +14,6 @@ _LIBCPP_PUSH_MACROS
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 #if _LIBCPP_STD_VER >= 26
-
-template <class S>
-concept __template_string = requires {
-    { S::fmt() } -> same_as<char const*>;
-    { S::string(0) } -> same_as<char const*>;
-    { S::num_interpolations() } -> integral;
-};
-
-template <class S>
-concept template_string = __template_string<remove_cvref_t<S>>;
 
 template <template_string _S>
 [[nodiscard]] _LIBCPP_ALWAYS_INLINE _LIBCPP_HIDE_FROM_ABI string
@@ -37,6 +28,12 @@ format_to(_OutIt __out_it, _S&& __s) {
     auto& [...__parts] = __s;
     return std::format_to(std::move(__out_it), __s.fmt(), __parts...);
 }
+
+template<>
+template<template_string _S>
+constexpr basic_string<char>::basic_string(_S&& __s)
+    : basic_string(std::format((_S&&)__s))
+{ }
 
 inline namespace literals {
 inline namespace string_literals {
