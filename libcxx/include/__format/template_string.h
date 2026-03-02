@@ -29,12 +29,6 @@ format_to(_OutIt __out_it, _S&& __s) {
     return std::format_to(std::move(__out_it), __s.fmt(), __parts...);
 }
 
-template<>
-template<template_string _S>
-constexpr basic_string<char>::basic_string(_S&& __s)
-    : basic_string(std::format((_S&&)__s))
-{ }
-
 inline namespace literals {
 inline namespace string_literals {
 
