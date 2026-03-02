@@ -345,3 +345,10 @@ void test_udl() {
   // this form is only considered for template literals
   "oops"_one; // expected-error {{no matching literal operator}}
 }
+
+void test_comma() {
+  int x = 1;
+  int y = 2;
+  t"{x,y}";  // expected-error {{expected '}'}}
+  t"{(x,y)}"; // expected-warning {{left operand}} // expected-warning {{unused}}
+}

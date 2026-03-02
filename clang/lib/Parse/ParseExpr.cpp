@@ -3211,6 +3211,21 @@ ExprResult Parser::ParseTemplateStringLiteralExpression(TemplateStringAnnotation
     // Parse the expression
     ExprResult Expr = ParseAssignmentExpression();
     if (Expr.isInvalid()) {
+      // Skip to the EOF we injected before restoring the saved token
+      while (Tok.isNot(tok::eof))
+        ConsumeAnyToken();
+      Tok = SavedToken;
+      return ExprError();
+    }
+
+    // After parsing the expression, we expect to be at the EOF we injected.
+    // If not, there are extra tokens (e.g. a comma operator) that are not
+    // valid in this context.
+    if (Tok.isNot(tok::eof)) {
+      Diag(Tok.getLocation(), diag::err_expected) << tok::r_brace;
+      while (Tok.isNot(tok::eof))
+        ConsumeAnyToken();
+      Tok = SavedToken;
       return ExprError();
     }
 
