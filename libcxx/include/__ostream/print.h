@@ -169,13 +169,13 @@ _LIBCPP_HIDE_FROM_ABI inline void println(ostream& __os) {
 
 template <weak_template_string _S>
 _LIBCPP_HIDE_FROM_ABI void print(ostream& __os, _S&& __s) {
-  auto& [...__parts] = __s;
+  auto& [...__parts] = __s.exprs();
   return std::print(__os, __s.fmt(), __parts...);
 }
 
 template <weak_template_string _S>
 _LIBCPP_HIDE_FROM_ABI void println(ostream& __os, _S&& __s) {
-  auto& [...__parts] = __s;
+  auto& [...__parts] = __s.exprs();
   return std::println(__os, __s.fmt(), __parts...);
 }
 

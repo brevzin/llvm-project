@@ -434,6 +434,50 @@ CreateTemplateStringData(Sema &S, const TemplateStringAnnotation &Annotation) {
   return Data;
 }
 
+static CXXMethodDecl *CreateExprsFunction(Sema &S,
+                                           CXXRecordDecl *StructDecl,
+                                           SourceLocation Loc) {
+  ASTContext &Context = S.Context;
+
+  // Return type is 'S const&'
+  QualType StructType = Context.getRecordType(StructDecl);
+  QualType ConstStructType = Context.getConstType(StructType);
+  QualType ConstRefType = Context.getLValueReferenceType(ConstStructType);
+
+  // Build 'auto exprs() const -> S const&'
+  FunctionProtoType::ExtProtoInfo EPI;
+  EPI.TypeQuals.addConst();
+  QualType FuncType = Context.getFunctionType(ConstRefType, {}, EPI);
+
+  CXXMethodDecl *ExprsFunc = CXXMethodDecl::Create(
+      Context, StructDecl, Loc,
+      DeclarationNameInfo(
+          Context.DeclarationNames.getIdentifier(&Context.Idents.get("exprs")),
+          Loc),
+      FuncType, Context.getTrivialTypeSourceInfo(FuncType, Loc), SC_None,
+      /*UsesFPIntrin=*/false,
+      /*isInline=*/true, ConstexprSpecKind::Constexpr, Loc);
+
+  ExprsFunc->setImplicit(true);
+  ExprsFunc->setAccess(AS_public);
+
+  // Body: return *this;
+  CXXThisExpr *ThisExpr =
+      CXXThisExpr::Create(Context, Loc,
+                           Context.getPointerType(ConstStructType),
+                           /*isImplicit=*/false);
+
+  UnaryOperator *DerefThis = UnaryOperator::Create(
+      Context, ThisExpr, UO_Deref, ConstStructType, VK_LValue, OK_Ordinary,
+      Loc, false, FPOptionsOverride());
+
+  ReturnStmt *Return = ReturnStmt::Create(Context, Loc, DerefThis, nullptr);
+  ExprsFunc->setBody(
+      CompoundStmt::Create(Context, {Return}, FPOptionsOverride(), Loc, Loc));
+
+  return ExprsFunc;
+}
+
 CXXRecordDecl *Sema::BuildTemplateStringStruct(
     SourceLocation Loc, TemplateStringLiteralData *Data,
     ArrayRef<Expr *> Exprs) {
@@ -447,6 +491,7 @@ CXXRecordDecl *Sema::BuildTemplateStringStruct(
   StructDecl->addDecl(CreateStringFunction(*this, Data, StructDecl, Loc));
   StructDecl->addDecl(CreateInterpolationFunction(*this, Data, StructDecl, Loc));
   StructDecl->addDecl(CreateNumInterpolationsFunction(*this, Data, StructDecl, Loc));
+  StructDecl->addDecl(CreateExprsFunction(*this, StructDecl, Loc));
 
   SmallVector<Decl *, 4> FieldDecls;
   for (size_t I = 0; I < Exprs.size(); ++I) {

@@ -58,7 +58,8 @@ int main(int, char**) {
 
     // weak template
     struct W {
-        static auto fmt() { return std::runtime_format("Got {}"); }
+        auto fmt() const { return std::runtime_format("Got {}"); }
+        auto exprs() const -> W const& { return *this; }
         int x;
     };
     check_eq(std::format(W{.x=42}), "Got 42");

@@ -18,14 +18,14 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 template <weak_template_string _S>
 [[nodiscard]] _LIBCPP_ALWAYS_INLINE _LIBCPP_HIDE_FROM_ABI string
 format(_S&& __s) {
-    auto& [...__parts] = __s;
+    auto& [...__parts] = __s.exprs();
     return std::format(__s.fmt(), __parts...);
 }
 
 template <output_iterator<const char&> _OutIt, weak_template_string _S>
 _LIBCPP_ALWAYS_INLINE _LIBCPP_HIDE_FROM_ABI _OutIt
 format_to(_OutIt __out_it, _S&& __s) {
-    auto& [...__parts] = __s;
+    auto& [...__parts] = __s.exprs();
     return std::format_to(std::move(__out_it), __s.fmt(), __parts...);
 }
 
@@ -35,7 +35,7 @@ inline namespace string_literals {
 template<weak_template_string _S>
 inline _LIBCPP_HIDE_FROM_ABI constexpr string
 operator""s(_S&& __s) {
-    auto& [...__parts] = __s;
+    auto& [...__parts] = __s.exprs();
     return std::format(__s.fmt(), __parts...);
 }
 

@@ -28,6 +28,11 @@ void test_local_vars() {
   // Check that the fields have the right values
   static_assert((^^decltype(s1._0)) == (^^int&));
   static_assert((^^decltype(s1._1)) == (^^double&));
+
+  decltype(auto) e1 = s1.exprs();
+  static_assert((^^decltype(e1)) == ^^decltype(s1) const&);
+  static_assert((^^decltype(e1._0)) == (^^int&));
+  static_assert((^^decltype(e1._1)) == (^^double&));
 }
 
 // Test with expressions
