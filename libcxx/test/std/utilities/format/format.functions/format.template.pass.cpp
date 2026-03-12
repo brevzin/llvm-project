@@ -55,4 +55,11 @@ int main(int, char**) {
     std::stringstream sstr;
     std::println(sstr, t"Got {x}");
     check_eq(sstr.str(), "Got 42\n");
+
+    // weak template
+    struct W {
+        static auto fmt() { return std::runtime_format("Got {}"); }
+        int x;
+    };
+    check_eq(std::format(W{.x=42}), "Got 42");
 }

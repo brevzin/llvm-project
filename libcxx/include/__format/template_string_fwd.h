@@ -16,6 +16,16 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 
 #if _LIBCPP_STD_VER >= 26
 
+template <class _CharT>
+struct __runtime_format_string;
+
+template <class T>
+concept __suitable_fmt = same_as<T, char const*>
+                      || same_as<T, __runtime_format_string<char>>;
+
+template <class S>
+concept weak_template_string = __suitable_fmt<decltype(remove_cvref_t<S>::fmt())>;
+
 template <class S>
 concept __template_string = requires {
     { S::fmt() } -> same_as<char const*>;
@@ -24,7 +34,8 @@ concept __template_string = requires {
 };
 
 template <class S>
-concept template_string = __template_string<remove_cvref_t<S>>;
+concept template_string = weak_template_string<S>
+                       && __template_string<remove_cvref_t<S>>;
 
 #endif // _LIBCPP_STD_VER >= 26
 
