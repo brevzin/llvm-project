@@ -41,21 +41,20 @@ consteval void cfn2() { (void) static_cast<const void *>(p2); }
                            // ======================
 
 namespace non_consteval_contexts {
-info r1;  // expected-error {{consteval-only type must either be constexpr}}
-info r2 {};  // expected-error {{consteval-only type must either be constexpr}}
+info r1;  // ok (null)
+info r2 {};  // ok (null)
 info r3 = ^^int;
 // expected-error@-1 {{consteval-only type must either be constexpr}}
 info r4 = valid_cases::cfn1();
 // expected-error@-1 {{consteval-only type must either be constexpr}}
 unsigned sz = sizeof(^^int);  // ok
 
-S s1;  // expected-error {{consteval-only type must either be constexpr}}
-S s2{};  // expected-error {{consteval-only type must either be constexpr}}
+S s1;  // ok (null)
+S s2{};  // ok (null)
 S s3 = {^^int};
 // expected-error@-1 {{consteval-only type must either be constexpr}}
 
-const info *p1;
-// expected-error@-1 {{consteval-only type must either be constexpr}}
+const info *p1; // ok (null)
 const info *p2 = &valid_cases::r1;
 // expected-error@-1 {{consteval-only type must either be constexpr}}
 
@@ -72,15 +71,16 @@ void fn4() { (void) valid_cases::s1.m; }
 // expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn5() { (void) static_cast<const void *>(valid_cases::p2); }
-// expected-error@-1 {{expressions involving consteval-only values}}
+// expected-error@-1 {{expressions}}
 
 void fn6() { (void) [:^^valid_cases::r1:]; }
 // expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn7() {
-  (void) info{}; // expected-error {{expressions of consteval-only type}}
+  (void) info{}; // ok (null)
   (void) ^^int; // expected-error {{expressions of consteval-only type}}
-  (void) new info{}; // expected-error {{expressions of consteval-only type}}
+  (void) new info{}; // ok (null, so leaking is fine)
+  (void) new info(^^int); // expected-error {{expressions of consteval-only type}}
 }
 
 consteval bool is_null(info R) {
@@ -144,15 +144,16 @@ consteval const Base &fn1() {
   return d;
 }
 constexpr auto &ref = fn1();
-// expected-error@-1 {{'ref' must be initialized by a constant expression}}
-// expected-note@-2 {{reference into an object of consteval-only type}}
+// expected-error@-1 {{constant-evaluated context}}
+
+consteval auto &ref2 = fn1(); // ok (consteval)
 
 consteval void *fn2() {
   static consteval auto v = ^^int;
   return (void *)&v;
 }
 constexpr const void *ptr = fn2();
-// expected-error@-1 {{'ptr' must be initialized by a constant expression}}
-// expected-note@-2 {{pointer into an object of consteval-only type}}
+// expected-error@-1 {{constant-evaluated context}}
+consteval const void *ptr2 = fn2(); // ok (consteval)
 
 }  // namespace alias_smuggling

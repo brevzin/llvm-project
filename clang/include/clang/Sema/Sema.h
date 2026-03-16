@@ -10380,6 +10380,7 @@ public:
                                               NamedDecl *Dest = nullptr);
 
   bool APValueContainsConstevalOnlyValue(const APValue &V);
+  bool ExprContainsConstevalOnlyValue(Expr *E);
 
   /// EvaluateConvertedConstantExpression - Evaluate an Expression
   /// That is a converted constant expression

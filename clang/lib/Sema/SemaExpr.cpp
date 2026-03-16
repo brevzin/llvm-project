@@ -18253,8 +18253,16 @@ HandleImmediateInvocations(Sema &SemaRef,
   // TODO(P2996): Can we avoid this?
   for (size_t Idx = 0; Idx < Rec.ImmediateInvocationCandidates.size(); ++Idx) {
     auto CE = Rec.ImmediateInvocationCandidates[Idx];
-    if (!CE.getInt() && !CE.getPointer()->isValueDependent())
+    if (!CE.getInt() && !CE.getPointer()->isValueDependent()) {
       EvaluateAndDiagnoseImmediateInvocation(SemaRef, CE);
+      // If the evaluated result contains a consteval-only value (e.g., a
+      // reflection), the expression must be tracked so that it is diagnosed
+      // if used outside a consteval context.
+      ConstantExpr *CEPtr = CE.getPointer();
+      if (CEPtr->hasAPValueResult() &&
+          SemaRef.APValueContainsConstevalOnlyValue(CEPtr->getAPValueResult()))
+        Rec.ConstevalOnly.insert(CEPtr);
+    }
   }
   for (auto *DR : Rec.ReferenceToConsteval) {
     // If the expression is immediate escalating, it is not an error;

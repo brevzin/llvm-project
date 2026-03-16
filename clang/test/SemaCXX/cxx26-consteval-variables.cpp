@@ -10,14 +10,14 @@ using I = decltype(x);
 consteval auto lvalue_to_rvalue(auto x) { return x; }
 
 namespace ptr_ref {
-    constexpr int const* p1 = &x; // expected-error {{constant expression}}
+    constexpr int const* p1 = &x; // expected-error {{constant-evaluated context}}
     consteval int const* p2 = &x;
-    constexpr int const& r1 = x;  // expected-error {{constant expression}}
+    constexpr int const& r1 = x;  // expected-error {{constant-evaluated context}}
     consteval int const& r2 = x;
 
     template <class T> struct Wrap { T t; };
-    constexpr auto w1 = Wrap<int const*>{&x}; // expected-error {{constant expression}}
-    constexpr auto w2 = Wrap<int const&>{x};  // expected-error {{constant expression}}
+    constexpr auto w1 = Wrap<int const*>{&x}; // expected-error {{constant-evaluated context}}
+    constexpr auto w2 = Wrap<int const&>{x};  // expected-error {{constant-evaluated context}}
     consteval auto w3 = Wrap<int const*>{&x};
     consteval auto w4 = Wrap<int const&>{x};
 }
@@ -55,7 +55,7 @@ void local(int argc) {
     // Error: constexpr functions don't create constant-evaluated contexts
     int a5 = h(y);     // expected-error {{expressions involving consteval-only values}}
 
-    int const& a6 = y; // expected-error {{expressions involving consteval}}
+    int const& a6 = y; // expected-error {{constant-evaluated context}}
     constexpr int const& a7 = y; // expected-error {{constant expression}}
 
     // OK: static_assert creates a constant-evaluated context
@@ -171,7 +171,7 @@ namespace N3 {
 namespace N4 {
     using info = decltype(^^::);
 
-    constexpr info r1 = ^^int; //expected-error {{constant expression}}
+    constexpr info r1 = ^^int; //expected-error {{constant-evaluated context}}
     consteval info r2 = ^^int; // OK
 
     constexpr int size_of1(info ) { return 0; }
@@ -186,14 +186,14 @@ namespace N4 {
 
 
     struct M { info r; };
-    constexpr auto m1 = M{.r=^^int}; // expected-error {{constant expression}}
+    constexpr auto m1 = M{.r=^^int}; // expected-error {{constant-evaluated context}}
     consteval auto m2 = M{.r=^^int}; // OK
-    constexpr auto m3 = m2;          // expected-error {{constant expression}}
-    constexpr auto m4 = []{ return m2; }(); // expected-error {{constant expression}}
+    constexpr auto m3 = m2;          // expected-error {{constant-evaluated context}}
+    constexpr auto m4 = []{ return m2; }(); // expected-error {{constant-evaluated context}}
     consteval auto m5 = []{ return m2; }(); // OK
 
     constexpr info* pr = nullptr; // OK
-    constexpr M const* pm1 = &m2; // expected-error {{constant expression}}
+    constexpr M const* pm1 = &m2; // expected-error {{constant-evaluated context}}
     consteval M const* pm2 = &m2; // OK
 }
 
@@ -215,4 +215,26 @@ void lambda_capture() {
     consteval int y = 2;
     auto fx = []{ return x; };
     auto fy = []{ return y; };
+}
+
+namespace N6 {
+    using info = decltype(^^::);
+
+    struct S {
+        int i;
+        info r;
+    };
+    consteval S s = {.r = ^^int};
+
+    consteval const int &r1 = s.i; // ok
+    constexpr const int &r2 = s.i; // expected-error {{constant-evaluated context}}
+    const int &r3 = s.i; // expected-error {{constant-evaluated context}}
+    int x = s.i; // ok (because constant expression)
+
+    auto local() -> void {
+        consteval const int &lr1 = s.i; // ok
+        constexpr const int &lr2 = s.i; // expected-error {{constant-evaluated context}}
+        const int &lr3 = s.i; // expected-error {{constant-evaluated context}}
+        int lx = s.i; // ok (because constant expression)
+    }
 }
