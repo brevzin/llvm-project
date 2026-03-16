@@ -831,10 +831,7 @@ ExprResult Sema::ConstevalOnlyRecorder::RecordAndReturn(ExprResult Res) {
   if (Res.isInvalid())
     return Res;
 
-  Expr *E = Res.get();
-  // assert(E->getType()->isConstevalOnly() &&
-  //        "expected an expression of consteval-only type");
-  TheExpr = E;
+  TheExpr = Res.get();
   return Res;
 }
 

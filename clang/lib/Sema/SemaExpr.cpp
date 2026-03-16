@@ -18324,35 +18324,30 @@ HandleImmediateInvocations(Sema &SemaRef,
 
     if (!Rec.InImmediateEscalatingFunctionContext ||
         (SemaRef.inTemplateInstantiation() && !ImmediateEscalating)) {
-      // Check if this is a consteval variable reference vs consteval-only type
-      unsigned DiagID = diag::err_expr_consteval_only_type;
-      if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
-        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-          if (VD->isConsteval())
-            DiagID = diag::err_expr_consteval_var;
-        }
-      } else if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(E)) {
-        // Treat template parameters bound to consteval values as consteval variables
-        if (auto *DRE = dyn_cast<DeclRefExpr>(SNTTPE->getReplacement())) {
-          if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
-            if (FD->isImmediateFunction())
-              DiagID = diag::err_expr_consteval_var;
-          } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-            if (VD->isConsteval())
-              DiagID = diag::err_expr_consteval_var;
-          }
-        }
-      } else if (auto *CE = dyn_cast<CallExpr>(E)) {
-        // Check if this is a call through a consteval template parameter
-        if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(CE->getCallee())) {
-          if (auto *DRE = dyn_cast<DeclRefExpr>(SNTTPE->getReplacement())) {
-            if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
-              if (FD->isImmediateFunction())
-                DiagID = diag::err_expr_consteval_var;
-            }
-          }
-        }
-      }
+      // Select the appropriate diagnostic: use err_expr_consteval_var when the
+      // expression directly or indirectly refers to a consteval declaration,
+      // otherwise fall back to the generic consteval-only type diagnostic.
+      auto RefersToConstevalDecl = [](Expr *E) -> bool {
+        // Unwrap SubstNonTypeTemplateParmExpr and CallExpr to find the
+        // underlying DeclRefExpr.
+        if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(E))
+          E = SNTTPE->getReplacement();
+        else if (auto *CE = dyn_cast<CallExpr>(E))
+          if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(CE->getCallee()))
+            E = SNTTPE->getReplacement();
+
+        auto *DRE = dyn_cast<DeclRefExpr>(E);
+        if (!DRE)
+          return false;
+        if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
+          return FD->isImmediateFunction();
+        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
+          return VD->isConsteval();
+        return false;
+      };
+      unsigned DiagID = RefersToConstevalDecl(E)
+                            ? diag::err_expr_consteval_var
+                            : diag::err_expr_consteval_only_type;
       SemaRef.Diag(E->getExprLoc(), DiagID) << E->getSourceRange();
     } else {
       SemaRef.MarkExpressionAsImmediateEscalating(E);
@@ -20572,27 +20567,24 @@ MarkExprReferenced(Sema &SemaRef, SourceLocation Loc, Decl *D, Expr *E,
 }
 
 void Sema::MarkSubstNonTypeTemplateParmExprReferenced(SubstNonTypeTemplateParmExpr *E) {
-  // Check if the replacement expression refers to a consteval value
-  // If so, mark this substitution as requiring constant evaluation
-  if (!isUnevaluatedContext()) {
-    if (auto *DRE = dyn_cast<DeclRefExpr>(E->getReplacement())) {
-      if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl())) {
-        if (FD->isImmediateFunction()) {
-          // Mark as ConstevalOnly even in constant evaluated contexts
-          // unless we're already in a consteval context
-          if (!isImmediateFunctionContext()) {
-            ExprEvalContexts.back().ConstevalOnly.insert(E);
-          }
-        }
-      } else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-        if (VD->isConsteval() || VD->getType()->isConstevalOnly()) {
-          if (!isImmediateFunctionContext()) {
-            ExprEvalContexts.back().ConstevalOnly.insert(E);
-          }
-        }
-      }
-    }
-  }
+  // If the replacement refers to a consteval function or variable, track this
+  // substitution as a consteval-only expression so it gets diagnosed if used
+  // outside an immediate function context.
+  if (isUnevaluatedContext() || isImmediateFunctionContext())
+    return;
+
+  auto *DRE = dyn_cast<DeclRefExpr>(E->getReplacement());
+  if (!DRE)
+    return;
+
+  bool IsConstevalOnly = false;
+  if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
+    IsConstevalOnly = FD->isImmediateFunction();
+  else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
+    IsConstevalOnly = VD->isConsteval();
+
+  if (IsConstevalOnly)
+    ExprEvalContexts.back().ConstevalOnly.insert(E);
 }
 
 void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
@@ -20614,15 +20606,10 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
     if (auto *FD = dyn_cast<FunctionDecl>(E->getDecl());
         FD && FD->isImmediateFunction() && !FD->isDependentContext()) {
       ExprEvalContexts.back().ReferenceToConsteval.insert(E);
-
-      if (FD->getType()->isConstevalOnly())
-        ExprEvalContexts.back().ConstevalOnly.insert(E);
-    } else if (E->getDecl()) {
-      if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
-          VD && !VD->getType()->getContainedAutoType()
-             && (VD->getType()->isConstevalOnly() || VD->isConsteval())) {
-        ExprEvalContexts.back().ConstevalOnly.insert(E);
-      }
+    } else if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
+               VD && VD->isConsteval() &&
+               !VD->getType()->getContainedAutoType()) {
+      ExprEvalContexts.back().ConstevalOnly.insert(E);
     }
   }
   MarkExprReferenced(*this, E->getLocation(), E->getDecl(), E, OdrUse,

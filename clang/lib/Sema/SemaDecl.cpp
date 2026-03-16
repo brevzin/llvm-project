@@ -14680,40 +14680,38 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (var->isInvalidDecl()) return;
 
   // A variable initialized with a consteval-only value must be consteval.
-  // Check both the type (for types that inherently contain consteval-only
-  // values, like structs with info members) and the initializer value.
-  if (!var->isConsteval() &&
+  // This has two parts:
+  //   1. Check the initializer expression tree for consteval-only constructs
+  //      (reflections, address-of consteval variables, etc.) — but only in
+  //      non-constant-evaluated contexts, since the expression-level
+  //      ConstevalOnly tracking handles those.
+  //   2. For reference variables, check the evaluated APValue for references
+  //      into consteval storage (e.g., const int &r = consteval_var.member;).
+  //      This is needed because expression-level tracking can miss member
+  //      access on consteval variables when the DRE is erased by
+  //      MarkNotOdrUsed.
+  if (!var->isConsteval() && var->hasInit() &&
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
-      !isImmediateFunctionContext() && !isAlwaysConstantEvaluatedContext()) {
-    if (var->hasInit() && ExprContainsConstevalOnlyValue(var->getInit())) {
+      !isImmediateFunctionContext()) {
+    bool HasConstevalOnlyValue = false;
+
+    if (!isAlwaysConstantEvaluatedContext())
+      HasConstevalOnlyValue = ExprContainsConstevalOnlyValue(var->getInit());
+
+    if (!HasConstevalOnlyValue && var->getType()->isReferenceType() &&
+        !var->getInit()->isValueDependent() &&
+        !var->getInit()->isTypeDependent()) {
+      Expr::EvalResult ER;
+      if (var->getInit()->EvaluateAsLValue(ER, Context))
+        HasConstevalOnlyValue = APValueContainsConstevalOnlyValue(ER.Val);
+    }
+
+    if (HasConstevalOnlyValue) {
       if (!ExprEvalContexts.back().InImmediateEscalatingFunctionContext)
         Diag(var->getLocation(), diag::err_decl_consteval_only_type) << var;
       else if (FunctionScopeInfo *FI = getCurFunction())
         FI->FoundImmediateEscalatingConstruct = true;
-    }
-  }
-
-  // For reference/pointer variables that bind to consteval storage,
-  // the expression-level ConstevalOnly tracking may not catch it (e.g.,
-  // const int &r = consteval_var.member;). Check the evaluated APValue
-  // for references into consteval variables.
-  if (!var->isConsteval() && var->getType()->isReferenceType() &&
-      !isCheckingDefaultArgumentOrInitializer() &&
-      !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
-      !isImmediateFunctionContext()) {
-    if (var->hasInit() && !var->getInit()->isValueDependent() &&
-        !var->getInit()->isTypeDependent()) {
-      Expr::EvalResult ER;
-      if (var->getInit()->EvaluateAsLValue(ER, Context) &&
-          APValueContainsConstevalOnlyValue(ER.Val)) {
-        if (ExprEvalContexts.back().InImmediateEscalatingFunctionContext) {
-          if (FunctionScopeInfo *FI = getCurFunction())
-            FI->FoundImmediateEscalatingConstruct = true;
-        } else {
-          Diag(var->getLocation(), diag::err_decl_consteval_only_type) << var;
-        }
-      }
     }
   }
 
@@ -14878,7 +14876,6 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (getLangOpts().C23 && var->isConstexpr() && !Init)
     Diag(var->getLocation(), diag::err_constexpr_var_requires_const_init)
         << var;
-
 
 
   // Check whether the initializer is sufficiently constant.
