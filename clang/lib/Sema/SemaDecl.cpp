@@ -14702,7 +14702,8 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
       !isImmediateFunctionContext()) {
-    if (var->hasInit()) {
+    if (var->hasInit() && !var->getInit()->isValueDependent() &&
+        !var->getInit()->isTypeDependent()) {
       Expr::EvalResult ER;
       if (var->getInit()->EvaluateAsLValue(ER, Context) &&
           APValueContainsConstevalOnlyValue(ER.Val)) {
