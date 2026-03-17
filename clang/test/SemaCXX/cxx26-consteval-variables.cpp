@@ -246,12 +246,14 @@ namespace N7 {
         info r;
         template <class> constexpr auto eq() const -> bool { return this->r == info(); }
         template <class> constexpr auto ne() const -> bool { return this->r != info(); }
+        template <class> constexpr auto id() const -> info { return this-> r; }
     };
 
     constexpr auto p1 = &S::eq<int>; // expected-error {{constant expression}}
     consteval auto p2 = &S::eq<int>; // ok
     constexpr auto p3 = &S::ne<int>; // expected-error {{constant expression}}
     consteval auto p4 = &S::ne<int>; // ok
+    constexpr auto p5 = &S::id<int>; // ok (doesn't escalate)
 
     constexpr auto const& r1 = S{^^int}; // expected-error {{constant-evaluated context}}
     consteval auto const& r2 = S{^^int}; // ok
