@@ -238,3 +238,18 @@ namespace N6 {
         int lx = s.i; // ok (because constant expression)
     }
 }
+
+namespace N7 {
+    using info = decltype(^^::);
+
+    struct S {
+        info r;
+        template <class> constexpr auto eq() const -> bool { return this->r == info(); }
+        template <class> constexpr auto ne() const -> bool { return this->r != info(); }
+    };
+
+    constexpr auto p1 = &S::eq<int>; // expected-error {{constant expression}}
+    consteval auto p2 = &S::eq<int>; // ok
+    constexpr auto p3 = &S::ne<int>; // expected-error {{constant expression}}
+    consteval auto p4 = &S::ne<int>; // ok
+}

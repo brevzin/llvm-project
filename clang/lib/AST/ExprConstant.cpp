@@ -2602,9 +2602,18 @@ static bool CheckMemberPointerConstantExpression(EvalInfo &Info,
   if (!FD)
     return true;
   if (FD->isImmediateFunction()) {
-    Info.FFDiag(Loc, diag::note_consteval_address_accessible) << /*pointer*/ 0;
-    Info.Note(FD->getLocation(), diag::note_declared_at);
-    return false;
+    // Allow member pointers to consteval functions in consteval variable
+    // initializers (they can hold consteval-only values).
+    bool Allow = false;
+    if (Info.ContainingDecl) {
+      if (auto *VD = dyn_cast<VarDecl>(Info.ContainingDecl))
+        Allow = VD->isConsteval();
+    }
+    if (!Allow) {
+      Info.FFDiag(Loc, diag::note_consteval_address_accessible) << /*pointer*/ 0;
+      Info.Note(FD->getLocation(), diag::note_declared_at);
+      return false;
+    }
   }
   return isForManglingOnly(Kind) || FD->isVirtual() ||
          !FD->hasAttr<DLLImportAttr>();

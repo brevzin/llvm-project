@@ -15439,8 +15439,20 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
     if (ConvertHalfVec)
       return convertHalfVecBinOp(*this, LHS, RHS, Opc, ResultTy, VK, OK, false,
                                  OpLoc, CurFPFeatureOverrides());
-    return BinaryOperator::Create(Context, LHS.get(), RHS.get(), Opc, ResultTy,
-                                  VK, OK, OpLoc, CurFPFeatureOverrides());
+    ExprResult Result = BinaryOperator::Create(
+        Context, LHS.get(), RHS.get(), Opc, ResultTy, VK, OK, OpLoc,
+        CurFPFeatureOverrides());
+
+    // Reflection equality/inequality comparisons are treated as consteval
+    // operations — they can only be meaningfully evaluated at compile time.
+    if (BinaryOperator::isEqualityOp(Opc) &&
+        LHS.get()->getType()->isReflectionType() &&
+        !isUnevaluatedContext() && !isImmediateFunctionContext() &&
+        !isAlwaysConstantEvaluatedContext()) {
+      ExprEvalContexts.back().ConstevalOnly.insert(Result.get());
+    }
+
+    return Result;
   }
 
   // Handle compound assignments.
