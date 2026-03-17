@@ -14595,17 +14595,28 @@ bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
       return true;
   }
 
-  // Check LValues that refer to consteval variables
+  // Check LValues that refer to consteval variables or temporaries containing
+  // consteval-only values.
   if (V.isLValue()) {
-    if (const ValueDecl *D = V.getLValueBase().dyn_cast<const ValueDecl*>()) {
-      if (const VarDecl *VD = dyn_cast<VarDecl>(D)) {
+    APValue::LValueBase Base = V.getLValueBase();
+    if (const auto *D = Base.dyn_cast<const ValueDecl*>()) {
+      if (const auto *VD = dyn_cast<VarDecl>(D)) {
         if (VD->isConsteval())
           return true;
       }
-      // Check for immediate function pointers
-      if (const FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+      if (const auto *FD = dyn_cast<FunctionDecl>(D)) {
         if (FD->isImmediateFunction())
           return true;
+      }
+    }
+    // For references bound to lifetime-extended temporaries, check the
+    // temporary's evaluated value (e.g., const auto& r = S{^^int}).
+    if (const auto *E = Base.dyn_cast<const Expr*>()) {
+      if (const auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E)) {
+        if (const auto *LETD = MTE->getLifetimeExtendedTemporaryDecl()) {
+          if (const APValue *TempVal = LETD->getValue())
+            return APValueContainsConstevalOnlyValue(*TempVal);
+        }
       }
     }
   }
@@ -14669,6 +14680,10 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
     return false;
   }
 
+  // For MaterializeTemporaryExpr, check the temporary value.
+  if (auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E))
+    return ExprContainsConstevalOnlyValue(MTE->getSubExpr());
+
   // For CXXDefaultInitExpr, check the underlying init expression.
   if (auto *DIE = dyn_cast<CXXDefaultInitExpr>(E))
     return ExprContainsConstevalOnlyValue(DIE->getExpr());
@@ -14694,10 +14709,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
       !isImmediateFunctionContext()) {
-    bool HasConstevalOnlyValue = false;
-
-    if (!isAlwaysConstantEvaluatedContext())
-      HasConstevalOnlyValue = ExprContainsConstevalOnlyValue(var->getInit());
+    bool HasConstevalOnlyValue = ExprContainsConstevalOnlyValue(var->getInit());
 
     if (!HasConstevalOnlyValue && var->getType()->isReferenceType() &&
         !var->getInit()->isValueDependent() &&

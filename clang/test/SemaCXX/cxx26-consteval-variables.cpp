@@ -252,4 +252,7 @@ namespace N7 {
     consteval auto p2 = &S::eq<int>; // ok
     constexpr auto p3 = &S::ne<int>; // expected-error {{constant expression}}
     consteval auto p4 = &S::ne<int>; // ok
+
+    constexpr auto const& r1 = S{^^int}; // expected-error {{constant-evaluated context}}
+    consteval auto const& r2 = S{^^int}; // ok
 }
