@@ -10,7 +10,7 @@
 //
 // RUN: %clang_cc1 %s -std=c++26 -freflection
 
-consteval auto r = ^^int;
+constexpr auto r = ^^int;
 typename[:r:] x = 42;       // Same as: int x = 42;
 typename[:^^char:] c = '*';  // Same as: char c = '*';
 

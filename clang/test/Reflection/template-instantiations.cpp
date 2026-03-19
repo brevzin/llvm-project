@@ -23,15 +23,15 @@ struct Test {
   using type = int;
 };
 
-consteval info rTest = ^^Test;
+constexpr info rTest = ^^Test;
 }  // namespace myns
 
 struct Test {
   using type = int;
 };
 
-consteval info null1;
-consteval info null2;
+constexpr info null1;
+constexpr info null2;
 
 // Test equality of instantiations parameterized by reflection types.
 static_assert(fn<null1> == fn<null2>);
@@ -46,7 +46,7 @@ static_assert(fn<^^::Test::type> != fn<^^myns::Test::type>);
 static_assert(fn<^^::Test::type> == fn<^^::Test::type>);
 
 // Test instantiations in the presence of a variable holding the reflection.
-consteval info refl = ^^int;
+constexpr info refl = ^^int;
 static_assert(fn<refl> == fn<refl>);
 static_assert(fn<refl> == fn<^^int>);
 static_assert(fn<refl> != fn<null1>);

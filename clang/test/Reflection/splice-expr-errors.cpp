@@ -76,7 +76,7 @@ void fn([:^^int:]);
 namespace enclosing_lambdas {
 void fn() {
   int x = 1;  // expected-note {{'x' declared here}}
-  consteval auto r = ^^x;
+  constexpr auto r = ^^x;
 
   (void) [] -> decltype([:r:]) {
     return [:r:];

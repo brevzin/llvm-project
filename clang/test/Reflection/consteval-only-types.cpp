@@ -140,7 +140,7 @@ struct Derived : Base {
   consteval Derived() : Base(), k(^^int) {}
 };
 consteval const Base &fn1() {
-  static consteval Derived d;
+  static constexpr Derived d;
   return d;
 }
 constexpr auto &ref = fn1(); // implicitly consteval
@@ -148,7 +148,7 @@ constexpr auto &ref = fn1(); // implicitly consteval
 consteval auto &ref2 = fn1(); // ok (consteval)
 
 consteval void *fn2() {
-  static consteval auto v = ^^int;
+  static constexpr auto v = ^^int;
   return (void *)&v;
 }
 constexpr const void *ptr = fn2(); // implicitly consteval
