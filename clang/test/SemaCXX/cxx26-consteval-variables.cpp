@@ -2,6 +2,8 @@
 
 // Test for P3603R0: Allowing consteval variables
 
+using info = decltype(^^::);
+
 // Global consteval variables
 consteval int x = 42;
 static_assert(x == 42);
@@ -169,8 +171,6 @@ namespace N3 {
 }
 
 namespace N4 {
-    using info = decltype(^^::);
-
     constexpr info r1 = ^^int; //expected-error {{constant-evaluated context}}
     consteval info r2 = ^^int; // OK
 
@@ -218,8 +218,6 @@ void lambda_capture() {
 }
 
 namespace N6 {
-    using info = decltype(^^::);
-
     struct S {
         int i;
         info r;
@@ -240,8 +238,6 @@ namespace N6 {
 }
 
 namespace N7 {
-    using info = decltype(^^::);
-
     struct S {
         info r;
         template <class> constexpr auto eq() const -> bool { return this->r == info(); }
@@ -257,4 +253,20 @@ namespace N7 {
 
     constexpr auto const& r1 = S{^^int}; // expected-error {{constant-evaluated context}}
     consteval auto const& r2 = S{^^int}; // ok
+}
+
+namespace N8 {
+    info var; // ok
+    auto normal_func() -> void {
+        var = ^^int; // expected-error {{constant}}
+    }
+    constexpr auto constexpr_func() -> bool {
+        var = ^^int; // expected-error {{constant}}
+        return true;
+    }
+    consteval auto consteval_func() -> bool {
+        var = ^^int;
+        return true;
+    }
+    static_assert(consteval_func()); // expected-error {{constant}}
 }
