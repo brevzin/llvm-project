@@ -32,7 +32,7 @@ auto parse_options(std::span<std::string_view const> args) -> Opts {
   Opts opts;
 
   using std::meta::access_context;
-  template for (consteval auto dm :
+  template for (constexpr auto dm :
                 define_static_array(
                     nonstatic_data_members_of(^^Opts,
                                               access_context::current()))) {

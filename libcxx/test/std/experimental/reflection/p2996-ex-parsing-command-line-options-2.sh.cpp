@@ -74,7 +74,7 @@ struct Clap {
       std::meta::info opt;
     };
 
-    template for (consteval auto Pair :
+    template for (constexpr auto Pair :
                   std::define_static_array([]() consteval {
       auto ctx = std::meta::access_context::current();
 
@@ -87,11 +87,11 @@ struct Clap {
       }
       return v;
     }())) {
-      consteval auto sm = Pair.spec;
-      consteval auto om = Pair.opt;
+      constexpr auto sm = Pair.spec;
+      constexpr auto om = Pair.opt;
 
       auto& cur = spec.[:sm:];
-      consteval auto type = type_of(om);
+      constexpr auto type = type_of(om);
 
       // find the argument associated with this option
       auto it = std::find_if(cmdline.begin(), cmdline.end(),

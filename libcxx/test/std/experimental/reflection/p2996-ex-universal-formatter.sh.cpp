@@ -41,7 +41,7 @@ struct universal_formatter {
       first = false;
     };
 
-    template for (consteval auto base :
+    template for (constexpr auto base :
                   define_static_array(bases_of(^^T,
                                                access_context::current()))) {
         delim();
@@ -49,7 +49,7 @@ struct universal_formatter {
                              (typename [: type_of(base) :] const&)(t));
     };
 
-    template for (consteval auto mem :
+    template for (constexpr auto mem :
                   define_static_array(
                       nonstatic_data_members_of(^^T,
                                                 access_context::current()))) {

@@ -19,7 +19,7 @@
 #include <experimental/meta>
 
 
-consteval auto ctx = std::meta::access_context::unchecked();
+constexpr auto ctx = std::meta::access_context::unchecked();
 
                          // ==========================
                          // class_or_namespace_members
@@ -406,7 +406,7 @@ struct S {
   void noexcept_true_method() noexcept(true);
   void noexcept_false_method() noexcept(false);
   void not_noexcept_method();
-
+  
   // virtual methods
   // w/o defining it complains about vtable
   virtual void noexcept_virtual_method() noexcept {}
@@ -983,7 +983,7 @@ template<char...>
 int operator""_b();
 
 
-consteval auto conversion_template =
+constexpr auto conversion_template =
     (members_of(^^T, ctx) | std::views::filter(std::meta::is_template)).front();
 
 static_assert(is_operator_function(^^S::operator+));

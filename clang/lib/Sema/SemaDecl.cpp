@@ -14704,15 +14704,20 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   // A variable whose type contains meta::info (through struct fields or array
   // elements, but not pointers, references, functions, or unions) must be
   // consteval, since any such object inherently holds a reflection value.
+  // Constexpr variables are silently upgraded to consteval.
   if (!var->isConsteval() &&
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
       !isImmediateFunctionContext() &&
       var->getType()->isConstevalOnly()) {
-    if (!ExprEvalContexts.back().InImmediateEscalatingFunctionContext)
+    if (var->isConstexpr()) {
+      var->setConsteval(true);
+    } else if (ExprEvalContexts.back().InImmediateEscalatingFunctionContext) {
+      if (FunctionScopeInfo *FI = getCurFunction())
+        FI->FoundImmediateEscalatingConstruct = true;
+    } else {
       Diag(var->getLocation(), diag::err_decl_consteval_only_type) << var;
-    else if (FunctionScopeInfo *FI = getCurFunction())
-      FI->FoundImmediateEscalatingConstruct = true;
+    }
   }
 
   // A variable initialized with a consteval-only value must be consteval.
@@ -14742,10 +14747,14 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
     }
 
     if (HasConstevalOnlyValue) {
-      if (!ExprEvalContexts.back().InImmediateEscalatingFunctionContext)
+      if (var->isConstexpr()) {
+        var->setConsteval(true);
+      } else if (ExprEvalContexts.back().InImmediateEscalatingFunctionContext) {
+        if (FunctionScopeInfo *FI = getCurFunction())
+          FI->FoundImmediateEscalatingConstruct = true;
+      } else {
         Diag(var->getLocation(), diag::err_decl_consteval_only_type) << var;
-      else if (FunctionScopeInfo *FI = getCurFunction())
-        FI->FoundImmediateEscalatingConstruct = true;
+      }
     }
   }
 
@@ -14947,22 +14956,11 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
 
     if (HasConstInit) {
       // Check if a constexpr variable contains consteval-only values.
-      // Such variables must be declared consteval, not just constexpr.
+      // Such variables are silently upgraded to consteval.
       if (var->isConstexpr() && !var->isConsteval() && !var->isStaticDataMember()) {
         if (APValue *V = var->evaluateValue()) {
           if (APValueContainsConstevalOnlyValue(*V)) {
-            bool IsVariableTemplate = isa<VarTemplateSpecializationDecl>(var);
-            if (IsVariableTemplate) {
-              // Upgrade from constexpr to consteval
-              var->setConsteval(true);
-            } else if (ExprEvalContexts.back()
-                           .InImmediateEscalatingFunctionContext) {
-              if (FunctionScopeInfo *FI = getCurFunction())
-                FI->FoundImmediateEscalatingConstruct = true;
-            } else {
-              Diag(var->getLocation(), diag::err_decl_consteval_only_type)
-                  << var;
-            }
+            var->setConsteval(true);
           }
         }
       }

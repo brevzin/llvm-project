@@ -20,8 +20,8 @@
 #include <experimental/meta>
 
 
-consteval auto ctx = std::meta::access_context::current();
-consteval auto unchecked = std::meta::access_context::unchecked();
+constexpr auto ctx = std::meta::access_context::current();
+constexpr auto unchecked = std::meta::access_context::unchecked();
 
 struct Base {};
 enum Enum { Red };
@@ -96,10 +96,10 @@ struct S : T {
   using T::fn;
   using typename T::Inner;
 
-  static consteval auto r = ^^S::fn;
-  static consteval auto s = ^^fn;
-  static consteval auto t = ^^typename S::Inner;
-  static consteval auto u = ^^Inner;
+  static constexpr auto r = ^^S::fn;
+  static constexpr auto s = ^^fn;
+  static constexpr auto t = ^^typename S::Inner;
+  static constexpr auto u = ^^Inner;
 };
 
 struct A { void fn(); struct Inner {}; };

@@ -38,7 +38,7 @@ template<typename... Ts> struct Tuple {
 };
 
 consteval std::meta::info get_nth_field(std::meta::info r, std::size_t n) {
-  consteval auto ctx = std::meta::access_context::current();
+  constexpr auto ctx = std::meta::access_context::current();
   return nonstatic_data_members_of(r, ctx)[n];
 }
 
@@ -54,7 +54,7 @@ struct std::tuple_size<Tuple<Ts...>>
 
 template<std::size_t I, typename... Ts>
 struct std::tuple_element<I, Tuple<Ts...>> {
-  static consteval std::array types = {^^Ts...};
+  static constexpr std::array types = {^^Ts...};
   using type = [: types[I] :];
 };
 

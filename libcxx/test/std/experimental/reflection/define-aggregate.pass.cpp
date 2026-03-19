@@ -23,7 +23,7 @@
 
 #include <print>
 
-consteval auto ctx = std::meta::access_context::unchecked();
+constexpr auto ctx = std::meta::access_context::unchecked();
 
                           // =========================
                           // completion_with_no_fields
@@ -355,7 +355,7 @@ namespace {
 struct I;
 
 consteval void *fn1() {
-  static consteval auto r = ^^I;
+  static constexpr auto r = ^^I;
   return (void *)&r;
 }
 

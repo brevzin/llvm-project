@@ -19,7 +19,7 @@
 #include <experimental/meta>
 
 
-consteval auto ctx = std::meta::access_context::unchecked();
+constexpr auto ctx = std::meta::access_context::unchecked();
 
                                 // =============
                                 // static_arrays
@@ -43,7 +43,7 @@ constexpr auto objs = std::define_static_array(std::vector<Cls>{1, 3, 5});
 static_assert(objs.size() == 3);
 static_assert(objs[0].k == 4 && objs[1].k == 6 && objs[2].k == 8);
 
-consteval auto infos = std::define_static_array(
+constexpr auto infos = std::define_static_array(
                                               nonstatic_data_members_of(^^Cls,
                                                                         ctx));
 static_assert(infos.size() == 1);

@@ -142,14 +142,14 @@ static_assert(
 static_assert(
   !has_automatic_storage_duration(template_arguments_of(^^TCls<S{}>)[0]));
 
-template <auto K> consteval auto R = std::meta::reflect_object(K);
+template <auto K> constexpr auto R = std::meta::reflect_object(K);
 static_assert(has_static_storage_duration(R<S{}>));
 static_assert(!has_thread_storage_duration(R<S{}>));
 static_assert(!has_automatic_storage_duration(R<S{}>));
 
 static std::pair<int, int> p;
 
-consteval auto first = std::meta::reflect_object(p.first);
+constexpr auto first = std::meta::reflect_object(p.first);
 static_assert(has_static_storage_duration(first));
 static_assert(!has_thread_storage_duration(first));
 static_assert(!has_automatic_storage_duration(first));

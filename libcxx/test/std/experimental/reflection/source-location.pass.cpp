@@ -39,7 +39,7 @@ void foo([[maybe_unused]] int param) {
     static_assert(source_location_of(^^S).function_name() == FnName);
 
     struct C : S {};
-    consteval auto ctx = std::meta::access_context::current();
+    constexpr auto ctx = std::meta::access_context::current();
     static_assert(source_location_of(bases_of(^^C, ctx)[0]).line() ==
                   std::source_location::current().line() - 3);
 

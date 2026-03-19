@@ -22,7 +22,7 @@
 #include <print>
 
 
-consteval auto ctx = std::meta::access_context::unchecked();
+constexpr auto ctx = std::meta::access_context::unchecked();
 
                                  // ===========
                                  // well_formed
@@ -70,7 +70,7 @@ consteval auto fn4() {
   consteval { define_aggregate(^^S, {}); }
   return ^^S;
 }
-consteval auto i4 = fn4<int>();
+constexpr auto i4 = fn4<int>();
 
 }  // namespace well_formed
 

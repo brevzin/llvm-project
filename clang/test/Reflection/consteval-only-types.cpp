@@ -143,8 +143,7 @@ consteval const Base &fn1() {
   static consteval Derived d;
   return d;
 }
-constexpr auto &ref = fn1();
-// expected-error@-1 {{constant-evaluated context}}
+constexpr auto &ref = fn1(); // implicitly consteval
 
 consteval auto &ref2 = fn1(); // ok (consteval)
 
@@ -152,8 +151,7 @@ consteval void *fn2() {
   static consteval auto v = ^^int;
   return (void *)&v;
 }
-constexpr const void *ptr = fn2();
-// expected-error@-1 {{constant-evaluated context}}
+constexpr const void *ptr = fn2(); // implicitly consteval
 consteval const void *ptr2 = fn2(); // ok (consteval)
 
 }  // namespace alias_smuggling

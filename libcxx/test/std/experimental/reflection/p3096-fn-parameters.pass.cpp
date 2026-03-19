@@ -19,7 +19,7 @@
 #include <experimental/meta>
 
 
-consteval auto ctx = std::meta::access_context::unchecked();
+constexpr auto ctx = std::meta::access_context::unchecked();
 
                               // =================
                               // with_no_arguments
@@ -85,7 +85,7 @@ struct Cls {
   static Cls &sfn(int a, ...);
 };
 
-consteval auto ctor =
+constexpr auto ctor =
     (members_of(^^Cls, ctx) |
      std::views::filter(std::meta::is_constructor)).front();
 static_assert(parameters_of(ctor).size() == 1);
@@ -96,7 +96,7 @@ static_assert(!has_default_argument(parameters_of(ctor)[0]));
 static_assert(!is_explicit_object_parameter(parameters_of(ctor)[0]));
 static_assert(!has_ellipsis_parameter(ctor));
 
-consteval auto dtor =
+constexpr auto dtor =
     (members_of(^^Cls, ctx) |
      std::views::filter(std::meta::is_destructor)).front();
 static_assert(parameters_of(dtor).size() == 0);
@@ -157,7 +157,7 @@ std::tuple<Ts *...> fn(Ts &&... ts);
 
 template <std::meta::info TFn, typename... Ts>  // check with dependent names.
 consteval bool check() {
-  consteval auto Fn = substitute(TFn, {^^Ts...});
+  constexpr auto Fn = substitute(TFn, {^^Ts...});
   static_assert(parameters_of(Fn).size() == 3);
   static_assert(parameters_of(type_of(Fn)) ==
                 std::vector {^^int &&, ^^char &&, ^^bool &&});
@@ -220,12 +220,12 @@ void fn(int a1, bool b, char c1);
 static_assert(has_consistent_identifier(parameters_of(^^fn)[2]));
 
 void fn(int a2, bool,   char c2);
-consteval auto r_a2 = parameters_of(^^fn)[0];
+constexpr auto r_a2 = parameters_of(^^fn)[0];
 
 static_assert(identifier_of(parameters_of(^^fn)[1]) == "b");
 
 void fn(int a3, bool b, char c1);
-consteval auto r_a3 = parameters_of(^^fn)[0];
+constexpr auto r_a3 = parameters_of(^^fn)[0];
 
 static_assert(parameters_of(^^fn).size() == 3);
 static_assert(parameters_of(type_of(^^fn)) ==

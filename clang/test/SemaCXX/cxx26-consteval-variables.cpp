@@ -12,14 +12,14 @@ using I = decltype(x);
 consteval auto lvalue_to_rvalue(auto x) { return x; }
 
 namespace ptr_ref {
-    constexpr int const* p1 = &x; // expected-error {{constant-evaluated context}}
+    constexpr int const* p1 = &x; // implicitly consteval
     consteval int const* p2 = &x;
-    constexpr int const& r1 = x;  // expected-error {{constant-evaluated context}}
+    constexpr int const& r1 = x;  // implicitly consteval
     consteval int const& r2 = x;
 
     template <class T> struct Wrap { T t; };
-    constexpr auto w1 = Wrap<int const*>{&x}; // expected-error {{constant-evaluated context}}
-    constexpr auto w2 = Wrap<int const&>{x};  // expected-error {{constant-evaluated context}}
+    constexpr auto w1 = Wrap<int const*>{&x}; // implicitly consteval
+    constexpr auto w2 = Wrap<int const&>{x};  // implicitly consteval
     consteval auto w3 = Wrap<int const*>{&x};
     consteval auto w4 = Wrap<int const&>{x};
 }
@@ -171,7 +171,7 @@ namespace N3 {
 }
 
 namespace N4 {
-    constexpr info r1 = ^^int; //expected-error {{constant-evaluated context}}
+    constexpr info r1 = ^^int; // implicitly consteval
     consteval info r2 = ^^int; // OK
 
     constexpr int size_of1(info ) { return 0; }
@@ -186,14 +186,14 @@ namespace N4 {
 
 
     struct M { info r; };
-    constexpr auto m1 = M{.r=^^int}; // expected-error {{constant-evaluated context}}
+    constexpr auto m1 = M{.r=^^int}; // implicitly consteval
     consteval auto m2 = M{.r=^^int}; // OK
-    constexpr auto m3 = m2;          // expected-error {{constant-evaluated context}}
-    constexpr auto m4 = []{ return m2; }(); // expected-error {{constant-evaluated context}}
+    constexpr auto m3 = m2;          // implicitly consteval
+    constexpr auto m4 = []{ return m2; }(); // implicitly consteval
     consteval auto m5 = []{ return m2; }(); // OK
 
     constexpr info* pr = nullptr; // OK
-    constexpr M const* pm1 = &m2; // expected-error {{constant-evaluated context}}
+    constexpr M const* pm1 = &m2; // implicitly consteval
     consteval M const* pm2 = &m2; // OK
 }
 
@@ -225,13 +225,13 @@ namespace N6 {
     consteval S s = {.r = ^^int};
 
     consteval const int &r1 = s.i; // ok
-    constexpr const int &r2 = s.i; // expected-error {{constant-evaluated context}}
+    constexpr const int &r2 = s.i; // implicitly consteval
     const int &r3 = s.i; // expected-error {{constant-evaluated context}}
     int x = s.i; // ok (because constant expression)
 
     auto local() -> void {
         consteval const int &lr1 = s.i; // ok
-        constexpr const int &lr2 = s.i; // expected-error {{constant-evaluated context}}
+        constexpr const int &lr2 = s.i; // implicitly consteval
         const int &lr3 = s.i; // expected-error {{constant-evaluated context}}
         int lx = s.i; // ok (because constant expression)
     }
@@ -251,7 +251,7 @@ namespace N7 {
     consteval auto p4 = &S::ne<int>; // ok
     constexpr auto p5 = &S::id<int>; // ok (doesn't escalate)
 
-    constexpr auto const& r1 = S{^^int}; // expected-error {{constant-evaluated context}}
+    constexpr auto const& r1 = S{^^int}; // implicitly consteval
     consteval auto const& r2 = S{^^int}; // ok
 }
 

@@ -32,7 +32,7 @@ consteval auto struct_to_tuple_type(std::meta::info type) -> std::meta::info {
     return substitute(^^std::remove_cvref_t, {r});
   };
 
-  consteval auto ctx = std::meta::access_context::current();
+  constexpr auto ctx = std::meta::access_context::current();
   return substitute(^^std::tuple,
                     nonstatic_data_members_of(type, ctx)
                     | std::views::transform(std::meta::type_of)
@@ -50,7 +50,7 @@ consteval auto get_struct_to_tuple_helper() {
   using To = [: struct_to_tuple_type(^^From) :];
 
   std::vector args = {^^To, ^^From};
-  consteval auto ctx = std::meta::access_context::current();
+  constexpr auto ctx = std::meta::access_context::current();
   for (auto mem : nonstatic_data_members_of(^^From, ctx)) {
     args.push_back(reflect_constant(mem));
   }
