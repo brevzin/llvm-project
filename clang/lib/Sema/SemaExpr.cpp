@@ -20626,9 +20626,21 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
         FD && FD->isImmediateFunction() && !FD->isDependentContext()) {
       ExprEvalContexts.back().ReferenceToConsteval.insert(E);
     } else if (auto *VD = dyn_cast<VarDecl>(E->getDecl());
-               VD && VD->isConsteval() &&
-               !VD->getType()->getContainedAutoType()) {
-      ExprEvalContexts.back().ConstevalOnly.insert(E);
+               VD && !VD->getType()->getContainedAutoType()) {
+      if (VD->isConsteval()) {
+        ExprEvalContexts.back().ConstevalOnly.insert(E);
+      } else if (VD->isConstexpr() && VD->hasInit() &&
+                 !VD->getInit()->isValueDependent()) {
+        // For constexpr variables with deferred initialization (e.g., inline
+        // static data members of class templates), check if the evaluated
+        // value contains consteval-only content and upgrade if needed.
+        if (APValue *V = VD->evaluateValue()) {
+          if (APValueContainsConstevalOnlyValue(*V)) {
+            VD->setConsteval(true);
+            ExprEvalContexts.back().ConstevalOnly.insert(E);
+          }
+        }
+      }
     }
   }
   MarkExprReferenced(*this, E->getLocation(), E->getDecl(), E, OdrUse,

@@ -28,12 +28,13 @@ consteval int f(int i) { return x + i; }
 consteval int g(int) { return 0; }
 constexpr int h(int const&) { return 0; }
 
-constexpr auto pf1 = f; // expected-error {{constant expression}}
-consteval auto pf2 = f; // OK
+constexpr auto pf1 = f; // OK
+          auto pf2 = f; // expected-error {{immediate}}
 
 struct Wrap { int(*p)(int); };
-constexpr auto c1 = Wrap{.p=f}; // expected-error {{constant expression}}
+constexpr auto c1 = Wrap{.p=f}; // ok
 consteval auto c2 = Wrap{.p=f}; // ok
+          auto c3 = Wrap{.p=f}; // expected-error {{immediate}}
 
 void local(int argc) {
     // Local consteval variables
@@ -58,7 +59,7 @@ void local(int argc) {
     int a5 = h(y);     // expected-error {{expressions involving consteval-only values}}
 
     int const& a6 = y; // expected-error {{constant-evaluated context}}
-    constexpr int const& a7 = y; // expected-error {{constant expression}}
+    constexpr int const& a7 = y; // ok (implicitly consteval)
 
     // OK: static_assert creates a constant-evaluated context
     static_assert(f(1) == 43);
@@ -83,7 +84,7 @@ void expansion() {
 
     template for (consteval int x : {1, 2, 3}) {
         static_assert(x < 10);
-        constexpr int const* p = &x; // expected-error 3 {{constant expression}}
+        constexpr int const* p = &x; // ok (implicitly consteval)
     }
 
     template for (consteval auto p : Ptr{&i}) {
@@ -92,7 +93,7 @@ void expansion() {
 
     template for (consteval int e : array{1, 2, 3}) {
         static_assert(e < 10);
-        constexpr int const* p = &e; // expected-error 3 {{constant expression}}
+        constexpr int const* p = &e; // ok (implicitly consteval)
     }
 }
 
@@ -116,8 +117,8 @@ namespace N1 {
     static_assert(D<f>::call2(5) == 47); // ok
     static_assert(D<f>::call3(5) == 47); // ok
 
-    constexpr auto call2a = D<f>::call2; // expected-error {{constant expression}}
-    consteval auto call2b = D<f>::call2; // ok
+    constexpr auto call2a = D<f>::call2; // ok
+              auto call2b = D<f>::call2; // expected-error {{immediate}}
 }
 
 namespace N2 {
@@ -131,19 +132,19 @@ namespace N2 {
 
     constexpr auto i = C<0>::value;
     static_assert(i == 0);
-    constexpr auto pf1 = C<::f>::value; // expected-error {{constant expression}}
-    consteval auto pf2 = C<::f>::value;
-    static_assert(pf2(2) == 44);
-    constexpr auto pf3 = var<::f>; // expected-error {{constant expression}}
-    consteval auto pf4 = var<::f>;
-    static_assert(pf4(2) == 44);
+    constexpr auto pf1 = C<::f>::value; // ok
+              auto pf2 = C<::f>::value; // expected-error {{constant-evaluated}}
+    static_assert(pf1(2) == 44);
+    constexpr auto pf3 = var<::f>; // ok
+              auto pf4 = var<::f>; // expected-error {{constant-evaluated}}
+    static_assert(pf3(2) == 44);
 
-    constexpr auto w1 = C<Wrap{.p=::f}>::value; // expected-error {{constant expression}}
-    consteval auto w2 = C<Wrap{.p=::f}>::value;
-    static_assert(w2.p(2) == 44);
-    constexpr auto w3 = var<Wrap{.p=::f}>; // expected-error {{constant expression}}
-    consteval auto w4 = var<Wrap{.p=::f}>;
-    static_assert(w4.p(2) == 44);
+    constexpr auto w1 = C<Wrap{.p=::f}>::value; // ok
+              auto w2 = C<Wrap{.p=::f}>::value; // expected-error {{consteval-only values}}
+    static_assert(w1.p(2) == 44);
+    constexpr auto w3 = var<Wrap{.p=::f}>; // ok
+              auto w4 = var<Wrap{.p=::f}>; // expected-error {{consteval-only values}}
+    static_assert(w3.p(2) == 44);
 
 }
 
@@ -242,16 +243,17 @@ namespace N7 {
         info r;
         template <class> constexpr auto eq() const -> bool { return this->r == info(); }
         template <class> constexpr auto ne() const -> bool { return this->r != info(); }
-        template <class> constexpr auto id() const -> info { return this-> r; }
+        template <class> constexpr auto id() const -> info { return this->r; }
     };
 
-    constexpr auto p1 = &S::eq<int>; // expected-error {{constant expression}}
-    consteval auto p2 = &S::eq<int>; // ok
-    constexpr auto p3 = &S::ne<int>; // expected-error {{constant expression}}
-    consteval auto p4 = &S::ne<int>; // ok
-    constexpr auto p5 = &S::id<int>; // ok (doesn't escalate)
+              auto p1 = &S::eq<int>; // expected-error {{cannot take address of immediate}}
+    constexpr auto p2 = &S::eq<int>; // ok (implicictly consteval)
+              auto p3 = &S::ne<int>; // expected-error {{cannot take address of immediate}}
+    constexpr auto p4 = &S::ne<int>; // ok
+              auto p5 = &S::id<int>; // expected-error {{cannot take address of immediate}}
+    constexpr auto p6 = &S::id<int>; // ok
 
-    constexpr auto const& r1 = S{^^int}; // implicitly consteval
+    constexpr auto const& r1 = S{^^int}; // ok
     consteval auto const& r2 = S{^^int}; // ok
 }
 

@@ -7763,10 +7763,15 @@ ExprResult InitializationSequence::Perform(Sema &S,
                                            MultiExprArg Args,
                                            QualType *ResultType) {
   auto on_complete = [&](ExprResult Res) {
-    // Note: Under the old consteval-only type model, we tracked temporary
-    // expressions of consteval-only type here. Under the new value-based model,
-    // variable declarations are checked in CheckCompleteVariableDeclaration
-    // and expression values are tracked through ConstevalOnly elsewhere.
+    if (Res.get() && Res.get()->getType()->isConstevalOnly() &&
+        !Entity.getDecl() && !S.isCheckingDefaultArgumentOrInitializer() &&
+        !S.RebuildingImmediateInvocation && !S.isUnevaluatedContext() &&
+        !S.isImmediateFunctionContext() &&
+        !S.isAlwaysConstantEvaluatedContext() &&
+        Entity.getKind() != InitializedEntity::EK_Member &&
+        Entity.getKind() != InitializedEntity::EK_Base) {
+      S.ExprEvalContexts.back().ConstevalOnly.insert(Res.get());
+    }
 
     return Res;
   };

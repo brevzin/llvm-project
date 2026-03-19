@@ -19130,7 +19130,19 @@ void Sema::ActOnCXXExitDeclInitializer(Scope *S, Decl *D) {
       // [...]
       // - it is a subexpression of a manifestly constant-evaluated expression
       //   or conversion.
-      ExprEvalContexts.back().InImmediateFunctionContext = true;
+      //
+      // However, for non-constexpr/non-consteval variables with constant
+      // initialization, don't suppress HandleImmediateInvocations if there
+      // are consteval-only references or values that need to be diagnosed.
+      // These variables can't be silently upgraded to consteval, so the
+      // consteval-only content must be rejected.
+      bool SuppressForConstevalOnly =
+          !VD->isConstexpr() && !VD->isConsteval() &&
+          !VD->getType().getNonReferenceType()->isConstevalOnly() &&
+          (!ExprEvalContexts.back().ConstevalOnly.empty() ||
+           !ExprEvalContexts.back().ReferenceToConsteval.empty());
+      if (!SuppressForConstevalOnly)
+        ExprEvalContexts.back().InImmediateFunctionContext = true;
     }
   }
 

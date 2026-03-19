@@ -2453,29 +2453,36 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
   // Check that the object is a global. Note that the fake 'this' object we
   // manufacture when checking potential constant expressions is conservatively
   // assumed to be global here.
+  //
+  // Consteval variables are an exception: they only exist at compile time,
+  // so references/pointers to them are valid in consteval contexts even if
+  // they are non-static locals.
   if (!IsGlobalLValue(Base)) {
-    if (Info.getLangOpts().CPlusPlus11) {
-      Info.FFDiag(Loc, diag::note_constexpr_non_global, 1)
-          << IsReferenceType << !Designator.Entries.empty() << !!BaseVD
-          << BaseVD;
-      auto *VarD = dyn_cast_or_null<VarDecl>(BaseVD);
-      if (VarD && VarD->isConstexpr()) {
-        // Non-static local constexpr variables have unintuitive semantics:
-        //   constexpr int a = 1;
-        //   constexpr const int *p = &a;
-        // ... is invalid because the address of 'a' is not constant. Suggest
-        // adding a 'static' in this case.
-        Info.Note(VarD->getLocation(), diag::note_constexpr_not_static)
-            << VarD
-            << FixItHint::CreateInsertion(VarD->getBeginLoc(), "static ");
+    auto *VarD = dyn_cast_or_null<VarDecl>(BaseVD);
+    bool IsConstevalVar = VarD && VarD->isConsteval();
+    if (!IsConstevalVar) {
+      if (Info.getLangOpts().CPlusPlus11) {
+        Info.FFDiag(Loc, diag::note_constexpr_non_global, 1)
+            << IsReferenceType << !Designator.Entries.empty() << !!BaseVD
+            << BaseVD;
+        if (VarD && VarD->isConstexpr()) {
+          // Non-static local constexpr variables have unintuitive semantics:
+          //   constexpr int a = 1;
+          //   constexpr const int *p = &a;
+          // ... is invalid because the address of 'a' is not constant. Suggest
+          // adding a 'static' in this case.
+          Info.Note(VarD->getLocation(), diag::note_constexpr_not_static)
+              << VarD
+              << FixItHint::CreateInsertion(VarD->getBeginLoc(), "static ");
+        } else {
+          NoteLValueLocation(Info, Base);
+        }
       } else {
-        NoteLValueLocation(Info, Base);
+        Info.FFDiag(Loc);
       }
-    } else {
-      Info.FFDiag(Loc);
+      // Don't allow references to temporaries to escape.
+      return false;
     }
-    // Don't allow references to temporaries to escape.
-    return false;
   }
   assert((Info.checkingPotentialConstantExpression() ||
           LVal.getLValueCallIndex() == 0) &&

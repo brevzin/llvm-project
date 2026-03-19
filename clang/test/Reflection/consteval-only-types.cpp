@@ -18,17 +18,17 @@ struct S { info m = {}; };
                                  // ===========
 
 namespace valid_cases {
-consteval info r1 = ^^int;
-static consteval info r2 = ^^int;
+constexpr info r1 = ^^int;
+static constexpr info r2 = ^^int;
 
-consteval S s1;
-consteval S s2{};
-consteval S s3 = {^^int};
+constexpr S s1;
+constexpr S s2{};
+constexpr S s3 = {^^int};
 
 constexpr info *p1 = nullptr;
-consteval const info *p2 = &r1;
+constexpr const info *p2 = &r1;
 
-void fn1() { static consteval info r = ^^int; }
+void fn1() { static constexpr info r = ^^int; }
 void fn2() { extern info r; }
 consteval info cfn1() { return ^^int; }
 consteval void cfn2() { (void) static_cast<const void *>(p2); }
@@ -56,7 +56,7 @@ S s3 = {^^int};
 
 const info *p1; // ok (null)
 const info *p2 = &valid_cases::r1;
-// expected-error@-1 {{consteval-only type must either be constexpr}}
+// expected-error@-1 {{expressions involving consteval-only values are only allowed in constant-evaluated contexts}}
 
 info fn1() { return ^^int; }
 // expected-error@-1 {{expressions of consteval-only type}}
@@ -77,9 +77,9 @@ void fn6() { (void) [:^^valid_cases::r1:]; }
 // expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn7() {
-  (void) info{}; // ok (null)
+  (void) info{}; // expected-error {{expressions of consteval-only type}}
   (void) ^^int; // expected-error {{expressions of consteval-only type}}
-  (void) new info{}; // ok (null, so leaking is fine)
+  (void) new info{}; // expected-error {{expressions of consteval-only type}}
   (void) new info(^^int); // expected-error {{expressions of consteval-only type}}
 }
 
