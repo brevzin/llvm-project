@@ -5194,19 +5194,23 @@ void RecordDecl::completeDefinition() {
 
   ASTContext &Ctx = getASTContext();
 
-  // Compute whether this is a consteval-only type.
-  for (FieldDecl *FD : fields()) {
-    if (FD->getType()->isConstevalOnly()) {
-      setIsConstevalOnly(true);
-      break;
-    }
-  }
-  if (auto CXXRD = dyn_cast<CXXRecordDecl>(this);
-      CXXRD && !isConstevalOnly()) {
-    for (CXXBaseSpecifier BaseSpecifier : CXXRD->bases()) {
-      if (BaseSpecifier.getType()->isConstevalOnly()) {
+  // Compute whether this is a consteval-only type. Unions are excluded because
+  // a union may hold non-reflection alternatives (e.g., union { info r; int i; }
+  // initialized with .i is fine).
+  if (!isUnion()) {
+    for (FieldDecl *FD : fields()) {
+      if (FD->getType()->isConstevalOnly()) {
         setIsConstevalOnly(true);
         break;
+      }
+    }
+    if (auto CXXRD = dyn_cast<CXXRecordDecl>(this);
+        CXXRD && !isConstevalOnly()) {
+      for (CXXBaseSpecifier BaseSpecifier : CXXRD->bases()) {
+        if (BaseSpecifier.getType()->isConstevalOnly()) {
+          setIsConstevalOnly(true);
+          break;
+        }
       }
     }
   }

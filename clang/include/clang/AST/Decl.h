@@ -4410,7 +4410,7 @@ public:
 
   void setIsRandomized(bool V) { RecordDeclBits.IsRandomized = V; }
 
-  bool isConstevalOnly() const { return false; /* RecordDeclBits.IsConstevalOnly; */ }
+  bool isConstevalOnly() const { return RecordDeclBits.IsConstevalOnly; }
 
   void setIsConstevalOnly(bool V) { RecordDeclBits.IsConstevalOnly = V; }
 

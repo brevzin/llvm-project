@@ -3279,7 +3279,7 @@ class PointerType : public Type, public llvm::FoldingSetNode {
 
   PointerType(QualType Pointee, QualType CanonicalPtr)
       : Type(Pointer, CanonicalPtr, Pointee->getDependence(),
-             Pointee->isConstevalOnly()),
+             /*ConstevalOnly=*/false),
         PointeeType(Pointee) {}
 
 public:
@@ -3525,7 +3525,7 @@ protected:
   ReferenceType(TypeClass tc, QualType Referencee, QualType CanonicalRef,
                 bool SpelledAsLValue)
       : Type(tc, CanonicalRef, Referencee->getDependence(),
-             Referencee->isConstevalOnly()),
+             /*ConstevalOnly=*/false),
         PointeeType(Referencee) {
     ReferenceTypeBits.SpelledAsLValue = SpelledAsLValue;
     ReferenceTypeBits.InnerRef = Referencee->isReferenceType();
@@ -4721,7 +4721,7 @@ protected:
   FunctionType(TypeClass tc, QualType res, QualType Canonical,
                TypeDependence Dependence, ExtInfo Info)
       : Type(tc, Canonical, Dependence,
-             /*ConstevalOnly=*/res->isConstevalOnly()), ResultType(res) {
+             /*ConstevalOnly=*/false), ResultType(res) {
     FunctionTypeBits.ExtInfo = Info.Bits;
   }
 

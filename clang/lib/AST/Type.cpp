@@ -352,7 +352,7 @@ DependentAddressSpaceType::DependentAddressSpaceType(QualType PointeeType,
                PointeeType->getDependence() |
                (AddrSpaceExpr ? toTypeDependence(AddrSpaceExpr->getDependence())
                               : TypeDependence::None),
-           PointeeType->isConstevalOnly()),
+           /*ConstevalOnly=*/false),
       AddrSpaceExpr(AddrSpaceExpr), PointeeType(PointeeType), loc(loc) {}
 
 void DependentAddressSpaceType::Profile(llvm::FoldingSetNodeID &ID,
@@ -701,9 +701,6 @@ bool Type::isStructureTypeWithFlexibleArrayMember() const {
 }
 
 bool Type::isConstevalOnly() const {
-  // let's see what removing consteval-only type means
-  return false;
-
   const Type *CanonType = getCanonicalTypeInternal().getTypePtr();
   if (CanonType != this)
     return CanonType->isConstevalOnly();
@@ -3740,9 +3737,6 @@ FunctionProtoType::FunctionProtoType(QualType result, ArrayRef<QualType> params,
     addDependence(params[i]->getDependence() &
                   ~TypeDependence::VariablyModified);
     argSlot[i] = params[i];
-
-    if (params[i]->isConstevalOnly())
-      setConstevalOnly(true);
   }
 
   // Propagate the SME ACLE attributes.

@@ -257,7 +257,7 @@ void run_tests() {
 namespace barry_alias_bug {
 template <std::meta::info R>
 struct Reflection {
-    static constexpr auto value = R;
+    static consteval auto value = R;
 };
 
 template <class... R>

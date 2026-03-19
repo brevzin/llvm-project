@@ -41,16 +41,16 @@ consteval void cfn2() { (void) static_cast<const void *>(p2); }
                            // ======================
 
 namespace non_consteval_contexts {
-info r1;  // ok (null)
-info r2 {};  // ok (null)
+info r1;  // expected-error {{consteval-only type must either be constexpr}}
+info r2 {};  // expected-error {{consteval-only type must either be constexpr}}
 info r3 = ^^int;
 // expected-error@-1 {{consteval-only type must either be constexpr}}
 info r4 = valid_cases::cfn1();
 // expected-error@-1 {{consteval-only type must either be constexpr}}
 unsigned sz = sizeof(^^int);  // ok
 
-S s1;  // ok (null)
-S s2{};  // ok (null)
+S s1;  // expected-error {{consteval-only type must either be constexpr}}
+S s2{};  // expected-error {{consteval-only type must either be constexpr}}
 S s3 = {^^int};
 // expected-error@-1 {{consteval-only type must either be constexpr}}
 

@@ -733,14 +733,20 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   Res = ImplicitCastExpr::Create(Context, T, CK, E, nullptr, VK_PRValue,
                                  CurFPFeatureOverrides());
 
+  // When a consteval variable undergoes lvalue-to-rvalue conversion and its
+  // value contains consteval-only content, track the result. Skip if the
+  // original DeclRefExpr is already tracked (to avoid double-diagnosis).
   if (!isUnevaluatedContext() && !isConstantEvaluatedContext() &&
       !isImmediateFunctionContext() &&
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation) {
     if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
       if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-        if (VD->isConsteval() && VD->getInit() && !VD->getInit()->isValueDependent()) {
-          if (APValue *V = VD->evaluateValue(); V && APValueContainsConstevalOnlyValue(*V)) {
+        if (VD->isConsteval() && VD->getInit() &&
+            !VD->getInit()->isValueDependent() &&
+            !ExprEvalContexts.back().ConstevalOnly.count(DRE)) {
+          if (APValue *V = VD->evaluateValue();
+              V && APValueContainsConstevalOnlyValue(*V)) {
             ExprEvalContexts.back().ConstevalOnly.insert(Res.get());
           }
         }
@@ -18027,8 +18033,9 @@ ExprResult Sema::CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl) {
   /// in order to remove any arguments of consteval-only type nested in the
   /// argument expressions.
   ExprEvalContexts.back().ImmediateInvocationCandidates.emplace_back(Res, 0);
-  if (Res->getType()->isConstevalOnly())
-    ExprEvalContexts.back().ConstevalOnly.insert(Res);
+  // Note: type-based ConstevalOnly tracking is handled post-evaluation in
+  // HandleImmediateInvocations, which checks the APValue result. Doing it
+  // here (pre-evaluation) would cause false positives for failed invocations.
 
   return Res;
 }

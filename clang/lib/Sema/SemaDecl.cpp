@@ -14555,6 +14555,7 @@ StmtResult Sema::ActOnCXXForRangeIdentifier(Scope *S, SourceLocation IdentLoc,
                                                       : IdentLoc);
 }
 
+
 // Helper function to recursively check if an APValue contains consteval-only values
 // (reflection values or references to consteval variables)
 bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
@@ -14665,6 +14666,12 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
   // Recurse into InitListExpr elements and CXXConstructExpr arguments,
   // which contribute values to the initialized object.
   if (auto *ILE = dyn_cast<InitListExpr>(E)) {
+    // For unions, the active member determines whether the value is
+    // consteval-only — check the initialized field's type.
+    if (ILE->getInitializedFieldInUnion()) {
+      if (ILE->getInitializedFieldInUnion()->getType()->isConstevalOnly())
+        return true;
+    }
     for (Expr *Init : ILE->inits()) {
       if (ExprContainsConstevalOnlyValue(Init))
         return true;
@@ -14694,6 +14701,20 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
 void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (var->isInvalidDecl()) return;
 
+  // A variable whose type contains meta::info (through struct fields or array
+  // elements, but not pointers, references, functions, or unions) must be
+  // consteval, since any such object inherently holds a reflection value.
+  if (!var->isConsteval() &&
+      !isCheckingDefaultArgumentOrInitializer() &&
+      !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
+      !isImmediateFunctionContext() &&
+      var->getType()->isConstevalOnly()) {
+    if (!ExprEvalContexts.back().InImmediateEscalatingFunctionContext)
+      Diag(var->getLocation(), diag::err_decl_consteval_only_type) << var;
+    else if (FunctionScopeInfo *FI = getCurFunction())
+      FI->FoundImmediateEscalatingConstruct = true;
+  }
+
   // A variable initialized with a consteval-only value must be consteval.
   // This has two parts:
   //   1. Check the initializer expression tree for consteval-only constructs
@@ -14706,6 +14727,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   //      access on consteval variables when the DRE is erased by
   //      MarkNotOdrUsed.
   if (!var->isConsteval() && var->hasInit() &&
+      !var->getType()->isConstevalOnly() &&
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
       !isImmediateFunctionContext()) {

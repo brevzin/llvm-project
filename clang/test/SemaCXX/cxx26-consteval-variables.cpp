@@ -256,7 +256,7 @@ namespace N7 {
 }
 
 namespace N8 {
-    info var; // ok
+    info var; // expected-error {{constant}}
     auto normal_func() -> void {
         var = ^^int; // expected-error {{constant}}
     }
@@ -269,4 +269,20 @@ namespace N8 {
         return true;
     }
     static_assert(consteval_func()); // expected-error {{constant}}
+}
+
+namespace N9 {
+    struct S { info r; };
+    union U { info r; int i; };
+
+    info a;       // expected-error {{constant}}
+    S b;          // expected-error {{constant}}
+    U c{.i = 1};  // ok
+    U d{.r={}};   // expected-error {{constant}}
+    auto normal() -> void {
+        info e;      // expected-error {{constant}}
+        S f;         // expected-error {{constant}}
+        U g{.i = 2}; // ok
+        U h{.r={}};  // expected-error {{constant}}
+    }
 }
