@@ -288,3 +288,60 @@ namespace N9 {
         U h{.r={}};  // expected-error {{constant}}
     }
 }
+
+namespace N10 {
+    // Constexpr function returning consteval-only value (Bug 1)
+    constexpr auto identity(auto x) { return x; }
+    constexpr auto pf = identity(f);  // should work
+
+    // Struct with both fn ptr and info (Bug 2)
+    struct Multi { int(*p)(int); info r; };
+    constexpr Multi m = {f, ^^int};  // should work
+
+    consteval int cv = 42;
+    constexpr int const* get_ptr() { return &cv; }  // expected-error {{constant-evaluated}}
+
+    // Structured bindings from consteval
+    struct Pair { int x; int y; };
+    consteval Pair p = {1, 2};
+    auto [a, b] = p;  // should be ok
+
+    // Lambda init-capture
+    consteval int y = 42;
+    auto lam = [z = y]{ return z; };  // should be ok
+
+    // Chained upgrades through multiple levels
+    constexpr info r1 = ^^int;
+    constexpr info r2 = r1;
+    constexpr info r3 = r2;
+    static_assert(r3 == ^^int);
+
+    // Array of function pointers
+    constexpr int(*arr[])(int) = {f, f};
+    static_assert(arr[0](1) == 43);
+
+    // Double indirection
+    consteval int i = 1;
+    constexpr int const* pi = &i;
+    constexpr int const* const* ppi = &pi;
+
+    // Consteval in class scope
+    struct HasConsteval {
+        static consteval int val = 42;
+        static constexpr int const* ptr = &val;
+    };
+
+    // Parenthesized consteval reference
+    constexpr auto pf_norm = f;  // should work
+    constexpr auto pf_paren = (f);  // should work
+
+    // Member access on consteval struct
+    consteval struct { int x; } cs = {42};
+    constexpr int member = cs.x;  // value is int, not consteval-only — stays constexpr
+    int const* pmem = &member; // ok
+
+    // Pure compute (negative test — should NOT upgrade)
+    consteval int compute(int x) { return x * 2; }
+    constexpr int result = compute(21);  // stays constexpr, value is just 42
+    int runtime = result;  // ok
+}

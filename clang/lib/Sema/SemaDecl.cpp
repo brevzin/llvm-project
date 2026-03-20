@@ -14643,8 +14643,9 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
     return false;
   }
 
-  // Strip implicit conversions to get at the underlying expression.
-  E = E->IgnoreImplicit();
+  // Strip implicit conversions and parentheses to get at the underlying
+  // expression. This handles cases like `(f)` where `f` is consteval.
+  E = E->IgnoreParenImpCasts();
 
   // A CXXReflectExpr always produces a reflection (consteval-only value).
   if (isa<CXXReflectExpr>(E))
@@ -14655,8 +14656,16 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
   if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
     if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
       return FD->isImmediateFunction();
-    if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
-      return VD->isConsteval();
+    if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+      if (!VD->isConsteval()) return false;
+      // A consteval variable whose VALUE is not consteval-only (e.g.,
+      // consteval int y = 42) can be read freely — the result is just
+      // an ordinary integer. Only flag it if the value itself is
+      // consteval-only (e.g., contains a reflection or function pointer).
+      if (APValue *V = VD->evaluateValue())
+        return APValueContainsConstevalOnlyValue(*V);
+      return true; // can't evaluate — assume consteval-only
+    }
     // A TemplateParamObject stores a baked-in APValue — check it for
     // consteval-only content (e.g., Wrap{.p=consteval_fn}).
     if (auto *TPO = dyn_cast<TemplateParamObjectDecl>(DRE->getDecl()))
@@ -14786,6 +14795,32 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
         // HandleImmediateInvocations won't see it.
         Diag(var->getInit()->getExprLoc(),
              diag::err_expr_consteval_var);
+      }
+    } else if (!var->getType()->isReferenceType()) {
+      // The initializer does NOT contain a consteval-only value. If the
+      // variable is being copy-initialized from a consteval variable
+      // (e.g., auto [a,b] = p where p is consteval Pair{1,2}), the DRE
+      // to the consteval variable is just a value copy and is safe. Erase
+      // it from ConstevalOnly so HandleImmediateInvocations won't diagnose.
+      // Only erase the DRE if it's the DIRECT init arg (the source of the
+      // copy), not any DRE that happens to appear as a subexpression.
+      Expr *Init = var->getInit()->IgnoreParenImpCasts();
+      if (auto *CCE = dyn_cast<CXXConstructExpr>(Init)) {
+        // Copy/move constructor: the argument is the source DRE.
+        if (CCE->getNumArgs() == 1) {
+          Expr *Arg = CCE->getArg(0)->IgnoreParenImpCasts();
+          if (auto *DRE = dyn_cast<DeclRefExpr>(Arg)) {
+            if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+              if (VD->isConsteval() && VD->hasInit() &&
+                  !VD->getInit()->isValueDependent()) {
+                if (APValue *V = VD->evaluateValue()) {
+                  if (!APValueContainsConstevalOnlyValue(*V))
+                    ExprEvalContexts.back().ConstevalOnly.erase(DRE);
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -733,21 +733,27 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   Res = ImplicitCastExpr::Create(Context, T, CK, E, nullptr, VK_PRValue,
                                  CurFPFeatureOverrides());
 
-  // When a consteval variable undergoes lvalue-to-rvalue conversion and its
-  // value contains consteval-only content, track the result. Skip if the
-  // original DeclRefExpr is already tracked (to avoid double-diagnosis).
-  if (!isUnevaluatedContext() && !isConstantEvaluatedContext() &&
-      !isImmediateFunctionContext() &&
+  // When a consteval variable undergoes lvalue-to-rvalue conversion, check
+  // whether the resulting value is consteval-only. If so, track the result
+  // (and keep the original DRE tracked). If NOT, remove the DRE from
+  // ConstevalOnly — the value has been materialized and is safe to use.
+  if (!isUnevaluatedContext() &&
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation) {
     if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
       if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
         if (VD->isConsteval() && VD->getInit() &&
-            !VD->getInit()->isValueDependent() &&
-            !ExprEvalContexts.back().ConstevalOnly.count(DRE)) {
-          if (APValue *V = VD->evaluateValue();
-              V && APValueContainsConstevalOnlyValue(*V)) {
-            ExprEvalContexts.back().ConstevalOnly.insert(Res.get());
+            !VD->getInit()->isValueDependent()) {
+          if (APValue *V = VD->evaluateValue()) {
+            if (APValueContainsConstevalOnlyValue(*V)) {
+              // Value is consteval-only: track the result expression too.
+              if (!ExprEvalContexts.back().ConstevalOnly.count(DRE))
+                ExprEvalContexts.back().ConstevalOnly.insert(Res.get());
+            } else {
+              // Value is NOT consteval-only: the l-to-r conversion produced
+              // a safe value, so remove the DRE from tracking.
+              ExprEvalContexts.back().ConstevalOnly.erase(DRE);
+            }
           }
         }
       }
@@ -18328,9 +18334,62 @@ HandleImmediateInvocations(Sema &SemaRef,
       SemaRef.MarkExpressionAsImmediateEscalating(DR);
     }
   }
+  // In a ConstantEvaluated context (static_assert, if constexpr, template
+  // arguments, etc.), consteval-only values are fine — the entire expression
+  // is constant-evaluated.
+  bool IsConstantEvaluated =
+      Rec.Context ==
+          Sema::ExpressionEvaluationContext::ConstantEvaluated ||
+      Rec.Context ==
+          Sema::ExpressionEvaluationContext::ImmediateFunctionContext;
+
+  // Helper to check if a consteval-only expression refers to a consteval
+  // variable whose VALUE is not consteval-only. Such DREs can be safely
+  // propagated to the parent context for later resolution (e.g., when
+  // DefaultLvalueConversion erases them after value copy).
+  auto HasNonConstevalOnlyValue = [&](Expr *E) -> bool {
+    Expr *Inner = E;
+    if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(Inner))
+      Inner = SNTTPE->getReplacement();
+    if (auto *DRE = dyn_cast<DeclRefExpr>(Inner)) {
+      if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+        if (VD->isConsteval() && VD->hasInit() &&
+            !VD->getInit()->isValueDependent()) {
+          if (APValue *V = VD->evaluateValue())
+            return !SemaRef.APValueContainsConstevalOnlyValue(*V);
+        }
+      }
+    }
+    return false;
+  };
+
+  // Get the parent context for propagation (if any).
+  Sema::ExpressionEvaluationContextRecord *ParentRec = nullptr;
+  if (SemaRef.ExprEvalContexts.size() > 1)
+    ParentRec = &SemaRef.ExprEvalContexts[SemaRef.ExprEvalContexts.size() - 2];
+
   for (auto *E : Rec.ConstevalOnly) {
     if (E->isImmediateEscalating())
       continue;
+
+    if (IsConstantEvaluated)
+      continue;
+
+    // When a sub-context (e.g., lambda init-capture) is popped, DREs to
+    // consteval variables with non-consteval-only values may be safe
+    // if the enclosing context performs a value copy (e.g., init-capture
+    // copy-init erases them via DefaultLvalueConversion). Propagate such
+    // DREs to the parent context for resolution. Only do this when:
+    // - This context has no associated decl (it's a temporary context,
+    //   like the one pushed for lambda init-capture parsing)
+    // - The parent context DOES have an associated decl (it's a variable
+    //   init context that will process the DRE through
+    //   CheckCompleteVariableDeclaration or DefaultLvalueConversion)
+    if (HasNonConstevalOnlyValue(E) && ParentRec &&
+        !Rec.ManglingContextDecl && ParentRec->ManglingContextDecl) {
+      ParentRec->ConstevalOnly.insert(E);
+      continue;
+    }
 
     bool ImmediateEscalating = false;
     bool IsPotentiallyEvaluated =
