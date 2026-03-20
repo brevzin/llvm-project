@@ -14600,7 +14600,7 @@ bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
   // consteval-only values.
   if (V.isLValue()) {
     APValue::LValueBase Base = V.getLValueBase();
-    if (const auto *D = Base.dyn_cast<const ValueDecl*>()) {
+    if (const auto *D = Base.dyn_cast<const ValueDecl *>()) {
       if (const auto *VD = dyn_cast<VarDecl>(D)) {
         if (VD->isConsteval())
           return true;
@@ -14612,7 +14612,7 @@ bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
     }
     // For references bound to lifetime-extended temporaries, check the
     // temporary's evaluated value (e.g., const auto& r = S{^^int}).
-    if (const auto *E = Base.dyn_cast<const Expr*>()) {
+    if (const auto *E = Base.dyn_cast<const Expr *>()) {
       if (const auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E)) {
         if (const auto *LETD = MTE->getLifetimeExtendedTemporaryDecl()) {
           if (const APValue *TempVal = LETD->getValue())
@@ -14623,6 +14623,16 @@ bool Sema::APValueContainsConstevalOnlyValue(const APValue &V) {
   }
 
   return false;
+}
+
+std::optional<bool> Sema::TryEvaluateConstevalOnlyValue(VarDecl *VD) {
+  if (!VD || !VD->hasInit() || VD->getInit()->isValueDependent())
+    return std::nullopt;
+
+  if (APValue *V = VD->evaluateValue())
+    return APValueContainsConstevalOnlyValue(*V);
+
+  return std::nullopt;
 }
 
 // Check if an expression (tree) contains a consteval-only value.
@@ -14657,13 +14667,15 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
     if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
       return FD->isImmediateFunction();
     if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-      if (!VD->isConsteval()) return false;
+      if (!VD->isConsteval())
+        return false;
       // A consteval variable whose VALUE is not consteval-only (e.g.,
       // consteval int y = 42) can be read freely — the result is just
       // an ordinary integer. Only flag it if the value itself is
       // consteval-only (e.g., contains a reflection or function pointer).
-      if (APValue *V = VD->evaluateValue())
-        return APValueContainsConstevalOnlyValue(*V);
+      if (std::optional<bool> HasConstevalOnlyValue =
+              TryEvaluateConstevalOnlyValue(VD))
+        return *HasConstevalOnlyValue;
       return true; // can't evaluate — assume consteval-only
     }
     // A TemplateParamObject stores a baked-in APValue — check it for
@@ -14811,12 +14823,11 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
           Expr *Arg = CCE->getArg(0)->IgnoreParenImpCasts();
           if (auto *DRE = dyn_cast<DeclRefExpr>(Arg)) {
             if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-              if (VD->isConsteval() && VD->hasInit() &&
-                  !VD->getInit()->isValueDependent()) {
-                if (APValue *V = VD->evaluateValue()) {
-                  if (!APValueContainsConstevalOnlyValue(*V))
-                    ExprEvalContexts.back().ConstevalOnly.erase(DRE);
-                }
+              if (VD->isConsteval()) {
+                if (std::optional<bool> HasConstevalOnlyValue =
+                        TryEvaluateConstevalOnlyValue(VD);
+                    HasConstevalOnlyValue && !*HasConstevalOnlyValue)
+                  ExprEvalContexts.back().ConstevalOnly.erase(DRE);
               }
             }
           }
@@ -15025,11 +15036,10 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       // Check if a constexpr variable contains consteval-only values.
       // Such variables are silently upgraded to consteval.
       if (var->isConstexpr() && !var->isConsteval()) {
-        if (APValue *V = var->evaluateValue()) {
-          if (APValueContainsConstevalOnlyValue(*V)) {
-            var->setConsteval(true);
-          }
-        }
+        if (std::optional<bool> HasConstevalOnlyValue =
+                TryEvaluateConstevalOnlyValue(var);
+            HasConstevalOnlyValue && *HasConstevalOnlyValue)
+          var->setConsteval(true);
       }
       // FIXME: Consider replacing the initializer with a ConstantExpr.
     } else if (var->isConstexpr()) {

@@ -10380,6 +10380,7 @@ public:
                                               NamedDecl *Dest = nullptr);
 
   bool APValueContainsConstevalOnlyValue(const APValue &V);
+  std::optional<bool> TryEvaluateConstevalOnlyValue(VarDecl *VD);
   bool ExprContainsConstevalOnlyValue(Expr *E);
 
   /// EvaluateConvertedConstantExpression - Evaluate an Expression

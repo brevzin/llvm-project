@@ -72,6 +72,28 @@
 using namespace clang;
 using namespace sema;
 
+namespace {
+
+static DeclRefExpr *unwrapDeclRefToConstevalDecl(Expr *E) {
+  if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(E))
+    E = SNTTPE->getReplacement();
+  else if (auto *CE = dyn_cast<CallExpr>(E))
+    if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(CE->getCallee()))
+      E = SNTTPE->getReplacement();
+
+  auto *DRE = dyn_cast<DeclRefExpr>(E);
+  if (!DRE)
+    return nullptr;
+
+  if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
+    return FD->isImmediateFunction() ? DRE : nullptr;
+  if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
+    return VD->isConsteval() ? DRE : nullptr;
+  return nullptr;
+}
+
+} // namespace
+
 bool Sema::CanUseDecl(NamedDecl *D, bool TreatUnavailableAsInvalid) {
   // See if this is an auto-typed variable whose initializer we are parsing.
   if (ParsingInitForAutoVars.count(D))
@@ -742,10 +764,11 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
       !RebuildingImmediateInvocation) {
     if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
       if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-        if (VD->isConsteval() && VD->getInit() &&
-            !VD->getInit()->isValueDependent()) {
-          if (APValue *V = VD->evaluateValue()) {
-            if (APValueContainsConstevalOnlyValue(*V)) {
+        if (VD->isConsteval()) {
+          if (std::optional<bool> HasConstevalOnlyValue =
+                  TryEvaluateConstevalOnlyValue(VD);
+              HasConstevalOnlyValue) {
+            if (*HasConstevalOnlyValue) {
               // Value is consteval-only: track the result expression too.
               if (!ExprEvalContexts.back().ConstevalOnly.count(DRE))
                 ExprEvalContexts.back().ConstevalOnly.insert(Res.get());
@@ -18353,10 +18376,11 @@ HandleImmediateInvocations(Sema &SemaRef,
       Inner = SNTTPE->getReplacement();
     if (auto *DRE = dyn_cast<DeclRefExpr>(Inner)) {
       if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-        if (VD->isConsteval() && VD->hasInit() &&
-            !VD->getInit()->isValueDependent()) {
-          if (APValue *V = VD->evaluateValue())
-            return !SemaRef.APValueContainsConstevalOnlyValue(*V);
+        if (VD->isConsteval()) {
+          if (std::optional<bool> HasConstevalOnlyValue =
+                  SemaRef.TryEvaluateConstevalOnlyValue(VD);
+              HasConstevalOnlyValue)
+            return !*HasConstevalOnlyValue;
         }
       }
     }
@@ -18405,25 +18429,7 @@ HandleImmediateInvocations(Sema &SemaRef,
       // Select the appropriate diagnostic: use err_expr_consteval_var when the
       // expression directly or indirectly refers to a consteval declaration,
       // otherwise fall back to the generic consteval-only type diagnostic.
-      auto RefersToConstevalDecl = [](Expr *E) -> bool {
-        // Unwrap SubstNonTypeTemplateParmExpr and CallExpr to find the
-        // underlying DeclRefExpr.
-        if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(E))
-          E = SNTTPE->getReplacement();
-        else if (auto *CE = dyn_cast<CallExpr>(E))
-          if (auto *SNTTPE = dyn_cast<SubstNonTypeTemplateParmExpr>(CE->getCallee()))
-            E = SNTTPE->getReplacement();
-
-        auto *DRE = dyn_cast<DeclRefExpr>(E);
-        if (!DRE)
-          return false;
-        if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
-          return FD->isImmediateFunction();
-        if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
-          return VD->isConsteval();
-        return false;
-      };
-      unsigned DiagID = RefersToConstevalDecl(E)
+      unsigned DiagID = unwrapDeclRefToConstevalDecl(E)
                             ? diag::err_expr_consteval_var
                             : diag::err_expr_consteval_only_type;
       SemaRef.Diag(E->getExprLoc(), DiagID) << E->getSourceRange();
@@ -20651,17 +20657,7 @@ void Sema::MarkSubstNonTypeTemplateParmExprReferenced(SubstNonTypeTemplateParmEx
   if (isUnevaluatedContext() || isImmediateFunctionContext())
     return;
 
-  auto *DRE = dyn_cast<DeclRefExpr>(E->getReplacement());
-  if (!DRE)
-    return;
-
-  bool IsConstevalOnly = false;
-  if (auto *FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
-    IsConstevalOnly = FD->isImmediateFunction();
-  else if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
-    IsConstevalOnly = VD->isConsteval();
-
-  if (IsConstevalOnly)
+  if (unwrapDeclRefToConstevalDecl(E))
     ExprEvalContexts.back().ConstevalOnly.insert(E);
 }
 
@@ -20693,11 +20689,11 @@ void Sema::MarkDeclRefReferenced(DeclRefExpr *E, const Expr *Base) {
         // For constexpr variables with deferred initialization (e.g., inline
         // static data members of class templates), check if the evaluated
         // value contains consteval-only content and upgrade if needed.
-        if (APValue *V = VD->evaluateValue()) {
-          if (APValueContainsConstevalOnlyValue(*V)) {
-            VD->setConsteval(true);
-            ExprEvalContexts.back().ConstevalOnly.insert(E);
-          }
+        if (std::optional<bool> HasConstevalOnlyValue =
+                TryEvaluateConstevalOnlyValue(VD);
+            HasConstevalOnlyValue && *HasConstevalOnlyValue) {
+          VD->setConsteval(true);
+          ExprEvalContexts.back().ConstevalOnly.insert(E);
         }
       }
     }
