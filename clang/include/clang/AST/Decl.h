@@ -4410,10 +4410,6 @@ public:
 
   void setIsRandomized(bool V) { RecordDeclBits.IsRandomized = V; }
 
-  bool isConstevalOnly() const { return RecordDeclBits.IsConstevalOnly; }
-
-  void setIsConstevalOnly(bool V) { RecordDeclBits.IsConstevalOnly = V; }
-
   void reorderDecls(const SmallVectorImpl<Decl *> &Decls);
 
   /// Determines whether this declaration represents the

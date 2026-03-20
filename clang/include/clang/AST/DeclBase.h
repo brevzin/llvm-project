@@ -1704,18 +1704,13 @@ protected:
     LLVM_PREFERRED_TYPE(bool)
     uint64_t IsRandomized : 1;
 
-    /// Legacy bit for consteval-only-type propagation. Reflection now uses a
-    /// value-based model, so semantic checks do not consult this flag.
-    LLVM_PREFERRED_TYPE(bool)
-    uint64_t IsConstevalOnly : 1;
-
     /// True if a valid hash is stored in ODRHash. This should shave off some
     /// extra storage and prevent CXXRecordDecl to store unused bits.
     uint64_t ODRHash : NumOdrHashBits;
   };
 
   /// Number of inherited and non-inherited bits in RecordDeclBitfields.
-  enum { NumRecordDeclBits = NumTagDeclBits + 41 };
+  enum { NumRecordDeclBits = NumTagDeclBits + 40 };
 
   /// Stores the bits used by OMPDeclareReductionDecl.
   /// If modified NumOMPDeclareReductionDeclBits and the accessor
