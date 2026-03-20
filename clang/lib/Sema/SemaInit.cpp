@@ -7762,19 +7762,7 @@ ExprResult InitializationSequence::Perform(Sema &S,
                                            const InitializationKind &Kind,
                                            MultiExprArg Args,
                                            QualType *ResultType) {
-  auto on_complete = [&](ExprResult Res) {
-    if (Res.get() && Res.get()->getType()->isConstevalOnly() &&
-        !Entity.getDecl() && !S.isCheckingDefaultArgumentOrInitializer() &&
-        !S.RebuildingImmediateInvocation && !S.isUnevaluatedContext() &&
-        !S.isImmediateFunctionContext() &&
-        !S.isAlwaysConstantEvaluatedContext() &&
-        Entity.getKind() != InitializedEntity::EK_Member &&
-        Entity.getKind() != InitializedEntity::EK_Base) {
-      S.ExprEvalContexts.back().ConstevalOnly.insert(Res.get());
-    }
-
-    return Res;
-  };
+  auto on_complete = [&](ExprResult Res) { return Res; };
 
   if (Failed()) {
     Diagnose(S, Entity, Kind, Args);

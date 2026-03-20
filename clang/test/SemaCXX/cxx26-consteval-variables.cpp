@@ -244,26 +244,39 @@ namespace N7 {
         template <class> constexpr auto eq() const -> bool { return this->r == info(); }
         template <class> constexpr auto ne() const -> bool { return this->r != info(); }
         template <class> constexpr auto id() const -> info { return this->r; }
+
+        template <class> constexpr auto eq2() const -> bool { return this->r == ^^int; }
+        template <class> constexpr auto ne2() const -> bool { return this->r != ^^int; }
     };
 
-              auto p1 = &S::eq<int>; // expected-error {{cannot take address of immediate}}
-    constexpr auto p2 = &S::eq<int>; // ok (implicictly consteval)
-              auto p3 = &S::ne<int>; // expected-error {{cannot take address of immediate}}
+              auto p1 = &S::eq<int>; // ok
+    constexpr auto p2 = &S::eq<int>; // ok
+              auto p3 = &S::ne<int>; // ok
     constexpr auto p4 = &S::ne<int>; // ok
-              auto p5 = &S::id<int>; // expected-error {{cannot take address of immediate}}
+              auto p5 = &S::id<int>; // ok
     constexpr auto p6 = &S::id<int>; // ok
+
+              auto p7 = &S::eq2<int>; // expected-error {{immediate}}
+    constexpr auto p8 = &S::eq2<int>; // ok
+              auto p9 = &S::ne2<int>; // expected-error {{immediate}}
+    constexpr auto p0 = &S::ne2<int>; // ok
 
     constexpr auto const& r1 = S{^^int}; // ok
     consteval auto const& r2 = S{^^int}; // ok
 }
 
 namespace N8 {
-    info var; // expected-error {{constant}}
+    info var; // ok
+    info other; // ok
     auto normal_func() -> void {
+        var = other;        // ok
+        (void)(var == other); // ok
         var = ^^int; // expected-error {{constant}}
+        (void)(var == ^^int); // expected-error {{constant}}
     }
     constexpr auto constexpr_func() -> bool {
         var = ^^int; // expected-error {{constant}}
+        (void)(var == ^^int); // expected-error {{constant}}
         return true;
     }
     consteval auto consteval_func() -> bool {
@@ -277,15 +290,15 @@ namespace N9 {
     struct S { info r; };
     union U { info r; int i; };
 
-    info a;       // expected-error {{constant}}
-    S b;          // expected-error {{constant}}
+    info a;       // ok
+    S b;          // ok
     U c{.i = 1};  // ok
-    U d{.r={}};   // expected-error {{constant}}
+    U d{.r={}};   // ok
     auto normal() -> void {
-        info e;      // expected-error {{constant}}
-        S f;         // expected-error {{constant}}
+        info e;      // ok
+        S f;         // ok
         U g{.i = 2}; // ok
-        U h{.r={}};  // expected-error {{constant}}
+        U h{.r={}};  // ok
     }
 }
 

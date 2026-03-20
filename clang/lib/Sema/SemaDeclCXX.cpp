@@ -19138,7 +19138,6 @@ void Sema::ActOnCXXExitDeclInitializer(Scope *S, Decl *D) {
       // consteval-only content must be rejected.
       bool SuppressForConstevalOnly =
           !VD->isConstexpr() && !VD->isConsteval() &&
-          !VD->getType().getNonReferenceType()->isConstevalOnly() &&
           (!ExprEvalContexts.back().ConstevalOnly.empty() ||
            !ExprEvalContexts.back().ReferenceToConsteval.empty());
       if (!SuppressForConstevalOnly)

@@ -6793,8 +6793,8 @@ public:
     /// context not already known to be immediately invoked.
     llvm::SmallPtrSet<DeclRefExpr *, 4> ReferenceToConsteval;
 
-    /// Set of expressions having consteval-only type when used in a context
-    /// not already known to be immediately invoked.
+    /// Set of expressions producing consteval-only values when used in a
+    /// context not already known to be immediately invoked.
     llvm::SmallPtrSet<Expr *, 4> ConstevalOnly;
 
     /// P2718R0 - Lifetime extension in range-based for loops.

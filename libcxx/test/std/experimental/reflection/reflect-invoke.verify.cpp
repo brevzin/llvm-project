@@ -40,7 +40,7 @@ int main() {
               // ======================
  constexpr A expectedClass{};
  reflect_invoke(^^A::fn, {^^expectedClass});
- // expected-error@-1 {{expressions of consteval-only type}}
+ // expected-error@-1 {{expressions involving consteval-only values}}
 
  reflect_invoke(^^A::void_fn, {^^expectedClass});
  // expected-error-re@-1 {{call to consteval function 'std::meta::reflect_invoke<{{.*}}>' is not a constant expression}}
@@ -67,7 +67,7 @@ int main() {
  // test that implementation workaround with getting constexpr method from pointer couldn't be abused
  constexpr int (A::*constexpr_pointer)() const = &A::fn;
  reflect_invoke(^^constexpr_pointer, {^^expectedClass}); // ok
- // expected-error@-1 {{consteval-only type}}
+ // expected-error@-1 {{consteval-only values}}
 
  int (A::*pointer)() const = &A::fn;
  reflect_invoke(^^pointer, {^^expectedClass});

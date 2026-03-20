@@ -41,34 +41,30 @@ consteval void cfn2() { (void) static_cast<const void *>(p2); }
                            // ======================
 
 namespace non_consteval_contexts {
-info r1;  // expected-error {{consteval-only type must either be constexpr}}
-info r2 {};  // expected-error {{consteval-only type must either be constexpr}}
-info r3 = ^^int;
-// expected-error@-1 {{consteval-only type must either be constexpr}}
-info r4 = valid_cases::cfn1();
-// expected-error@-1 {{consteval-only type must either be constexpr}}
+info r1;  // ok
+info r2 {};  // ok
+info r3 = ^^int;  // expected-error {{constant-evaluated contexts}}
+info r4 = valid_cases::cfn1();  // expected-error {{constant-evaluated contexts}}
 unsigned sz = sizeof(^^int);  // ok
 
-S s1;  // expected-error {{consteval-only type must either be constexpr}}
-S s2{};  // expected-error {{consteval-only type must either be constexpr}}
-S s3 = {^^int};
-// expected-error@-1 {{consteval-only type must either be constexpr}}
+S s1;  // ok
+S s2{};  // ok
+S s3 = {^^int};  // expected-error {{constant-evaluated contexts}}
 
 const info *p1; // ok (null)
 const info *p2 = &valid_cases::r1;
 // expected-error@-1 {{expressions involving consteval-only values are only allowed in constant-evaluated contexts}}
 
 info fn1() { return ^^int; }
-// expected-error@-1 {{expressions of consteval-only type}}
+// expected-error@-1 {{expressions involving consteval-only values}}
 
 info fn2() { return valid_cases::cfn1(); }
-// expected-error@-1 {{expressions of consteval-only type}}
+// expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn3() { (void) valid_cases::r1; }
 // expected-error@-1 {{expressions involving consteval-only values}}
 
-void fn4() { (void) valid_cases::s1.m; }
-// expected-error@-1 {{expressions involving consteval-only values}}
+void fn4() { (void) valid_cases::s1.m; } // ok
 
 void fn5() { (void) static_cast<const void *>(valid_cases::p2); }
 // expected-error@-1 {{expressions}}
@@ -77,10 +73,10 @@ void fn6() { (void) [:^^valid_cases::r1:]; }
 // expected-error@-1 {{expressions involving consteval-only values}}
 
 void fn7() {
-  (void) info{}; // expected-error {{expressions of consteval-only type}}
-  (void) ^^int; // expected-error {{expressions of consteval-only type}}
-  (void) new info{}; // expected-error {{expressions of consteval-only type}}
-  (void) new info(^^int); // expected-error {{expressions of consteval-only type}}
+  (void) info{}; // ok
+  (void) ^^int; // expected-error {{expressions involving consteval-only values}}
+  (void) new info{}; // ok
+  (void) new info(^^int); // expected-error {{expressions involving consteval-only values}}
 }
 
 consteval bool is_null(info R) {

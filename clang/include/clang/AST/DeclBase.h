@@ -1704,7 +1704,8 @@ protected:
     LLVM_PREFERRED_TYPE(bool)
     uint64_t IsRandomized : 1;
 
-    /// Indicates whether this struct is a consteval-only type.
+    /// Legacy bit for consteval-only-type propagation. Reflection now uses a
+    /// value-based model, so semantic checks do not consult this flag.
     LLVM_PREFERRED_TYPE(bool)
     uint64_t IsConstevalOnly : 1;
 

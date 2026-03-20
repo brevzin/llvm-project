@@ -14702,12 +14702,6 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
   // Recurse into InitListExpr elements and CXXConstructExpr arguments,
   // which contribute values to the initialized object.
   if (auto *ILE = dyn_cast<InitListExpr>(E)) {
-    // For unions, the active member determines whether the value is
-    // consteval-only — check the initialized field's type.
-    if (ILE->getInitializedFieldInUnion()) {
-      if (ILE->getInitializedFieldInUnion()->getType()->isConstevalOnly())
-        return true;
-    }
     for (Expr *Init : ILE->inits()) {
       if (ExprContainsConstevalOnlyValue(Init))
         return true;
@@ -14746,25 +14740,6 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
 void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (var->isInvalidDecl()) return;
 
-  // A variable whose type contains meta::info (through struct fields or array
-  // elements, but not pointers, references, functions, or unions) must be
-  // consteval, since any such object inherently holds a reflection value.
-  // Constexpr variables are silently upgraded to consteval.
-  if (!var->isConsteval() &&
-      !isCheckingDefaultArgumentOrInitializer() &&
-      !RebuildingImmediateInvocation && !isUnevaluatedContext() &&
-      !isImmediateFunctionContext() &&
-      var->getType()->isConstevalOnly()) {
-    if (var->isConstexpr()) {
-      var->setConsteval(true);
-    } else if (ExprEvalContexts.back().InImmediateEscalatingFunctionContext) {
-      if (FunctionScopeInfo *FI = getCurFunction())
-        FI->FoundImmediateEscalatingConstruct = true;
-    } else {
-      Diag(var->getLocation(), diag::err_decl_consteval_only_type) << var;
-    }
-  }
-
   // A variable initialized with a consteval-only value must be consteval.
   // Constexpr variables are silently upgraded to consteval so that the
   // constant evaluator allows consteval-only values in the result (e.g.,
@@ -14775,7 +14750,6 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   // For reference variables, we also check the evaluated APValue for
   // references into consteval storage.
   if (!var->isConsteval() && var->hasInit() &&
-      !var->getType()->isConstevalOnly() &&
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation && !isUnevaluatedContext()) {
     bool HasConstevalOnlyValue = ExprContainsConstevalOnlyValue(var->getInit());
@@ -14801,12 +14775,10 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       } else if (!isImmediateFunctionContext() &&
                  ExprEvalContexts.back().ConstevalOnly.empty() &&
                  ExprEvalContexts.back().ReferenceToConsteval.empty()) {
-        // The initializer contains a consteval-only value (e.g., a union
-        // member of consteval-only type) but expression-level tracking
-        // didn't catch it. Diagnose directly since
+        // The initializer contains a consteval-only value but
+        // expression-level tracking didn't catch it. Diagnose directly since
         // HandleImmediateInvocations won't see it.
-        Diag(var->getInit()->getExprLoc(),
-             diag::err_expr_consteval_var);
+        Diag(var->getInit()->getExprLoc(), diag::err_expr_consteval_var);
       }
     } else if (!var->getType()->isReferenceType()) {
       // The initializer does NOT contain a consteval-only value. If the

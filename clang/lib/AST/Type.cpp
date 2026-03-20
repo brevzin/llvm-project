@@ -701,13 +701,6 @@ bool Type::isStructureTypeWithFlexibleArrayMember() const {
 }
 
 bool Type::isConstevalOnly() const {
-  const Type *CanonType = getCanonicalTypeInternal().getTypePtr();
-  if (CanonType != this)
-    return CanonType->isConstevalOnly();
-  else if (TypeBits.ConstevalOnly)
-    return true;
-  else if (auto *RD = getAsRecordDecl())
-    return RD->isConstevalOnly();
   return false;
 }
 

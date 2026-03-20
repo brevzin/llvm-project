@@ -15478,15 +15478,6 @@ ExprResult Sema::CreateBuiltinBinOp(SourceLocation OpLoc,
         Context, LHS.get(), RHS.get(), Opc, ResultTy, VK, OK, OpLoc,
         CurFPFeatureOverrides());
 
-    // Reflection equality/inequality comparisons are treated as consteval
-    // operations — they can only be meaningfully evaluated at compile time.
-    if (BinaryOperator::isEqualityOp(Opc) &&
-        LHS.get()->getType()->isReflectionType() &&
-        !isUnevaluatedContext() && !isImmediateFunctionContext() &&
-        !isAlwaysConstantEvaluatedContext()) {
-      ExprEvalContexts.back().ConstevalOnly.insert(Result.get());
-    }
-
     return Result;
   }
 
@@ -18059,7 +18050,7 @@ ExprResult Sema::CheckForImmediateInvocation(ExprResult E, FunctionDecl *Decl) {
     Res->MoveIntoResult(Cached, getASTContext());
   /// Value-dependent constant expressions should not be immediately
   /// evaluated until they are instantiated. We add them the candidate anyway
-  /// in order to remove any arguments of consteval-only type nested in the
+  /// in order to remove any arguments producing consteval-only values nested in the
   /// argument expressions.
   ExprEvalContexts.back().ImmediateInvocationCandidates.emplace_back(Res, 0);
   // Note: type-based ConstevalOnly tracking is handled post-evaluation in
@@ -18426,13 +18417,8 @@ HandleImmediateInvocations(Sema &SemaRef,
 
     if (!Rec.InImmediateEscalatingFunctionContext ||
         (SemaRef.inTemplateInstantiation() && !ImmediateEscalating)) {
-      // Select the appropriate diagnostic: use err_expr_consteval_var when the
-      // expression directly or indirectly refers to a consteval declaration,
-      // otherwise fall back to the generic consteval-only type diagnostic.
-      unsigned DiagID = unwrapDeclRefToConstevalDecl(E)
-                            ? diag::err_expr_consteval_var
-                            : diag::err_expr_consteval_only_type;
-      SemaRef.Diag(E->getExprLoc(), DiagID) << E->getSourceRange();
+      SemaRef.Diag(E->getExprLoc(), diag::err_expr_consteval_var)
+          << E->getSourceRange();
     } else {
       SemaRef.MarkExpressionAsImmediateEscalating(E);
     }
@@ -20268,8 +20254,7 @@ ExprResult Sema::CheckLValueToRValueConversionOperand(Expr *E) {
     return E;
 
   auto &CEO = ExprEvalContexts.back().ConstevalOnly;
-  bool ReplaceConstevalOnly = E->getType()->isConstevalOnly() &&
-                              CEO.find(E) != CEO.end();
+  bool ReplaceConstevalOnly = CEO.find(E) != CEO.end();
 
   ExprResult Result =
       rebuildPotentialResultsAsNonOdrUsed(*this, E, NOUR_Constant);

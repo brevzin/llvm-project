@@ -1851,7 +1851,8 @@ private:
     LLVM_PREFERRED_TYPE(TypeClass)
     unsigned TC : 8;
 
-    /// Whether this is a consteval-only type ([basic.types.general], P2996).
+    /// Legacy bit for consteval-only-type propagation. Reflection now uses a
+    /// value-based model, so semantic checks do not consult this flag.
     unsigned ConstevalOnly : 1;
 
     /// Store information on the type dependency.
@@ -3144,7 +3145,7 @@ private:
       : Type(Builtin, QualType(),
              K == Dependent ? TypeDependence::DependentInstantiation
                             : TypeDependence::None,
-             /*ConstevalOnly=*/(K == MetaInfo)) {
+             /*ConstevalOnly=*/false) {
     static_assert(Kind::LastKind <
                       (1 << BuiltinTypeBitfields::NumOfBuiltinTypeBits) &&
                   "Defined builtin type exceeds the allocated space for serial "
