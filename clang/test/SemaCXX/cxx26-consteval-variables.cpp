@@ -358,3 +358,14 @@ namespace N10 {
     constexpr int result = compute(21);  // stays constexpr, value is just 42
     int runtime = result;  // ok
 }
+
+namespace N11 {
+    constexpr info obj = ^^int;
+    constexpr info arr[] = {^^int};
+
+    constexpr info const* p = &obj + 1;
+    constexpr info const* q = &arr[1];
+
+    info bad1 = p[-1]; // expected-error {{consteval-only value}}
+    info bad2 = q[-1]; // expected-error {{consteval-only value}}
+}
