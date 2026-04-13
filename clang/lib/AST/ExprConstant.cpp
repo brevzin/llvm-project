@@ -53,6 +53,7 @@
 #include "clang/AST/StmtVisitor.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/Basic/Builtins.h"
+#include "clang/Basic/DiagnosticMetafn.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Basic/TargetInfo.h"
@@ -16809,8 +16810,48 @@ public:
   }
 
   bool VisitCXXDeleteExpr(const CXXDeleteExpr *E);
+  bool VisitCXXBuiltinInjectExpr(const CXXBuiltinInjectExpr *E);
 };
 } // end anonymous namespace
+
+bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
+    const CXXBuiltinInjectExpr *E) {
+  if (Info.checkingPotentialConstantExpression())
+    return false;
+
+  // Check that injection is allowed (must be plainly constant evaluated).
+  bool AllowInjection =
+      (Info.EvalMode ==
+       EvalInfo::EM_ConstantExpressionPlainlyConstantEvaluated);
+  if (!AllowInjection) {
+    Info.FFDiag(E->getBeginLoc(),
+                diag::metafn_injected_decl_non_plainly_consteval);
+    return false;
+  }
+
+  // Evaluate the operand to get the token sequence reflection.
+  APValue Operand;
+  if (!::Evaluate(Operand, Info, E->getOperand()))
+    return false;
+  if (E->getOperand()->isGLValue()) {
+    LValue LV;
+    LV.setFrom(Info.Ctx, Operand);
+    if (!handleLValueToRValueConversion(Info, E->getOperand(),
+                                         E->getOperand()->getType(), LV,
+                                         Operand))
+      return false;
+  }
+
+  if (!Operand.isReflectedTokenSequence()) {
+    Info.FFDiag(E->getBeginLoc(),
+                diag::err_builtin_inject_not_token_sequence);
+    return false;
+  }
+
+  const TokenSequenceData *TSD = Operand.getReflectedTokenSequence();
+  Info.EvalStatus.PendingInjections.push_back({E->getBeginLoc(), TSD});
+  return true;
+}
 
 bool VoidExprEvaluator::VisitCXXDeleteExpr(const CXXDeleteExpr *E) {
   // We cannot speculatively evaluate a delete expression.
@@ -17774,6 +17815,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXNoexceptExprClass:
   case Expr::CXXReflectExprClass:
   case Expr::CXXMetafunctionExprClass:
+  case Expr::CXXBuiltinInjectExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::ExtractLValueExprClass:

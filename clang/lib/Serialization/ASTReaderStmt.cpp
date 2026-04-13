@@ -522,6 +522,14 @@ void ASTStmtReader::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
   E->setArgs(Args, NumArgs);
 }
 
+void ASTStmtReader::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  E->setOperand(Record.readExpr());
+}
+
 void ASTStmtReader::VisitCXXSpliceExpr(CXXSpliceExpr *E) {
   VisitExpr(E);
   E->setTemplateKWLoc(Record.readSourceLocation());
@@ -4657,6 +4665,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     }
     case EXPR_METAFUNCTION: {
       S = CXXMetafunctionExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_BUILTIN_INJECT: {
+      S = CXXBuiltinInjectExpr::CreateEmpty(Context);
       break;
     }
     case EXPR_SPLICE: {

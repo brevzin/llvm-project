@@ -190,6 +190,7 @@ class TemplateInstantiationCallback;
 class TemplatePartialOrderingContext;
 class TemplateSpecCandidateSet;
 class Token;
+struct TokenSequenceData;
 class TypeConstraint;
 class TypoCorrectionConsumer;
 class TypeLocBuilder;
@@ -15599,6 +15600,15 @@ public:
                                  ParsedTemplateArgument Template);
   ExprResult ActOnCXXReflectExpr(SourceLocation OpLoc, CXXSpliceExpr *E);
 
+  ExprResult ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
+                                             SourceRange OperandRange,
+                                             ArrayRef<Token> Tokens);
+
+  ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
+                                   SourceLocation LParenLoc,
+                                   Expr *Operand,
+                                   SourceLocation RParenLoc);
+
   ExprResult ActOnCXXMetafunction(SourceLocation KwLoc,
                                   SourceLocation LParenLoc,
                                   SmallVectorImpl<Expr *> &Args,
@@ -15719,6 +15729,10 @@ public:
 
     return nullptr;
   }
+
+  // Token sequences pending injection from consteval block evaluation.
+  SmallVector<std::pair<SourceLocation, const TokenSequenceData *>>
+      PendingInjections;
 
 private:
   // Lambdas having bound references to this Sema object, used to evaluate

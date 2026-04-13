@@ -2787,6 +2787,12 @@ void StmtPrinter::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *S) {
   OS << ")";
 }
 
+void StmtPrinter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *S) {
+  OS << "__builtin_inject(";
+  PrintExpr(S->getOperand());
+  OS << ")";
+}
+
 void StmtPrinter::VisitCXXSpliceExpr(CXXSpliceExpr *S) {
   OS << "[: ... :]";
 }

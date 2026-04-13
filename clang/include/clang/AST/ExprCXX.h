@@ -5631,6 +5631,51 @@ public:
   }
 };
 
+/// Represents a call to __builtin_inject(token_sequence_reflection).
+/// This expression injects the tokens from a token sequence reflection into
+/// the enclosing scope during consteval evaluation.
+class CXXBuiltinInjectExpr : public Expr {
+  Stmt *Operand;
+  SourceLocation KwLoc;
+  SourceLocation LParenLoc;
+  SourceLocation RParenLoc;
+
+  CXXBuiltinInjectExpr(QualType Ty, Expr *Operand, SourceLocation KwLoc,
+                        SourceLocation LParenLoc, SourceLocation RParenLoc);
+  CXXBuiltinInjectExpr(EmptyShell Empty);
+
+public:
+  static CXXBuiltinInjectExpr *Create(ASTContext &C, QualType Ty,
+                                       Expr *Operand, SourceLocation KwLoc,
+                                       SourceLocation LParenLoc,
+                                       SourceLocation RParenLoc);
+  static CXXBuiltinInjectExpr *CreateEmpty(ASTContext &C);
+
+  Expr *getOperand() const { return cast<Expr>(Operand); }
+  void setOperand(Expr *E) { Operand = E; }
+
+  SourceLocation getKwLoc() const { return KwLoc; }
+  void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
+
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return KwLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() { return child_range(&Operand, &Operand + 1); }
+  const_child_range children() const {
+    return const_child_range(&Operand, &Operand + 1);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXBuiltinInjectExprClass;
+  }
+};
+
 // Implementation detail of the 'is_accessible' metafunction.
 // Used to "reach up the stack" to find the context from which the metafunction
 // was called, such that the accessibility of a class member can thereafter be

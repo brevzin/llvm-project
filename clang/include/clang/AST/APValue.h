@@ -579,6 +579,10 @@ public:
   bool isReflectedAnnotation() const {
     return isReflection() && getReflectionKind() == ReflectionKind::Annotation;
   }
+  bool isReflectedTokenSequence() const {
+    return isReflection() &&
+           getReflectionKind() == ReflectionKind::TokenSequence;
+  }
 
   void dump() const;
   void dump(raw_ostream &OS, const ASTContext &Context) const;
@@ -771,6 +775,7 @@ public:
   CXXBaseSpecifier *getReflectedBaseSpecifier() const;
   TagDataMemberSpec *getReflectedDataMemberSpec() const;
   CXX26AnnotationAttr *getReflectedAnnotation() const;
+  const TokenSequenceData *getReflectedTokenSequence() const;
 
   void setInt(APSInt I) {
     assert(isInt() && "Invalid accessor");

@@ -58,6 +58,7 @@ namespace clang {
   class ParmVarDecl;
   class StringLiteral;
   class TargetInfo;
+  struct TokenSequenceData;
   class ValueDecl;
 
 /// A simple array of base specifiers.
@@ -638,6 +639,11 @@ public:
     /// (which may include expensive operations like converting APValue objects
     /// to a string representation).
     SmallVectorImpl<PartialDiagnosticAt> *Diag = nullptr;
+
+    /// Token sequences pending injection from __builtin_inject calls
+    /// during consteval block evaluation.
+    SmallVector<std::pair<SourceLocation, const TokenSequenceData *>>
+        PendingInjections;
 
     EvalStatus() = default;
 

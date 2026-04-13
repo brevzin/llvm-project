@@ -496,6 +496,15 @@ void ASTStmtWriter::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
   Code = serialization::EXPR_METAFUNCTION;
 }
 
+void ASTStmtWriter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
+  VisitExpr(E);
+  Record.AddSourceLocation(E->getKwLoc());
+  Record.AddSourceLocation(E->getLParenLoc());
+  Record.AddSourceLocation(E->getRParenLoc());
+  Record.AddStmt(E->getOperand());
+  Code = serialization::EXPR_BUILTIN_INJECT;
+}
+
 void ASTStmtWriter::VisitCXXSpliceExpr(CXXSpliceExpr *E) {
   VisitExpr(E);
   Record.AddSourceLocation(E->getTemplateKWLoc());

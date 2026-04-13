@@ -563,6 +563,7 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
   case ReflectionKind::EntityProxy:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Annotation:
+  case ReflectionKind::TokenSequence:
     ID.AddPointer(V.getOpaqueReflectionData());
     return;
   case ReflectionKind::DataMemberSpec: {
@@ -971,6 +972,13 @@ CXX26AnnotationAttr *APValue::getReflectedAnnotation() const {
           const_cast<void *>(getOpaqueReflectionData()));
 }
 
+const TokenSequenceData *APValue::getReflectedTokenSequence() const {
+  assert(getReflectionKind() == ReflectionKind::TokenSequence &&
+         "not a reflection of a token sequence");
+  return reinterpret_cast<const TokenSequenceData *>(
+          getOpaqueReflectionData());
+}
+
 static double GetApproxValue(const llvm::APFloat &F) {
   llvm::APFloat V = F;
   bool ignored;
@@ -1330,6 +1338,9 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     case ReflectionKind::Annotation:
       Repr = "annotation";
       break;
+    case ReflectionKind::TokenSequence:
+      Repr = "token-sequence";
+      break;
     }
     Out << "^^(" << Repr << ")";
     return;
@@ -1668,6 +1679,7 @@ void APValue::setReflection(ReflectionKind RK, const void *Ptr) {
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
+  case ReflectionKind::TokenSequence:
     SelfData.Kind = RK;
     SelfData.Data = Ptr;
     return;

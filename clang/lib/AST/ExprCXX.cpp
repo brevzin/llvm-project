@@ -2051,6 +2051,32 @@ CXXSpliceExpr *CXXSpliceExpr::CreateEmpty(ASTContext &C) {
   return new (C) CXXSpliceExpr(EmptyShell());
 }
 
+CXXBuiltinInjectExpr::CXXBuiltinInjectExpr(QualType Ty, Expr *Operand,
+                                             SourceLocation KwLoc,
+                                             SourceLocation LParenLoc,
+                                             SourceLocation RParenLoc)
+    : Expr(CXXBuiltinInjectExprClass, Ty, VK_PRValue, OK_Ordinary),
+      Operand(Operand), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  setDependence(Operand->getDependence());
+}
+
+CXXBuiltinInjectExpr::CXXBuiltinInjectExpr(EmptyShell Empty)
+    : Expr(CXXBuiltinInjectExprClass, Empty) {}
+
+CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::Create(ASTContext &C, QualType Ty,
+                                                     Expr *Operand,
+                                                     SourceLocation KwLoc,
+                                                     SourceLocation LParenLoc,
+                                                     SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinInjectExpr(Ty, Operand, KwLoc, LParenLoc,
+                                       RParenLoc);
+}
+
+CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::CreateEmpty(ASTContext &C) {
+  return new (C) CXXBuiltinInjectExpr(EmptyShell());
+}
+
 StackLocationExpr::StackLocationExpr(QualType ResultTy, SourceRange Range,
                                      int FrameOffset)
     : Expr(StackLocationExprClass, ResultTy, VK_PRValue, OK_Ordinary),

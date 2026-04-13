@@ -27,6 +27,7 @@ class APValue;
 class ASTContext;
 class CXXBaseSpecifier;
 class NamespaceDecl;
+class Token;
 class ValueDecl;
 
 struct TagDataMemberSpec;
@@ -112,8 +113,19 @@ enum class ReflectionKind {
 
   /// \brief A reflection of an annotation (P2996 ext).
   Annotation,
+
+  /// \brief A reflection of a token sequence (^^{ ... }).
+  ///
+  /// Corresponds to a TokenSequenceData.
+  TokenSequence,
 };
 
+
+/// \brief Representation of a captured token sequence from ^^{ ... }.
+struct TokenSequenceData {
+  const Token *Tokens;
+  unsigned NumTokens;
+};
 
 /// \brief Representation of a hypothetical data member, which could be used to
 /// complete an incomplete class definition using the 'std::meta::define_class'

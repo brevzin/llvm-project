@@ -1594,6 +1594,9 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw___metafunction:
     return ParseCXXMetafunctionExpression();
 
+  case tok::kw___builtin_inject:
+    return ParseCXXBuiltinInjectExpression();
+
   case tok::at: {
     if (NotPrimaryExpression)
       *NotPrimaryExpression = true;

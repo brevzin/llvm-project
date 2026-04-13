@@ -13,7 +13,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/LocInfoType.h"
+#include "clang/AST/Reflection.h"
 #include "clang/Basic/DiagnosticParse.h"
+#include "clang/Lex/Token.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
@@ -21,6 +23,36 @@ using namespace clang;
 
 ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
   SourceLocation OperandLoc = Tok.getLocation();
+
+  // Handle token sequence: ^^{ balanced tokens }
+  if (Tok.is(tok::l_brace)) {
+    SourceLocation LBraceLoc = ConsumeBrace();
+
+    SmallVector<Token, 16> Tokens;
+    unsigned BraceDepth = 1;
+    while (BraceDepth > 0 && Tok.isNot(tok::eof)) {
+      if (Tok.is(tok::l_brace))
+        ++BraceDepth;
+      else if (Tok.is(tok::r_brace)) {
+        --BraceDepth;
+        if (BraceDepth == 0)
+          break;
+      }
+      Tokens.push_back(Tok);
+      ConsumeAnyToken();
+    }
+
+    SourceLocation RBraceLoc = Tok.getLocation();
+    if (Tok.isNot(tok::r_brace)) {
+      Diag(LBraceLoc, diag::err_expected) << tok::r_brace;
+      return ExprError();
+    }
+    ConsumeBrace();
+
+    SourceRange OperandRange(LBraceLoc, RBraceLoc);
+    return Actions.ActOnCXXTokenSequenceReflection(OpLoc, OperandRange,
+                                                   Tokens);
+  }
 
   Sema::ConstevalOnlyRecorder RecordConstevalOnly(Actions);
   EnterExpressionEvaluationContext EvalContext(
@@ -126,6 +158,28 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
 
   Diag(OperandLoc, diag::err_cannot_reflect_operand);
   return ExprError();
+}
+
+ExprResult Parser::ParseCXXBuiltinInjectExpression() {
+  assert(Tok.is(tok::kw___builtin_inject) && "expected '__builtin_inject'");
+  SourceLocation KwLoc = ConsumeToken();
+
+  BalancedDelimiterTracker Parens(*this, tok::l_paren);
+  if (Parens.expectAndConsume())
+    return ExprError();
+
+  ExprResult Operand = ParseConstantExpression();
+  if (Operand.isInvalid()) {
+    Parens.skipToEnd();
+    return ExprError();
+  }
+
+  if (Parens.consumeClose())
+    return ExprError();
+
+  return Actions.ActOnCXXBuiltinInject(KwLoc, Parens.getOpenLocation(),
+                                       Operand.get(),
+                                       Parens.getCloseLocation());
 }
 
 ExprResult Parser::ParseCXXMetafunctionExpression() {

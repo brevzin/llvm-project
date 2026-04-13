@@ -14,6 +14,7 @@
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/Reflection.h"
 #include "clang/AST/PrettyDeclStackTrace.h"
 #include "clang/Basic/AttributeCommonInfo.h"
 #include "clang/Basic/Attributes.h"
@@ -1145,7 +1146,43 @@ Decl *Parser::ParseConstevalBlockDeclaration(SourceLocation &DeclEnd) {
   if (Invocation.isInvalid())
     return nullptr;
 
-  return Actions.ActOnConstevalBlockDeclaration(ConstevalLoc, Invocation.get());
+  Decl *Result = Actions.ActOnConstevalBlockDeclaration(ConstevalLoc,
+                                                        Invocation.get());
+
+  // Process any pending token injections from __builtin_inject calls.
+  while (!Actions.PendingInjections.empty()) {
+    auto Injections = std::move(Actions.PendingInjections);
+    Actions.PendingInjections.clear();
+
+    for (auto &[Loc, TSD] : Injections) {
+      // Build a token stream with an eof sentinel at the end.
+      SmallVector<Token, 16> Toks(TSD->Tokens, TSD->Tokens + TSD->NumTokens);
+      Token Eof;
+      Eof.startToken();
+      Eof.setKind(tok::eof);
+      Eof.setLocation(Loc);
+      Toks.push_back(Eof);
+
+      // Save the current token and enter the token stream.
+      Token SavedTok = Tok;
+      PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                          /*IsReinject=*/false);
+      ConsumeAnyToken();
+
+      // Parse declarations from the injected tokens until eof.
+      while (Tok.isNot(tok::eof)) {
+        ParsedAttributes DeclAttrs(AttrFactory);
+        ParsedAttributes DeclSpecAttrs(AttrFactory);
+        SourceLocation DeclEnd;
+        ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
+      }
+
+      // Consume the eof sentinel and restore the saved token.
+      Tok = SavedTok;
+    }
+  }
+
+  return Result;
 }
 
 SourceLocation Parser::ParseDecltypeSpecifier(DeclSpec &DS) {

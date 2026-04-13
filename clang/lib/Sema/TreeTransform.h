@@ -9092,6 +9092,7 @@ TreeTransform<Derived>::TransformCXXReflectExpr(CXXReflectExpr *E) {
   }
   case ReflectionKind::Object:
   case ReflectionKind::Value:
+  case ReflectionKind::TokenSequence:
     return E;
   case ReflectionKind::Null:
   case ReflectionKind::BaseSpecifier:
@@ -9118,6 +9119,17 @@ TreeTransform<Derived>::TransformCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
                                             E->getRParenLoc(),
                                             E->getMetaFnID(), E->getImpl(),
                                             Args);
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
+  ExprResult Operand = getDerived().TransformExpr(E->getOperand());
+  if (Operand.isInvalid())
+    return ExprError();
+
+  return getSema().ActOnCXXBuiltinInject(E->getKwLoc(), E->getLParenLoc(),
+                                         Operand.get(), E->getRParenLoc());
 }
 
 template <typename Derived>

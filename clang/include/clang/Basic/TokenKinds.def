@@ -440,6 +440,7 @@ CXX20_KEYWORD(requires              , 0)
 
 // C++2c reflection keywords.
 KEYWORD(__metafunction              , KEYREFLECT)
+KEYWORD(__builtin_inject            , KEYREFLECT)
 
 // Not a CXX20_KEYWORD because it is disabled by -fno-char8_t.
 KEYWORD(char8_t                     , CHAR8SUPPORT)

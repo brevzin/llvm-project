@@ -186,6 +186,7 @@ def RequiresExpr : StmtNode<Expr>;
 def CXXReflectExpr : StmtNode<Expr>;
 def CXXMetafunctionExpr : StmtNode<Expr>;
 def CXXSpliceExpr : StmtNode<Expr>;
+def CXXBuiltinInjectExpr : StmtNode<Expr>;
 def StackLocationExpr : StmtNode<Expr>;
 def ExtractLValueExpr : StmtNode<Expr>;
 def ExplDependentCallExpr : StmtNode<Expr>;

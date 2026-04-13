@@ -17,6 +17,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/MetaActions.h"
+#include "clang/Lex/Token.h"
 #include "clang/AST/Metafunction.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
@@ -817,6 +818,13 @@ public:
     return ParsedAttrs.addNew(&II, Range, {}, nullptr, 0,
                               ParsedAttr::Form::Annotation(), Loc);
   }
+
+  bool InjectTokens(const TokenSequenceData *Tokens,
+                    Decl *ContainingDecl,
+                    SourceLocation InjectLoc) override {
+    S.PendingInjections.push_back({InjectLoc, Tokens});
+    return false;
+  }
 };
 }  // anonymous namespace
 
@@ -976,6 +984,29 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
 ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OperatorLoc,
                                      CXXSpliceExpr *E) {
   return BuildCXXReflectExpr(OperatorLoc, E);
+}
+
+ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
+                                                  SourceRange OperandRange,
+                                                  ArrayRef<Token> Tokens) {
+  // Allocate the tokens in the ASTContext.
+  Token *StoredTokens = new (Context) Token[Tokens.size()];
+  std::copy(Tokens.begin(), Tokens.end(), StoredTokens);
+
+  auto *TSD = new (Context) TokenSequenceData();
+  TSD->Tokens = StoredTokens;
+  TSD->NumTokens = Tokens.size();
+
+  APValue RV(ReflectionKind::TokenSequence, TSD);
+  return CXXReflectExpr::Create(Context, OpLoc, OperandRange, RV);
+}
+
+ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
+                                       SourceLocation LParenLoc,
+                                       Expr *Operand,
+                                       SourceLocation RParenLoc) {
+  return CXXBuiltinInjectExpr::Create(Context, Context.VoidTy, Operand,
+                                       KwLoc, LParenLoc, RParenLoc);
 }
 
 /// Returns an expression representing the result of a metafunction operating
@@ -1739,6 +1770,7 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
     case ReflectionKind::Parameter:
     case ReflectionKind::DataMemberSpec:
     case ReflectionKind::Annotation:
+    case ReflectionKind::TokenSequence:
       Diag(Splice->getBeginLoc(),
            diag::err_unexpected_reflection_kind_in_splice)
           << 1 << Splice->getSourceRange();
@@ -1803,6 +1835,10 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
       for (PartialDiagnosticAt PD : Diags)
         Diag(PD.first, PD.second);
     }
+
+    // Collect any pending token injections from __builtin_inject calls.
+    for (auto &Injection : ER.PendingInjections)
+      PendingInjections.push_back(Injection);
   }
   return Result;
 }
@@ -1875,6 +1911,7 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
+  case ReflectionKind::TokenSequence:
     Diag(Splice->getBeginLoc(), diag::err_expected_class_or_namespace)
         << "spliced entity" << getLangOpts().CPlusPlus;
     return nullptr;

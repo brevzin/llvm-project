@@ -5067,6 +5067,8 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
     mangleExpression(R.getReflectedAnnotation()->getArg());
     break;
   }
+  case ReflectionKind::TokenSequence:
+    llvm_unreachable("token sequences cannot be mangled");
   }
   Out << 'E';
 }
@@ -5172,6 +5174,7 @@ recurse:
   case Expr::CXXInheritedCtorInitExprClass:
   case Expr::CXXParenListInitExprClass:
   case Expr::CXXMetafunctionExprClass:
+  case Expr::CXXBuiltinInjectExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::CXXDependentMemberSpliceExprClass:
   case Expr::StackLocationExprClass:

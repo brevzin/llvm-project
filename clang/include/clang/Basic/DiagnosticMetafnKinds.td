@@ -114,4 +114,8 @@ def metafn_injected_decl_non_plainly_consteval : Note<
 // Annotation injection.
 def metafn_cannot_annotate : Note<"cannot attach an annotation to %1">;
 
+// Token injection.
+def err_builtin_inject_not_token_sequence : Note<
+  "argument to __builtin_inject is not a token sequence reflection">;
+
 }  // end of metafn component
