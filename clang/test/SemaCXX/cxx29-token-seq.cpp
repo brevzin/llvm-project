@@ -151,3 +151,40 @@ namespace N6 {
         a.l();
     }
 }
+
+namespace N7 {
+    struct string_view {
+    private:
+        char const* p_;
+        size_t len_;
+
+    public:
+        constexpr string_view(char const* p) : p_(p), len_(__builtin_strlen(p)) { }
+        constexpr auto data() const -> char const* { return p_; }
+        constexpr auto size() const -> size_t { return len_; }
+    };
+
+    template <class S>
+    consteval auto make_field(info type, S name, int val) -> info {
+        return ^^{ \(type) \(__builtin_id(name)) = \(val); };
+    }
+
+    consteval auto make_field2(info type, string_view name, info init) {
+        return ^^{ \(type) \(__builtin_id(name)) \(init); };
+    }
+
+    struct S {
+        consteval {
+            __builtin_inject(make_field(^^int, "x", 1));
+            __builtin_inject(make_field(^^int, string_view("y"), 2));
+            __builtin_inject(make_field2(^^int, "z", ^^{ = 3 }));
+        }
+    };
+
+    static_assert(sizeof(S) == 3 * sizeof(int));
+    constexpr auto check() -> int {
+        S s = {};
+        return s.x + s.y + s.z;
+    }
+    static_assert(check() == 6);
+}

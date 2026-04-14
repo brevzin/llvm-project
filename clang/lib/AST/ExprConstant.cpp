@@ -17017,7 +17017,10 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
 
     if (HasInterpolations) {
       // Build a new token array with interpolations resolved.
-      Token *NewTokens = new (Info.Ctx) Token[TSD->NumTokens];
+      // Use a SmallVector since token sequence interpolation can change the
+      // number of tokens.
+      SmallVector<Token, 32> NewTokens;
+      NewTokens.reserve(TSD->NumTokens);
       for (unsigned I = 0; I < TSD->NumTokens; ++I) {
         if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
           // Extract the unevaluated expression from the annotation token.
@@ -17045,17 +17048,28 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
               }
 
               // Create an annot_typename token carrying the type.
-              NewTokens[I] = TSD->Tokens[I];
-              NewTokens[I].setKind(tok::annot_typename);
-              NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
+              Token Tok = TSD->Tokens[I];
+              Tok.setKind(tok::annot_typename);
+              Tok.setAnnotationValue(QT.getAsOpaquePtr());
+              NewTokens.push_back(Tok);
             } else if (Val.isReflectedIdentifier()) {
               IdentifierInfo *II = Val.getReflectedIdentifier();
 
               // Create a tok::identifier token.
-              NewTokens[I] = TSD->Tokens[I];
-              NewTokens[I].setKind(tok::identifier);
-              NewTokens[I].setIdentifierInfo(II);
-              NewTokens[I].setLength(II->getLength());
+              Token Tok = TSD->Tokens[I];
+              Tok.setKind(tok::identifier);
+              Tok.setIdentifierInfo(II);
+              Tok.setLength(II->getLength());
+              NewTokens.push_back(Tok);
+            } else if (Val.isReflectedTokenSequence()) {
+              // Token sequence concatenation: splice the tokens inline,
+              // excluding the trailing eof.
+              const TokenSequenceData *Inner = Val.getReflectedTokenSequence();
+              for (unsigned J = 0; J < Inner->NumTokens; ++J) {
+                if (Inner->Tokens[J].is(tok::eof))
+                  break;
+                NewTokens.push_back(Inner->Tokens[J]);
+              }
             } else {
               Info.FFDiag(SubExpr->getExprLoc(),
                           diag::err_interpolation_not_type_reflection);
@@ -17072,17 +17086,22 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
             ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, SubExpr, Val);
             CE->setValueKind(VK_PRValue);
 
-            NewTokens[I] = TSD->Tokens[I];
-            NewTokens[I].setAnnotationValue(static_cast<void *>(CE));
+            Token Tok = TSD->Tokens[I];
+            Tok.setAnnotationValue(static_cast<void *>(CE));
+            NewTokens.push_back(Tok);
           }
         } else {
-          NewTokens[I] = TSD->Tokens[I];
+          NewTokens.push_back(TSD->Tokens[I]);
         }
       }
 
+      // Copy to ASTContext-allocated array.
+      Token *AllocTokens = new (Info.Ctx) Token[NewTokens.size()];
+      std::copy(NewTokens.begin(), NewTokens.end(), AllocTokens);
+
       auto *NewTSD = new (Info.Ctx) TokenSequenceData();
-      NewTSD->Tokens = NewTokens;
-      NewTSD->NumTokens = TSD->NumTokens;
+      NewTSD->Tokens = AllocTokens;
+      NewTSD->NumTokens = NewTokens.size();
       return Success(APValue(ReflectionKind::TokenSequence, NewTSD), E);
     }
   }
@@ -17123,12 +17142,18 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
           Str = Str.drop_back();
         Name.append(Str);
       } else {
-        // Fall back to pointer evaluation for non-literal strings.
-        LValue String;
-        if (!EvaluatePointer(Arg, String, Info))
+        // Fall back to rvalue evaluation for non-literal strings
+        // (e.g. a const char* parameter).
+        APValue Val;
+        if (!EvaluateAsRValue(Info, Arg, Val))
           return false;
 
-        APValue::LValueBase Base = String.getLValueBase();
+        if (!Val.isLValue()) {
+          Info.FFDiag(Arg->getExprLoc());
+          return false;
+        }
+
+        APValue::LValueBase Base = Val.getLValueBase();
         if (!Base) {
           Info.FFDiag(Arg->getExprLoc());
           return false;
@@ -17137,7 +17162,7 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
         if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
                 Base.dyn_cast<const Expr *>())) {
           StringRef Str = SLit->getString();
-          int64_t Off = String.getLValueOffset().getQuantity();
+          int64_t Off = Val.getLValueOffset().getQuantity();
           if (Off >= 0 && (uint64_t)Off <= (uint64_t)Str.size()) {
             Str = Str.substr(Off);
             StringRef::size_type Pos = Str.find(0);
@@ -17149,6 +17174,65 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
           Info.FFDiag(Arg->getExprLoc());
           return false;
         }
+      }
+    } else if (Arg->getType()->isRecordType()) {
+      // Record type (e.g. string_view): evaluate as rvalue, then extract
+      // the string data from a pointer field and length from an integer field.
+      APValue Val;
+      if (!EvaluateAsRValue(Info, Arg, Val))
+        return false;
+
+      if (Val.getKind() != APValue::Struct) {
+        Info.FFDiag(Arg->getExprLoc());
+        return false;
+      }
+
+      // Find the pointer and length fields.
+      const auto *RD = Arg->getType()->getAsCXXRecordDecl();
+      int PtrIdx = -1, LenIdx = -1;
+      unsigned FieldIdx = 0;
+      for (const auto *FD : RD->fields()) {
+        QualType FT = FD->getType();
+        if (FT->isPointerType() && PtrIdx == -1)
+          PtrIdx = FieldIdx;
+        else if (FT->isIntegralOrEnumerationType() && LenIdx == -1)
+          LenIdx = FieldIdx;
+        ++FieldIdx;
+      }
+
+      if (PtrIdx == -1 || LenIdx == -1) {
+        Info.FFDiag(Arg->getExprLoc());
+        return false;
+      }
+
+      const APValue &PtrField = Val.getStructField(PtrIdx);
+      const APValue &LenField = Val.getStructField(LenIdx);
+
+      if (!PtrField.isLValue() || !LenField.isInt()) {
+        Info.FFDiag(Arg->getExprLoc());
+        return false;
+      }
+
+      int64_t Len = LenField.getInt().getExtValue();
+      APValue::LValueBase Base = PtrField.getLValueBase();
+      if (!Base) {
+        Info.FFDiag(Arg->getExprLoc());
+        return false;
+      }
+
+      if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
+              Base.dyn_cast<const Expr *>())) {
+        StringRef Str = SLit->getString();
+        int64_t Off = PtrField.getLValueOffset().getQuantity();
+        if (Off >= 0 && Len >= 0 && (uint64_t)(Off + Len) <= (uint64_t)Str.size())
+          Name.append(Str.substr(Off, Len));
+        else {
+          Info.FFDiag(Arg->getExprLoc());
+          return false;
+        }
+      } else {
+        Info.FFDiag(Arg->getExprLoc());
+        return false;
       }
     } else {
       Info.FFDiag(Arg->getExprLoc());
