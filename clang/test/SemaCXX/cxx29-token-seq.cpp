@@ -66,11 +66,25 @@ namespace N4 {
     struct enable_if {
         consteval {
             if (B) {
-                __builtin_inject(^^{ using type = T; });
+                __builtin_inject(^^{ using type1 = T; });
+                __builtin_inject(^^{ using type2 = \(^^T); });
             }
         }
     };
 
-    using A = enable_if<true, int>::type; // ok
-    using B = enable_if<false, int>::type; // expected-error {{no type named}}
+    using A1 = enable_if<true, int>::type1; // ok
+    using B1 = enable_if<false, int>::type1; // expected-error {{no type named}}
+    using A2 = enable_if<true, int>::type2; // ok
+    using B2 = enable_if<false, int>::type2; // expected-error {{no type named}}
+
+    template <auto V>
+    struct constant {
+        consteval {
+            __builtin_inject(^^{
+                static constexpr \(^^decltype(V)) value = \(V);
+            });
+        }
+    };
+
+    static_assert(constant<5>::value == 5);
 }

@@ -1187,8 +1187,13 @@ void Parser::ProcessTokenInjections(
 
     // Parse declarations from the injected tokens until eof.
     // If we're inside a class body, use ParseCXXClassMemberDeclaration
-    // so that the access specifier is set correctly.
+    // so that the access specifier is set correctly. We need to push a
+    // ParsingClassDefinition so that the ClassStack is non-empty.
     if (Actions.CurContext->isRecord()) {
+      Decl *TagDecl = cast<Decl>(Actions.CurContext);
+      ParsingClassDefinition ParsingDef(*this, TagDecl,
+                                        /*TopLevelClass=*/true,
+                                        /*IsInterface=*/false);
       while (Tok.isNot(tok::eof)) {
         ParsedAttributes DeclAttrs(AttrFactory);
         ParsedTemplateInfo TemplateInfo;

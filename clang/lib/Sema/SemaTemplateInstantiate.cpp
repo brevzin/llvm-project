@@ -2667,12 +2667,20 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
       }
     }
 
-    // Scan tokens for identifiers matching template parameters.
+    // Scan tokens for identifiers matching template parameters, or
+    // annot_primary_expr tokens containing dependent expressions.
     bool HasSubstitutions = false;
     for (unsigned I = 0; I < TSD->NumTokens; ++I) {
       if (TSD->Tokens[I].is(tok::identifier)) {
         IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
         if (II && ParamMap.count(II->getName())) {
+          HasSubstitutions = true;
+          break;
+        }
+      } else if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
+        Expr *SubExpr = static_cast<Expr *>(
+            TSD->Tokens[I].getAnnotationValue());
+        if (SubExpr && SubExpr->isInstantiationDependent()) {
           HasSubstitutions = true;
           break;
         }
@@ -2684,6 +2692,20 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
       Token *NewTokens = new (Ctx) Token[TSD->NumTokens];
       for (unsigned I = 0; I < TSD->NumTokens; ++I) {
         NewTokens[I] = TSD->Tokens[I];
+
+        if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
+          // Transform dependent expressions inside interpolation tokens.
+          Expr *SubExpr = static_cast<Expr *>(
+              TSD->Tokens[I].getAnnotationValue());
+          if (SubExpr && SubExpr->isInstantiationDependent()) {
+            ExprResult Transformed = TransformExpr(SubExpr);
+            if (!Transformed.isInvalid())
+              NewTokens[I].setAnnotationValue(
+                  static_cast<void *>(Transformed.get()));
+          }
+          continue;
+        }
+
         if (!TSD->Tokens[I].is(tok::identifier)) continue;
         IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
         if (!II) continue;
