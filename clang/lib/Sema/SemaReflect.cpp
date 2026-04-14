@@ -1001,6 +1001,21 @@ ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
   return CXXReflectExpr::Create(Context, OpLoc, OperandRange, RV);
 }
 
+ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
+  SmallVector<PartialDiagnosticAt, 4> Diags;
+  Expr::EvalResult Eval;
+  Eval.Diag = &Diags;
+
+  if (!E->EvaluateAsConstantExpr(Eval, Context)) {
+    Diag(E->getBeginLoc(), diag::err_interpolation_not_constant);
+    for (const auto &PD : Diags)
+      Diag(PD.first, PD.second);
+    return ExprError();
+  }
+
+  return ConstantExpr::Create(Context, E, Eval.Val);
+}
+
 ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                        SourceLocation LParenLoc,
                                        Expr *Operand,

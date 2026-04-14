@@ -3203,6 +3203,8 @@ def err_reflect_intervening_lambda : Error<
   "cannot take the reflection of a local entity for which there is an "
   "intervening lambda expression">;
 
+def err_interpolation_not_constant : Error<
+  "interpolation expression is not a constant expression">;
 def err_splice_operand_not_reflection : Error<
   "splice operand must be a reflection">;
 def err_splice_operand_not_constexpr : Error<

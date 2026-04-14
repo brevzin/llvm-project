@@ -10,3 +10,22 @@ namespace N1 {
     }
     static_assert(x == 42);
 }
+
+namespace N2 {
+    constexpr int value = 5;
+    constexpr info tok = ^^{ constexpr int y = \(value); };
+    static_assert(y == value); // expected-error {{use of undeclared}}
+    consteval {
+        __builtin_inject(tok);
+    }
+    static_assert(y == 5);
+
+    struct Point { int x, y; };
+    constexpr Point p = {.x=1, .y=2};
+    consteval {
+        __builtin_inject(^^{
+            constexpr int px = \(p).x;
+        });
+    }
+    static_assert(px == 1);
+}

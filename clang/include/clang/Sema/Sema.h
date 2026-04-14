@@ -15604,6 +15604,8 @@ public:
                                              SourceRange OperandRange,
                                              ArrayRef<Token> Tokens);
 
+  ExprResult ActOnTokenSequenceInterpolation(Expr *E);
+
   ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,
                                    Expr *Operand,

@@ -38,6 +38,42 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
         if (BraceDepth == 0)
           break;
       }
+
+      // Check for interpolation: \(expr)
+      if (Tok.is(tok::unknown) && Tok.getLength() == 1 &&
+          *PP.getSourceManager().getCharacterData(Tok.getLocation()) == '\\' &&
+          NextToken().is(tok::l_paren)) {
+        SourceLocation BackslashLoc = Tok.getLocation();
+        ConsumeToken();  // consume '\'
+        ConsumeParen();  // consume '('
+
+        ExprResult Expr = ParseConstantExpression();
+        if (Expr.isInvalid()) {
+          SkipUntil(tok::r_paren, StopAtSemi | StopBeforeMatch);
+          if (Tok.is(tok::r_paren))
+            ConsumeParen();
+          continue;
+        }
+
+        SourceLocation RParenLoc = Tok.getLocation();
+        if (ExpectAndConsume(tok::r_paren)) {
+          continue;
+        }
+
+        ExprResult CE = Actions.ActOnTokenSequenceInterpolation(Expr.get());
+        if (CE.isInvalid())
+          continue;
+
+        Token AnnTok;
+        AnnTok.startToken();
+        AnnTok.setKind(tok::annot_primary_expr);
+        AnnTok.setLocation(BackslashLoc);
+        AnnTok.setAnnotationEndLoc(RParenLoc);
+        setExprAnnotation(AnnTok, CE);
+        Tokens.push_back(AnnTok);
+        continue;
+      }
+
       Tokens.push_back(Tok);
       ConsumeAnyToken();
     }
