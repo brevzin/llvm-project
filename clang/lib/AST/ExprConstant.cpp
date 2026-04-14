@@ -56,6 +56,7 @@
 #include "clang/Basic/DiagnosticMetafn.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/TargetBuiltins.h"
+#include "clang/Lex/Token.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/APFixedPoint.h"
 #include "llvm/ADT/Sequence.h"
@@ -16973,8 +16974,58 @@ public:
 };
 
 bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
-  APValue Result(E->getReflection());
-  return Success(Result, E);
+  APValue Refl(E->getReflection());
+
+  // For token sequences, resolve any interpolation expressions.
+  if (Refl.isReflectedTokenSequence()) {
+    const TokenSequenceData *TSD = Refl.getReflectedTokenSequence();
+    bool HasInterpolations = false;
+    for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+      if (TSD->Tokens[I].is(tok::annot_primary_expr))  {
+        HasInterpolations = true;
+        break;
+      }
+    }
+
+    if (HasInterpolations) {
+      // Build a new token array with interpolations resolved.
+      Token *NewTokens = new (Info.Ctx) Token[TSD->NumTokens];
+      for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+        if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
+          // Extract the unevaluated expression from the annotation token.
+          // The annotation value is the Expr* stored by setExprAnnotation.
+          Expr *SubExpr = static_cast<Expr *>(
+              TSD->Tokens[I].getAnnotationValue());
+
+          // Evaluate it in the current constexpr context as an rvalue.
+          APValue Val;
+          if (!EvaluateAsRValue(Info, SubExpr, Val))
+            return false;
+
+          // Wrap in a ConstantExpr with the evaluated value.
+          // Force it to be a prvalue so the evaluator dispatches to the
+          // right evaluator kind (e.g. IntExprEvaluator, RecordExprEvaluator)
+          // rather than LValueExprEvaluator, since our stored APValue is
+          // always an rvalue.
+          ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, SubExpr, Val);
+          CE->setValueKind(VK_PRValue);
+
+          // Create a new annotation token with the ConstantExpr.
+          NewTokens[I] = TSD->Tokens[I];
+          NewTokens[I].setAnnotationValue(static_cast<void *>(CE));
+        } else {
+          NewTokens[I] = TSD->Tokens[I];
+        }
+      }
+
+      auto *NewTSD = new (Info.Ctx) TokenSequenceData();
+      NewTSD->Tokens = NewTokens;
+      NewTSD->NumTokens = TSD->NumTokens;
+      return Success(APValue(ReflectionKind::TokenSequence, NewTSD), E);
+    }
+  }
+
+  return Success(Refl, E);
 }
 
 bool ReflectionEvaluator::VisitCXXMetafunctionExpr(

@@ -28,4 +28,14 @@ namespace N2 {
         });
     }
     static_assert(px == 1);
+
+    consteval auto make_seq(int i) -> info {
+        return ^^{
+            constexpr int z = \(i);
+        };
+    }
+    consteval {
+        __builtin_inject(make_seq(10));
+    }
+    static_assert(z == 10);
 }

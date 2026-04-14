@@ -1002,18 +1002,12 @@ ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
 }
 
 ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
-  SmallVector<PartialDiagnosticAt, 4> Diags;
-  Expr::EvalResult Eval;
-  Eval.Diag = &Diags;
-
-  if (!E->EvaluateAsConstantExpr(Eval, Context)) {
-    Diag(E->getBeginLoc(), diag::err_interpolation_not_constant);
-    for (const auto &PD : Diags)
-      Diag(PD.first, PD.second);
-    return ExprError();
-  }
-
-  return ConstantExpr::Create(Context, E, Eval.Val);
+  // Don't evaluate here — the expression may reference consteval function
+  // parameters that aren't constant expressions at parse time but will have
+  // concrete values when the token sequence is evaluated during consteval
+  // evaluation. Evaluation happens in the ReflectionEvaluator when the
+  // ^^{ ... } expression is evaluated.
+  return E;
 }
 
 ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,

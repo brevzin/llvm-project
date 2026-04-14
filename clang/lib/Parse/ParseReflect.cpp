@@ -47,7 +47,7 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
         ConsumeToken();  // consume '\'
         ConsumeParen();  // consume '('
 
-        ExprResult Expr = ParseConstantExpression();
+        ExprResult Expr = ParseAssignmentExpression();
         if (Expr.isInvalid()) {
           SkipUntil(tok::r_paren, StopAtSemi | StopBeforeMatch);
           if (Tok.is(tok::r_paren))
