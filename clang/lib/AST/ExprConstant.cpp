@@ -16997,22 +16997,40 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
           Expr *SubExpr = static_cast<Expr *>(
               TSD->Tokens[I].getAnnotationValue());
 
-          // Evaluate it in the current constexpr context as an rvalue.
+          // Evaluate the expression in the current constexpr context.
           APValue Val;
-          if (!EvaluateAsRValue(Info, SubExpr, Val))
-            return false;
+          QualType ExprTy = SubExpr->getType();
+          if (ExprTy->isReflectionType()) {
+            // Reflection-typed expression: evaluate and check kind.
+            if (!EvaluateAsRValue(Info, SubExpr, Val))
+              return false;
 
-          // Wrap in a ConstantExpr with the evaluated value.
-          // Force it to be a prvalue so the evaluator dispatches to the
-          // right evaluator kind (e.g. IntExprEvaluator, RecordExprEvaluator)
-          // rather than LValueExprEvaluator, since our stored APValue is
-          // always an rvalue.
-          ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, SubExpr, Val);
-          CE->setValueKind(VK_PRValue);
+            // For now, only type reflections are supported.
+            if (!Val.isReflectedType()) {
+              Info.FFDiag(SubExpr->getExprLoc(),
+                          diag::err_interpolation_not_type_reflection);
+              return false;
+            }
+            QualType QT = Val.getReflectedType();
 
-          // Create a new annotation token with the ConstantExpr.
-          NewTokens[I] = TSD->Tokens[I];
-          NewTokens[I].setAnnotationValue(static_cast<void *>(CE));
+            // Create an annot_typename token carrying the type.
+            NewTokens[I] = TSD->Tokens[I];
+            NewTokens[I].setKind(tok::annot_typename);
+            NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
+          } else {
+            // Non-reflection interpolation: evaluate as rvalue and wrap
+            // in a ConstantExpr.
+            if (!EvaluateAsRValue(Info, SubExpr, Val))
+              return false;
+
+            // Force prvalue so the evaluator dispatches to the right
+            // evaluator kind rather than LValueExprEvaluator.
+            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, SubExpr, Val);
+            CE->setValueKind(VK_PRValue);
+
+            NewTokens[I] = TSD->Tokens[I];
+            NewTokens[I].setAnnotationValue(static_cast<void *>(CE));
+          }
         } else {
           NewTokens[I] = TSD->Tokens[I];
         }

@@ -39,3 +39,24 @@ namespace N2 {
     }
     static_assert(z == 10);
 }
+
+namespace N3 {
+    constexpr info r = ^^int;
+    consteval {
+        __builtin_inject(^^{
+            constexpr \(r) v = 12;
+        });
+    }
+    static_assert(v == 12);
+    static_assert(^^decltype(v) == ^^int const);
+
+    consteval auto make_variable(info ty) -> info {
+        return ^^{
+            \(ty) var = {};
+        };
+    }
+    consteval {
+        __builtin_inject(make_variable(^^char));
+    }
+    static_assert(^^decltype(var) == ^^char);
+}
