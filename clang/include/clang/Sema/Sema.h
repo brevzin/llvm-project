@@ -15754,6 +15754,10 @@ public:
 
   void ProcessPendingTokenInjections();
 
+  /// After a class definition completes, check its [[=expr]] annotations
+  /// for an on_complete member function and call it with ^^TheType.
+  void HandleAnnotationOnComplete(Decl *TagDecl);
+
 private:
   // Lambdas having bound references to this Sema object, used to evaluate
   // metafunction (C++26, P2996) at constant evaluation time.

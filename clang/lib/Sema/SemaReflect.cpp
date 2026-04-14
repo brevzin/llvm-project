@@ -1872,6 +1872,79 @@ void Sema::ProcessPendingTokenInjections() {
   TokenInjectionCallback(OpaqueParser, Injections);
 }
 
+void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
+  auto *RD = dyn_cast_or_null<CXXRecordDecl>(TagDecl);
+  if (!RD || !RD->isCompleteDefinition())
+    return;
+
+  for (auto *Attr : RD->attrs()) {
+    auto *A = dyn_cast<CXX26AnnotationAttr>(Attr);
+    if (!A)
+      continue;
+
+    QualType AnnotTy = A->getArg()->getType();
+    auto *AnnotRD = AnnotTy->getAsCXXRecordDecl();
+    if (!AnnotRD)
+      continue;
+
+    // Look up "on_complete" in the annotation's type.
+    IdentifierInfo *II = &Context.Idents.get("on_complete");
+    SourceLocation Loc = RD->getEndLoc();
+    DeclarationNameInfo DNI(II, Loc);
+    LookupResult R(*this, DNI, LookupMemberName);
+    if (!LookupQualifiedName(R, AnnotRD))
+      continue;
+
+    // Build: annotation_value.on_complete(^^RD)
+    // Use ImmediateFunctionContext so that consteval calls and
+    // __builtin_inject inside on_complete are treated as plainly
+    // constant-evaluated.
+    EnterExpressionEvaluationContext ConstantEvaluated(
+        *this, ExpressionEvaluationContext::ImmediateFunctionContext);
+
+    // 1. Object expression from the annotation's ConstantExpr.
+    Expr *ObjExpr = const_cast<Expr *>(A->getArg());
+
+    // 2. ^^RD
+    QualType ClassTy = Context.getTypeDeclType(RD);
+    ExprResult ReflExpr = BuildCXXReflectExpr(Loc, Loc, ClassTy);
+    if (ReflExpr.isInvalid())
+      continue;
+
+    // 3. Build member reference: ObjExpr.on_complete
+    CXXScopeSpec SS;
+    ExprResult MemberRef = BuildMemberReferenceExpr(
+        ObjExpr, AnnotTy, Loc, /*IsArrow=*/false,
+        SS, SourceLocation(), nullptr, R, nullptr, nullptr);
+    if (MemberRef.isInvalid())
+      continue;
+
+    // 4. Build call: ObjExpr.on_complete(ReflExpr)
+    Expr *Args[] = {ReflExpr.get()};
+    ExprResult Call = BuildCallExpr(nullptr, MemberRef.get(),
+                                    Loc, Args, Loc);
+    if (Call.isInvalid())
+      continue;
+
+    // 5. Evaluate as constant expression (like consteval block).
+    SmallVector<PartialDiagnosticAt, 4> Diags;
+    Expr::EvalResult ER;
+    ER.Diag = &Diags;
+
+    ConstantExprKind Kind = ConstantExprKind::PlainlyConstantEvaluated;
+    if (!Call.get()->EvaluateAsConstantExpr(ER, Context, Kind, RD)) {
+      Diag(Loc, diag::err_consteval_block_not_constexpr);
+      for (auto &PD : Diags)
+        Diag(PD.first, PD.second);
+      continue;
+    }
+
+    // 6. Collect pending token injections.
+    PendingInjections.append(ER.PendingInjections.begin(),
+                             ER.PendingInjections.end());
+  }
+}
+
 DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   if (Splice->getDependence() != SpliceSpecifierDependence::None)
     return nullptr;

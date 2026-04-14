@@ -1187,9 +1187,16 @@ void Parser::ProcessTokenInjections(
     ConsumeAnyToken();
 
     // If a target namespace was specified, switch to that context.
+    // We need both ContextRAII (to set CurContext) and a ParseScope with
+    // the scope entity set to the target DeclContext, so that name lookup
+    // finds declarations in the target namespace.
     std::optional<Sema::ContextRAII> TargetCtx;
-    if (Inj.TargetDC)
+    std::optional<ParseScope> TargetScope;
+    if (Inj.TargetDC) {
       TargetCtx.emplace(Actions, Inj.TargetDC);
+      TargetScope.emplace(this, Scope::DeclScope);
+      getCurScope()->setEntity(Inj.TargetDC);
+    }
 
     // Parse the injected tokens in the appropriate context.
     if (Actions.CurContext->isFunctionOrMethod()) {
@@ -4045,6 +4052,18 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
 
   if (TagDecl)
     Actions.ActOnTagFinishDefinition(getCurScope(), TagDecl, T.getRange());
+
+  // Handle annotation on_complete callbacks. At this point, the class is
+  // fully complete and CurContext is the enclosing namespace, so any
+  // unary __builtin_inject will inject into that namespace.
+  if (TagDecl) {
+    Actions.HandleAnnotationOnComplete(TagDecl);
+    while (!Actions.PendingInjections.empty()) {
+      auto Injections = std::move(Actions.PendingInjections);
+      Actions.PendingInjections.clear();
+      ProcessTokenInjections(Injections);
+    }
+  }
 
   // Leave the class scope.
   ParsingDef.Pop();
