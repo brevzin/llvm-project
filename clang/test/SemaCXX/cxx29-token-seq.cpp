@@ -60,3 +60,17 @@ namespace N3 {
     }
     static_assert(^^decltype(var) == ^^char);
 }
+
+namespace N4 {
+    template <bool B, typename T>
+    struct enable_if {
+        consteval {
+            if (B) {
+                __builtin_inject(^^{ using type = T; });
+            }
+        }
+    };
+
+    using A = enable_if<true, int>::type; // ok
+    using B = enable_if<false, int>::type; // expected-error {{no type named}}
+}

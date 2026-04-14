@@ -1852,6 +1852,16 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
   return Result;
 }
 
+void Sema::ProcessPendingTokenInjections() {
+  if (PendingInjections.empty() || !TokenInjectionCallback)
+    return;
+  // Move the injections out so the callback doesn't re-process them.
+  SmallVector<std::pair<SourceLocation, const TokenSequenceData *>, 4>
+      Injections = std::move(PendingInjections);
+  PendingInjections.clear();
+  TokenInjectionCallback(OpaqueParser, Injections);
+}
+
 DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   if (Splice->getDependence() != SpliceSpecifierDependence::None)
     return nullptr;

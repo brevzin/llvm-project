@@ -893,7 +893,7 @@ namespace {
     /// ContainingDecl - This is the declaration within which the expression
     /// under evaluation appears. Used to verify rules around injected
     /// declarations that may be produced by plainly constant evaluations.
-    Decl *ContainingDecl;
+    Decl *ContainingDecl = nullptr;
 
     enum class EvaluatingDeclKind {
       None,

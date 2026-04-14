@@ -15736,6 +15736,15 @@ public:
   SmallVector<std::pair<SourceLocation, const TokenSequenceData *>>
       PendingInjections;
 
+  // Callback for processing token injections. The Parser registers this
+  // so that Sema (during template instantiation) can feed injected tokens
+  // back to the parser.
+  typedef void TokenInjectionCB(void *P,
+      SmallVectorImpl<std::pair<SourceLocation, const TokenSequenceData *>> &);
+  TokenInjectionCB *TokenInjectionCallback = nullptr;
+
+  void ProcessPendingTokenInjections();
+
 private:
   // Lambdas having bound references to this Sema object, used to evaluate
   // metafunction (C++26, P2996) at constant evaluation time.

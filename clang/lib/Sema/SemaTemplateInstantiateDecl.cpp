@@ -2070,8 +2070,16 @@ Decl *TemplateDeclInstantiator::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
   if (InstantiatedEvaluatingExpr.isInvalid())
     return nullptr;
 
-  return SemaRef.BuildConstevalBlockDeclaration(
+  Decl *Result = SemaRef.BuildConstevalBlockDeclaration(
        D->getLocation(), InstantiatedEvaluatingExpr.get());
+
+  // Process any pending token injections from __builtin_inject calls.
+  // During normal parsing, ParseConstevalBlockDeclaration handles this,
+  // but during template instantiation we need to invoke the parser via
+  // callback.
+  SemaRef.ProcessPendingTokenInjections();
+
+  return Result;
 }
 
 Decl *TemplateDeclInstantiator::VisitExpansionStmtDecl(ExpansionStmtDecl *D) {

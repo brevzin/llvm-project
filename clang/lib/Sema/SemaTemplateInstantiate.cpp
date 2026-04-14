@@ -15,6 +15,8 @@
 #include "clang/AST/ASTConcept.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/Reflection.h"
+#include "clang/Lex/Token.h"
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/ASTMutationListener.h"
 #include "clang/AST/DeclBase.h"
@@ -2629,6 +2631,103 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
 
       return RecordConsteval.RecordAndReturn(
               getSema().BuildCXXReflectExpr(E->getOperatorLoc(), Result.get()));
+    }
+  }
+
+  // Handle token sequence reflections: substitute template parameter names
+  // with their instantiated values.
+  if (E->getReflection().isReflectedTokenSequence()) {
+    const TokenSequenceData *TSD = E->getReflection().getReflectedTokenSequence();
+
+    // Build a map from identifier name to (Depth, Index, NamedDecl*) for all
+    // template parameters across all substitution levels.
+    struct ParamInfo {
+      unsigned Depth;
+      unsigned Index;
+      NamedDecl *Param;
+    };
+    llvm::StringMap<ParamInfo> ParamMap;
+
+    for (unsigned Depth = TemplateArgs.getNumRetainedOuterLevels();
+         Depth < TemplateArgs.getNumLevels(); ++Depth) {
+      auto [AssocDecl, Final] = TemplateArgs.getAssociatedDecl(Depth);
+      if (!AssocDecl)
+        continue;
+      TemplateParameterList *TPL = nullptr;
+      if (auto *TD = dyn_cast<TemplateDecl>(AssocDecl))
+        TPL = TD->getTemplateParameters();
+      else if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(AssocDecl))
+        TPL = CTSD->getSpecializedTemplate()->getTemplateParameters();
+      if (!TPL)
+        continue;
+      for (unsigned I = 0; I < TPL->size(); ++I) {
+        NamedDecl *P = TPL->getParam(I);
+        if (IdentifierInfo *II = P->getIdentifier())
+          ParamMap[II->getName()] = {Depth, I, P};
+      }
+    }
+
+    // Scan tokens for identifiers matching template parameters.
+    bool HasSubstitutions = false;
+    for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+      if (TSD->Tokens[I].is(tok::identifier)) {
+        IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
+        if (II && ParamMap.count(II->getName())) {
+          HasSubstitutions = true;
+          break;
+        }
+      }
+    }
+
+    if (HasSubstitutions) {
+      ASTContext &Ctx = getSema().Context;
+      Token *NewTokens = new (Ctx) Token[TSD->NumTokens];
+      for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+        NewTokens[I] = TSD->Tokens[I];
+        if (!TSD->Tokens[I].is(tok::identifier)) continue;
+        IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
+        if (!II) continue;
+        auto It = ParamMap.find(II->getName());
+        if (It == ParamMap.end()) continue;
+
+        ParamInfo &PI = It->second;
+        if (!TemplateArgs.hasTemplateArgument(PI.Depth, PI.Index))
+          continue;
+        const TemplateArgument &Arg = TemplateArgs(PI.Depth, PI.Index);
+
+        if (isa<TemplateTypeParmDecl>(PI.Param)) {
+          // Type template parameter: substitute with annot_typename.
+          assert(Arg.getKind() == TemplateArgument::Type);
+          QualType QT = Arg.getAsType();
+          NewTokens[I].setKind(tok::annot_typename);
+          NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
+          NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
+        } else if (auto *NTTP = dyn_cast<NonTypeTemplateParmDecl>(PI.Param)) {
+          // Non-type template parameter: substitute with annot_primary_expr.
+          Expr *Val = nullptr;
+          if (Arg.getKind() == TemplateArgument::Expression) {
+            Val = Arg.getAsExpr();
+          } else if (Arg.getKind() == TemplateArgument::Integral) {
+            Val = IntegerLiteral::Create(
+                Ctx, Arg.getAsIntegral(), NTTP->getType(),
+                TSD->Tokens[I].getLocation());
+          }
+          if (Val) {
+            NewTokens[I].setKind(tok::annot_primary_expr);
+            NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
+            NewTokens[I].setAnnotationValue(static_cast<void *>(Val));
+          }
+        }
+      }
+
+      auto *NewTSD = new (Ctx) TokenSequenceData();
+      NewTSD->Tokens = NewTokens;
+      NewTSD->NumTokens = TSD->NumTokens;
+
+      APValue NewRefl(ReflectionKind::TokenSequence, NewTSD);
+      return RecordConsteval.RecordAndReturn(
+          CXXReflectExpr::Create(Ctx, E->getOperatorLoc(),
+                                 E->getOperandRange(), NewRefl));
     }
   }
 

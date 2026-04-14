@@ -82,6 +82,9 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
       [this](StringRef TypeStr, StringRef Context, SourceLocation IncludeLoc) {
         return this->ParseTypeFromString(TypeStr, Context, IncludeLoc);
       };
+
+  Actions.TokenInjectionCallback = &Parser::TokenInjectionCallback;
+  Actions.OpaqueParser = this;
 }
 
 DiagnosticBuilder Parser::Diag(SourceLocation Loc, unsigned DiagID) {

@@ -1150,39 +1150,68 @@ Decl *Parser::ParseConstevalBlockDeclaration(SourceLocation &DeclEnd) {
                                                         Invocation.get());
 
   // Process any pending token injections from __builtin_inject calls.
+  // (During template instantiation, BuildConstevalBlockDeclaration calls
+  // ProcessPendingTokenInjections via the callback instead.)
   while (!Actions.PendingInjections.empty()) {
     auto Injections = std::move(Actions.PendingInjections);
     Actions.PendingInjections.clear();
-
-    for (auto &[Loc, TSD] : Injections) {
-      // Build a token stream with an eof sentinel at the end.
-      SmallVector<Token, 16> Toks(TSD->Tokens, TSD->Tokens + TSD->NumTokens);
-      Token Eof;
-      Eof.startToken();
-      Eof.setKind(tok::eof);
-      Eof.setLocation(Loc);
-      Toks.push_back(Eof);
-
-      // Save the current token and enter the token stream.
-      Token SavedTok = Tok;
-      PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
-                          /*IsReinject=*/false);
-      ConsumeAnyToken();
-
-      // Parse declarations from the injected tokens until eof.
-      while (Tok.isNot(tok::eof)) {
-        ParsedAttributes DeclAttrs(AttrFactory);
-        ParsedAttributes DeclSpecAttrs(AttrFactory);
-        SourceLocation DeclEnd;
-        ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
-      }
-
-      // Consume the eof sentinel and restore the saved token.
-      Tok = SavedTok;
-    }
+    ProcessTokenInjections(Injections);
   }
 
   return Result;
+}
+
+void Parser::TokenInjectionCallback(void *P,
+    SmallVectorImpl<std::pair<SourceLocation, const TokenSequenceData *>>
+        &Injections) {
+  static_cast<Parser *>(P)->ProcessTokenInjections(Injections);
+}
+
+void Parser::ProcessTokenInjections(
+    SmallVectorImpl<std::pair<SourceLocation, const TokenSequenceData *>>
+        &Injections) {
+  for (auto &[Loc, TSD] : Injections) {
+    // Build a token stream with an eof sentinel at the end.
+    SmallVector<Token, 16> Toks(TSD->Tokens, TSD->Tokens + TSD->NumTokens);
+    Token Eof;
+    Eof.startToken();
+    Eof.setKind(tok::eof);
+    Eof.setLocation(Loc);
+    Toks.push_back(Eof);
+
+    // Save the current token and enter the token stream.
+    Token SavedTok = Tok;
+    PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                        /*IsReinject=*/true);
+    ConsumeAnyToken();
+
+    // Parse declarations from the injected tokens until eof.
+    // If we're inside a class body, use ParseCXXClassMemberDeclaration
+    // so that the access specifier is set correctly.
+    if (Actions.CurContext->isRecord()) {
+      while (Tok.isNot(tok::eof)) {
+        ParsedAttributes DeclAttrs(AttrFactory);
+        ParsedTemplateInfo TemplateInfo;
+        ParseCXXClassMemberDeclaration(AS_public, DeclAttrs, TemplateInfo);
+      }
+    } else {
+      while (Tok.isNot(tok::eof)) {
+        ParsedAttributes DeclAttrs(AttrFactory);
+        ParsedAttributes DeclSpecAttrs(AttrFactory);
+        ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
+      }
+    }
+
+    // Consume the eof sentinel and restore the saved token.
+    Tok = SavedTok;
+  }
+
+  // Recursively process any injections that were produced by injected code.
+  while (!Actions.PendingInjections.empty()) {
+    auto NewInjections = std::move(Actions.PendingInjections);
+    Actions.PendingInjections.clear();
+    ProcessTokenInjections(NewInjections);
+  }
 }
 
 SourceLocation Parser::ParseDecltypeSpecifier(DeclSpec &DS) {
