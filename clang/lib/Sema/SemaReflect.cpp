@@ -1877,6 +1877,11 @@ void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
   if (!RD || !RD->isCompleteDefinition())
     return;
 
+  // Skip dependent types (e.g., template patterns). on_complete callbacks
+  // will fire when the template is instantiated instead.
+  if (RD->isDependentType())
+    return;
+
   for (auto *Attr : RD->attrs()) {
     auto *A = dyn_cast<CXX26AnnotationAttr>(Attr);
     if (!A)

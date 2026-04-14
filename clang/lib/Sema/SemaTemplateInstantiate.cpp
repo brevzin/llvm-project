@@ -4017,6 +4017,12 @@ Sema::InstantiateClass(SourceLocation PointOfInstantiation,
   // Exit the scope of this instantiation.
   SavedContext.pop();
 
+  // Handle annotation on_complete callbacks for the instantiated class.
+  if (!Instantiation->isInvalidDecl()) {
+    HandleAnnotationOnComplete(Instantiation);
+    ProcessPendingTokenInjections();
+  }
+
   if (!Instantiation->isInvalidDecl()) {
     // Always emit the vtable for an explicit instantiation definition
     // of a polymorphic class template specialization. Otherwise, eagerly

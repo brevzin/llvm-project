@@ -66,17 +66,28 @@ struct [[=N::derive_debug]] Config {
     int amount;
 };
 
+template <class T>
+struct [[=N::derive_debug]] Widget {
+    T thing;
+};
+
 // template <> struct std::formatter<Config> : N::DebugFormatter { };
 
-template <class... Args>
-auto test(std::string_view expected, std::format_string<Args...> fmt, Args&&... args) {
-    std::string out = std::format(fmt, std::forward<Args>(args)...);
-    TEST_REQUIRE(
-        out == expected,
-        TEST_WRITE_CONCATENATED(
-            "\nFormat string   ", fmt.get(), "\nExpected output ", expected, "\nActual output   ", out, '\n'));
+template <class T>
+auto test(std::string_view expected, T const& object) -> void {
+    if constexpr (std::default_initializable<std::formatter<T>>) {
+        std::string out = std::format("{}", object);
+        TEST_REQUIRE(
+            out == expected,
+            TEST_WRITE_CONCATENATED(
+                "\nExpected output ", expected,
+                "\nActual output   ", out, '\n'));
+    } else {
+        static_assert(false, "Not formattable");
+    }
 }
 
 int main() {
-    test("Config{.name=abc, .amount=10}", "{}", Config{.name="abc", .amount=10});
+    test("Config{.name=abc, .amount=10}", Config{.name="abc", .amount=10});
+    test("Widget<int>{.thing=5}", Widget<int>{.thing=5});
 }
