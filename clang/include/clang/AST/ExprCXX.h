@@ -5676,6 +5676,57 @@ public:
   }
 };
 
+class CXXBuiltinIdExpr : public Expr {
+  Stmt **Args;
+  unsigned NumArgs;
+  SourceLocation KwLoc;
+  SourceLocation LParenLoc;
+  SourceLocation RParenLoc;
+
+  CXXBuiltinIdExpr(ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+                    SourceLocation KwLoc, SourceLocation LParenLoc,
+                    SourceLocation RParenLoc);
+  CXXBuiltinIdExpr(EmptyShell Empty, unsigned NumArgs);
+
+public:
+  static CXXBuiltinIdExpr *Create(ASTContext &C, QualType Ty,
+                                   ArrayRef<Expr *> Args, SourceLocation KwLoc,
+                                   SourceLocation LParenLoc,
+                                   SourceLocation RParenLoc);
+  static CXXBuiltinIdExpr *CreateEmpty(ASTContext &C, unsigned NumArgs);
+
+  unsigned getNumArgs() const { return NumArgs; }
+  Expr *getArg(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast<Expr>(Args[I]);
+  }
+  void setArg(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[I] = E;
+  }
+
+  SourceLocation getKwLoc() const { return KwLoc; }
+  void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
+
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return KwLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() { return child_range(Args, Args + NumArgs); }
+  const_child_range children() const {
+    return const_child_range(Args, Args + NumArgs);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXBuiltinIdExprClass;
+  }
+};
+
 // Implementation detail of the 'is_accessible' metafunction.
 // Used to "reach up the stack" to find the context from which the metafunction
 // was called, such that the accessibility of a class member can thereafter be

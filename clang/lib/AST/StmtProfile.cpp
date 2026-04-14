@@ -2385,6 +2385,10 @@ void StmtProfiler::VisitCXXBuiltinInjectExpr(const CXXBuiltinInjectExpr *E) {
   VisitExpr(E);
 }
 
+void StmtProfiler::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
+  VisitExpr(E);
+}
+
 void StmtProfiler::VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
   VisitExpr(E);
 }

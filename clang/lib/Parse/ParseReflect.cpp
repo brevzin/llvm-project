@@ -218,6 +218,34 @@ ExprResult Parser::ParseCXXBuiltinInjectExpression() {
                                        Parens.getCloseLocation());
 }
 
+ExprResult Parser::ParseCXXBuiltinIdExpression() {
+  assert(Tok.is(tok::kw___builtin_id) && "expected '__builtin_id'");
+  SourceLocation KwLoc = ConsumeToken();
+
+  BalancedDelimiterTracker Parens(*this, tok::l_paren);
+  if (Parens.expectAndConsume())
+    return ExprError();
+
+  SmallVector<Expr *, 4> Args;
+  while (true) {
+    ExprResult Arg = ParseAssignmentExpression();
+    if (Arg.isInvalid()) {
+      Parens.skipToEnd();
+      return ExprError();
+    }
+    Args.push_back(Arg.get());
+
+    if (!TryConsumeToken(tok::comma))
+      break;
+  }
+
+  if (Parens.consumeClose())
+    return ExprError();
+
+  return Actions.ActOnCXXBuiltinId(KwLoc, Parens.getOpenLocation(),
+                                   Args, Parens.getCloseLocation());
+}
+
 ExprResult Parser::ParseCXXMetafunctionExpression() {
   assert(Tok.is(tok::kw___metafunction) && "expected '___metafunction'");
   SourceLocation KwLoc = ConsumeToken();

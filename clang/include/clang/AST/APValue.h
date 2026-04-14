@@ -39,6 +39,7 @@ template <typename T> class BasicReaderBase;
   class DiagnosticBuilder;
   class Expr;
   class FieldDecl;
+  class IdentifierInfo;
   class NamespaceDecl;
   class ParmVarDecl;
   struct PrintingPolicy;
@@ -583,6 +584,10 @@ public:
     return isReflection() &&
            getReflectionKind() == ReflectionKind::TokenSequence;
   }
+  bool isReflectedIdentifier() const {
+    return isReflection() &&
+           getReflectionKind() == ReflectionKind::Identifier;
+  }
 
   void dump() const;
   void dump(raw_ostream &OS, const ASTContext &Context) const;
@@ -776,6 +781,7 @@ public:
   TagDataMemberSpec *getReflectedDataMemberSpec() const;
   CXX26AnnotationAttr *getReflectedAnnotation() const;
   const TokenSequenceData *getReflectedTokenSequence() const;
+  IdentifierInfo *getReflectedIdentifier() const;
 
   void setInt(APSInt I) {
     assert(isInt() && "Invalid accessor");

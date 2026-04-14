@@ -29,6 +29,7 @@
 #include "clang/Sema/DeclSpec.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/ParsedTemplate.h"
+#include "clang/Sema/CXXFieldCollector.h"
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaHLSL.h"
@@ -1194,11 +1195,16 @@ void Parser::ProcessTokenInjections(
       ParsingClassDefinition ParsingDef(*this, TagDecl,
                                         /*TopLevelClass=*/true,
                                         /*IsInterface=*/false);
+      // Ensure the field collector has a scope, since ActOnCXXMemberDeclarator
+      // unconditionally calls FieldCollector->Add() for field declarations.
+      // During template instantiation, there may not be an active scope.
+      Actions.FieldCollector->StartClass();
       while (Tok.isNot(tok::eof)) {
         ParsedAttributes DeclAttrs(AttrFactory);
         ParsedTemplateInfo TemplateInfo;
         ParseCXXClassMemberDeclaration(AS_public, DeclAttrs, TemplateInfo);
       }
+      Actions.FieldCollector->FinishClass();
     } else {
       while (Tok.isNot(tok::eof)) {
         ParsedAttributes DeclAttrs(AttrFactory);

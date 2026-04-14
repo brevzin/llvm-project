@@ -1018,6 +1018,15 @@ ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                        KwLoc, LParenLoc, RParenLoc);
 }
 
+ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,
+                                   SourceLocation LParenLoc,
+                                   SmallVectorImpl<Expr *> &Args,
+                                   SourceLocation RParenLoc) {
+  return CXXBuiltinIdExpr::Create(Context, Context.MetaInfoTy,
+                                  ArrayRef<Expr *>(Args),
+                                  KwLoc, LParenLoc, RParenLoc);
+}
+
 /// Returns an expression representing the result of a metafunction operating
 /// on a reflection.
 ExprResult Sema::ActOnCXXMetafunction(SourceLocation KwLoc,

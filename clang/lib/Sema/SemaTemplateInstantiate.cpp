@@ -2668,7 +2668,7 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
     }
 
     // Scan tokens for identifiers matching template parameters, or
-    // annot_primary_expr tokens containing dependent expressions.
+    // annot_primary_expr tokens containing expressions that need transformation.
     bool HasSubstitutions = false;
     for (unsigned I = 0; I < TSD->NumTokens; ++I) {
       if (TSD->Tokens[I].is(tok::identifier)) {
@@ -2678,12 +2678,11 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
           break;
         }
       } else if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
-        Expr *SubExpr = static_cast<Expr *>(
-            TSD->Tokens[I].getAnnotationValue());
-        if (SubExpr && SubExpr->isInstantiationDependent()) {
-          HasSubstitutions = true;
-          break;
-        }
+        // All annotation expressions need to be transformed during
+        // instantiation, since they may reference local declarations
+        // from the template that have been instantiated to new decls.
+        HasSubstitutions = true;
+        break;
       }
     }
 
@@ -2694,10 +2693,13 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
         NewTokens[I] = TSD->Tokens[I];
 
         if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
-          // Transform dependent expressions inside interpolation tokens.
+          // Transform all expressions inside interpolation tokens.
+          // This handles both dependent expressions (e.g., ^^T) and
+          // references to local declarations (e.g., loop variables)
+          // that have been instantiated to new decls.
           Expr *SubExpr = static_cast<Expr *>(
               TSD->Tokens[I].getAnnotationValue());
-          if (SubExpr && SubExpr->isInstantiationDependent()) {
+          if (SubExpr) {
             ExprResult Transformed = TransformExpr(SubExpr);
             if (!Transformed.isInvalid())
               NewTokens[I].setAnnotationValue(

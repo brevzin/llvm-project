@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -std=c++26 -freflection -fexpansion-statements -verify -verify-ignore-unexpected=note %s
 
 using info = decltype(^^::);
+using size_t = decltype(sizeof(0));
 
 namespace N1 {
     constexpr info tok = ^^{ constexpr int x = 42; };
@@ -87,4 +88,23 @@ namespace N4 {
     };
 
     static_assert(constant<5>::value == 5);
+}
+
+namespace N5 {
+    template <typename... Ts>
+    struct tuple {
+        consteval {
+            info types[] = {^^Ts...};
+            for (size_t k = 0; k != sizeof...(Ts); ++k) {
+                __builtin_inject(^^{
+                    \(types[k]) \(__builtin_id("_", k));
+                });
+            }
+        }
+    };
+
+    constexpr int i = 1;
+    constexpr auto xs = tuple<int, int const*>{._0 = 2, ._1 = &i};
+    static_assert(xs._0 == 2);
+    static_assert(xs._1 == &i);
 }

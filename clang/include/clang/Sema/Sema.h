@@ -15611,6 +15611,11 @@ public:
                                    Expr *Operand,
                                    SourceLocation RParenLoc);
 
+  ExprResult ActOnCXXBuiltinId(SourceLocation KwLoc,
+                               SourceLocation LParenLoc,
+                               SmallVectorImpl<Expr *> &Args,
+                               SourceLocation RParenLoc);
+
   ExprResult ActOnCXXMetafunction(SourceLocation KwLoc,
                                   SourceLocation LParenLoc,
                                   SmallVectorImpl<Expr *> &Args,

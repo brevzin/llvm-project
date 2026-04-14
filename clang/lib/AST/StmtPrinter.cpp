@@ -2793,6 +2793,15 @@ void StmtPrinter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *S) {
   OS << ")";
 }
 
+void StmtPrinter::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *S) {
+  OS << "__builtin_id(";
+  for (unsigned I = 0; I < S->getNumArgs(); ++I) {
+    if (I > 0) OS << ", ";
+    PrintExpr(S->getArg(I));
+  }
+  OS << ")";
+}
+
 void StmtPrinter::VisitCXXSpliceExpr(CXXSpliceExpr *S) {
   OS << "[: ... :]";
 }

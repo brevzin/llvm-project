@@ -118,6 +118,11 @@ enum class ReflectionKind {
   ///
   /// Corresponds to a TokenSequenceData.
   TokenSequence,
+
+  /// \brief A reflection of an identifier constructed via __builtin_id.
+  ///
+  /// Corresponds to an IdentifierInfo*.
+  Identifier,
 };
 
 

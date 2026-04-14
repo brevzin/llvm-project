@@ -2077,6 +2077,41 @@ CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::CreateEmpty(ASTContext &C) {
   return new (C) CXXBuiltinInjectExpr(EmptyShell());
 }
 
+CXXBuiltinIdExpr::CXXBuiltinIdExpr(ASTContext &C, QualType Ty,
+                                     ArrayRef<Expr *> Args,
+                                     SourceLocation KwLoc,
+                                     SourceLocation LParenLoc,
+                                     SourceLocation RParenLoc)
+    : Expr(CXXBuiltinIdExprClass, Ty, VK_PRValue, OK_Ordinary),
+      NumArgs(Args.size()), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  this->Args = new (C) Stmt *[NumArgs];
+  ExprDependence Deps = ExprDependence::None;
+  for (unsigned I = 0; I < NumArgs; ++I) {
+    this->Args[I] = Args[I];
+    Deps |= Args[I]->getDependence();
+  }
+  setDependence(Deps);
+}
+
+CXXBuiltinIdExpr::CXXBuiltinIdExpr(EmptyShell Empty, unsigned NumArgs)
+    : Expr(CXXBuiltinIdExprClass, Empty), Args(nullptr), NumArgs(NumArgs) {}
+
+CXXBuiltinIdExpr *CXXBuiltinIdExpr::Create(ASTContext &C, QualType Ty,
+                                             ArrayRef<Expr *> Args,
+                                             SourceLocation KwLoc,
+                                             SourceLocation LParenLoc,
+                                             SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinIdExpr(C, Ty, Args, KwLoc, LParenLoc, RParenLoc);
+}
+
+CXXBuiltinIdExpr *CXXBuiltinIdExpr::CreateEmpty(ASTContext &C,
+                                                   unsigned NumArgs) {
+  auto *E = new (C) CXXBuiltinIdExpr(EmptyShell(), NumArgs);
+  E->Args = new (C) Stmt *[NumArgs];
+  return E;
+}
+
 StackLocationExpr::StackLocationExpr(QualType ResultTy, SourceRange Range,
                                      int FrameOffset)
     : Expr(StackLocationExprClass, ResultTy, VK_PRValue, OK_Ordinary),

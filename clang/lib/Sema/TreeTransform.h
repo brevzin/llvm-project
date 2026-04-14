@@ -9093,6 +9093,7 @@ TreeTransform<Derived>::TransformCXXReflectExpr(CXXReflectExpr *E) {
   case ReflectionKind::Object:
   case ReflectionKind::Value:
   case ReflectionKind::TokenSequence:
+  case ReflectionKind::Identifier:
     return E;
   case ReflectionKind::Null:
   case ReflectionKind::BaseSpecifier:
@@ -9130,6 +9131,21 @@ TreeTransform<Derived>::TransformCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
 
   return getSema().ActOnCXXBuiltinInject(E->getKwLoc(), E->getLParenLoc(),
                                          Operand.get(), E->getRParenLoc());
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
+  SmallVector<Expr *, 4> TransformedArgs;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    ExprResult Arg = getDerived().TransformExpr(E->getArg(I));
+    if (Arg.isInvalid())
+      return ExprError();
+    TransformedArgs.push_back(Arg.get());
+  }
+
+  return getSema().ActOnCXXBuiltinId(E->getKwLoc(), E->getLParenLoc(),
+                                     TransformedArgs, E->getRParenLoc());
 }
 
 template <typename Derived>

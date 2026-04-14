@@ -564,6 +564,7 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Annotation:
   case ReflectionKind::TokenSequence:
+  case ReflectionKind::Identifier:
     ID.AddPointer(V.getOpaqueReflectionData());
     return;
   case ReflectionKind::DataMemberSpec: {
@@ -979,6 +980,13 @@ const TokenSequenceData *APValue::getReflectedTokenSequence() const {
           getOpaqueReflectionData());
 }
 
+IdentifierInfo *APValue::getReflectedIdentifier() const {
+  assert(getReflectionKind() == ReflectionKind::Identifier &&
+         "not a reflection of an identifier");
+  return reinterpret_cast<IdentifierInfo *>(
+          const_cast<void *>(getOpaqueReflectionData()));
+}
+
 static double GetApproxValue(const llvm::APFloat &F) {
   llvm::APFloat V = F;
   bool ignored;
@@ -1341,6 +1349,9 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     case ReflectionKind::TokenSequence:
       Repr = "token-sequence";
       break;
+    case ReflectionKind::Identifier:
+      Repr = "identifier";
+      break;
     }
     Out << "^^(" << Repr << ")";
     return;
@@ -1680,6 +1691,7 @@ void APValue::setReflection(ReflectionKind RK, const void *Ptr) {
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
   case ReflectionKind::TokenSequence:
+  case ReflectionKind::Identifier:
     SelfData.Kind = RK;
     SelfData.Data = Ptr;
     return;

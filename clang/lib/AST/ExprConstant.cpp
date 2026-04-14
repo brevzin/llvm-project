@@ -16971,6 +16971,7 @@ public:
   bool VisitCXXReflectExpr(const CXXReflectExpr *E);
   bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
   bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
+  bool VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E);
 };
 
 bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
@@ -17005,18 +17006,26 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
             if (!EvaluateAsRValue(Info, SubExpr, Val))
               return false;
 
-            // For now, only type reflections are supported.
-            if (!Val.isReflectedType()) {
+            if (Val.isReflectedType()) {
+              QualType QT = Val.getReflectedType();
+
+              // Create an annot_typename token carrying the type.
+              NewTokens[I] = TSD->Tokens[I];
+              NewTokens[I].setKind(tok::annot_typename);
+              NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
+            } else if (Val.isReflectedIdentifier()) {
+              IdentifierInfo *II = Val.getReflectedIdentifier();
+
+              // Create a tok::identifier token.
+              NewTokens[I] = TSD->Tokens[I];
+              NewTokens[I].setKind(tok::identifier);
+              NewTokens[I].setIdentifierInfo(II);
+              NewTokens[I].setLength(II->getLength());
+            } else {
               Info.FFDiag(SubExpr->getExprLoc(),
                           diag::err_interpolation_not_type_reflection);
               return false;
             }
-            QualType QT = Val.getReflectedType();
-
-            // Create an annot_typename token carrying the type.
-            NewTokens[I] = TSD->Tokens[I];
-            NewTokens[I].setKind(tok::annot_typename);
-            NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
           } else {
             // Non-reflection interpolation: evaluate as rvalue and wrap
             // in a ConstantExpr.
@@ -17053,6 +17062,67 @@ bool ReflectionEvaluator::VisitCXXMetafunctionExpr(
 
 bool ReflectionEvaluator::VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
   return BaseType::VisitCXXSpliceExpr(E);
+}
+
+bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
+  // Evaluate each argument and concatenate into an identifier string.
+  SmallString<64> Name;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    Expr *Arg = E->getArg(I);
+
+    if (Arg->getType()->isIntegralOrEnumerationType()) {
+      // Integer argument: convert to decimal string.
+      APValue Val;
+      if (!EvaluateAsRValue(Info, Arg, Val))
+        return false;
+      Val.getInt().toString(Name, 10);
+    } else if (Arg->getType()->isPointerType() ||
+               Arg->getType()->isArrayType()) {
+      // String argument: try to extract a string literal.
+      // Strip implicit casts to find the underlying StringLiteral.
+      const Expr *Stripped = Arg->IgnoreParenImpCasts();
+      if (const auto *SL = dyn_cast<StringLiteral>(Stripped)) {
+        StringRef Str = SL->getString();
+        // Exclude the null terminator if present.
+        if (!Str.empty() && Str.back() == '\0')
+          Str = Str.drop_back();
+        Name.append(Str);
+      } else {
+        // Fall back to pointer evaluation for non-literal strings.
+        LValue String;
+        if (!EvaluatePointer(Arg, String, Info))
+          return false;
+
+        APValue::LValueBase Base = String.getLValueBase();
+        if (!Base) {
+          Info.FFDiag(Arg->getExprLoc());
+          return false;
+        }
+
+        if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
+                Base.dyn_cast<const Expr *>())) {
+          StringRef Str = SLit->getString();
+          int64_t Off = String.getLValueOffset().getQuantity();
+          if (Off >= 0 && (uint64_t)Off <= (uint64_t)Str.size()) {
+            Str = Str.substr(Off);
+            StringRef::size_type Pos = Str.find(0);
+            if (Pos != StringRef::npos)
+              Str = Str.substr(0, Pos);
+            Name.append(Str);
+          }
+        } else {
+          Info.FFDiag(Arg->getExprLoc());
+          return false;
+        }
+      }
+    } else {
+      Info.FFDiag(Arg->getExprLoc());
+      return false;
+    }
+  }
+
+  IdentifierInfo &II = Info.Ctx.Idents.get(Name);
+  return Success(APValue(ReflectionKind::Identifier, &II), E);
 }
 }  // end anonymous namespace
 
@@ -17885,6 +17955,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXReflectExprClass:
   case Expr::CXXMetafunctionExprClass:
   case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::ExtractLValueExprClass:

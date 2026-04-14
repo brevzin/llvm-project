@@ -505,6 +505,17 @@ void ASTStmtWriter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
   Code = serialization::EXPR_BUILTIN_INJECT;
 }
 
+void ASTStmtWriter::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->getNumArgs());
+  Record.AddSourceLocation(E->getKwLoc());
+  Record.AddSourceLocation(E->getLParenLoc());
+  Record.AddSourceLocation(E->getRParenLoc());
+  for (unsigned I = 0; I < E->getNumArgs(); ++I)
+    Record.AddStmt(E->getArg(I));
+  Code = serialization::EXPR_BUILTIN_ID;
+}
+
 void ASTStmtWriter::VisitCXXSpliceExpr(CXXSpliceExpr *E) {
   VisitExpr(E);
   Record.AddSourceLocation(E->getTemplateKWLoc());
