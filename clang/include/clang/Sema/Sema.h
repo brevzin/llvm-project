@@ -15741,6 +15741,10 @@ public:
   SmallVector<std::pair<SourceLocation, const TokenSequenceData *>>
       PendingInjections;
 
+  // Statements parsed from injected token sequences that need to be added
+  // to the enclosing compound statement.
+  SmallVector<Stmt *> PendingInjectedStmts;
+
   // Callback for processing token injections. The Parser registers this
   // so that Sema (during template instantiation) can feed injected tokens
   // back to the parser.

@@ -1224,6 +1224,14 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
     if (R.isUsable())
       Stmts.push_back(R.get());
     LastIsError = R.isInvalid();
+
+    // Pick up any statements injected by consteval blocks
+    // (e.g., return statements from __builtin_inject).
+    if (!Actions.PendingInjectedStmts.empty()) {
+      Stmts.append(Actions.PendingInjectedStmts.begin(),
+                   Actions.PendingInjectedStmts.end());
+      Actions.PendingInjectedStmts.clear();
+    }
   }
   // StmtExpr needs to do copy initialization for last statement.
   // If last statement is invalid, the last statement in `Stmts` will be

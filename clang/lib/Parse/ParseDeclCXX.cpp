@@ -1186,11 +1186,20 @@ void Parser::ProcessTokenInjections(
                         /*IsReinject=*/true);
     ConsumeAnyToken();
 
-    // Parse declarations from the injected tokens until eof.
-    // If we're inside a class body, use ParseCXXClassMemberDeclaration
-    // so that the access specifier is set correctly. We need to push a
-    // ParsingClassDefinition so that the ClassStack is non-empty.
-    if (Actions.CurContext->isRecord()) {
+    // Parse the injected tokens in the appropriate context.
+    if (Actions.CurContext->isFunctionOrMethod()) {
+      // Inside a function body: parse statements and declarations.
+      // Parsed statements are added to PendingInjectedStmts so the
+      // enclosing compound statement can pick them up.
+      StmtVector Stmts;
+      while (Tok.isNot(tok::eof)) {
+        StmtResult R =
+            ParseStatementOrDeclaration(Stmts, ParsedStmtContext::Compound);
+        if (R.isUsable())
+          Actions.PendingInjectedStmts.push_back(R.get());
+      }
+    } else if (Actions.CurContext->isRecord()) {
+      // Inside a class body: parse member declarations.
       Decl *TagDecl = cast<Decl>(Actions.CurContext);
       ParsingClassDefinition ParsingDef(*this, TagDecl,
                                         /*TopLevelClass=*/true,
@@ -1204,8 +1213,13 @@ void Parser::ProcessTokenInjections(
         ParsedTemplateInfo TemplateInfo;
         ParseCXXClassMemberDeclaration(AS_public, DeclAttrs, TemplateInfo);
       }
+      // Process any late-parsed member initializers that were deferred
+      // during class member declaration parsing. This must happen before
+      // PopParsingClass destroys the LateParsedDeclarations.
+      ParseLexedMemberInitializers(getCurrentClass());
       Actions.FieldCollector->FinishClass();
     } else {
+      // Namespace/global scope: parse external declarations.
       while (Tok.isNot(tok::eof)) {
         ParsedAttributes DeclAttrs(AttrFactory);
         ParsedAttributes DeclSpecAttrs(AttrFactory);

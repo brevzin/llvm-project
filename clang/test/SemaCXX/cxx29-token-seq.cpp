@@ -97,7 +97,16 @@ namespace N5 {
             info types[] = {^^Ts...};
             for (size_t k = 0; k != sizeof...(Ts); ++k) {
                 __builtin_inject(^^{
-                    \(types[k]) \(__builtin_id("_", k));
+                    \(types[k]) \(__builtin_id("_", k)) = \(types[k])();
+                });
+            }
+        }
+
+        template <size_t I>
+        constexpr auto get() const -> auto const& {
+            consteval {
+                __builtin_inject(^^{
+                    return \(__builtin_id("_", I));
                 });
             }
         }
@@ -107,4 +116,6 @@ namespace N5 {
     constexpr auto xs = tuple<int, int const*>{._0 = 2, ._1 = &i};
     static_assert(xs._0 == 2);
     static_assert(xs._1 == &i);
+    static_assert(&xs.get<0>() == &xs._0);
+    static_assert(&xs.get<1>() == &xs._1);
 }

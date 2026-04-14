@@ -8189,6 +8189,15 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
 
     SubStmtChanged = SubStmtChanged || Result.get() != B;
     Statements.push_back(Result.getAs<Stmt>());
+
+    // Pick up any statements injected by consteval blocks
+    // (e.g., return statements from __builtin_inject).
+    if (!getSema().PendingInjectedStmts.empty()) {
+      Statements.append(getSema().PendingInjectedStmts.begin(),
+                        getSema().PendingInjectedStmts.end());
+      getSema().PendingInjectedStmts.clear();
+      SubStmtChanged = true;
+    }
   }
 
   if (SubStmtInvalid)
