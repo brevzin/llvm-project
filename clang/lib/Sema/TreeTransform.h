@@ -9138,8 +9138,17 @@ TreeTransform<Derived>::TransformCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
   if (Operand.isInvalid())
     return ExprError();
 
+  Expr *TargetNS = nullptr;
+  if (E->hasTargetNS()) {
+    ExprResult TransformedTarget = getDerived().TransformExpr(E->getTargetNS());
+    if (TransformedTarget.isInvalid())
+      return ExprError();
+    TargetNS = TransformedTarget.get();
+  }
+
   return getSema().ActOnCXXBuiltinInject(E->getKwLoc(), E->getLParenLoc(),
-                                         Operand.get(), E->getRParenLoc());
+                                         Operand.get(), E->getRParenLoc(),
+                                         TargetNS);
 }
 
 template <typename Derived>

@@ -5635,24 +5635,35 @@ public:
 /// This expression injects the tokens from a token sequence reflection into
 /// the enclosing scope during consteval evaluation.
 class CXXBuiltinInjectExpr : public Expr {
-  Stmt *Operand;
+  // Args[0] = Operand (token sequence), Args[1] = TargetNS (optional)
+  Stmt *Args[2];
+  unsigned NumArgs;
   SourceLocation KwLoc;
   SourceLocation LParenLoc;
   SourceLocation RParenLoc;
 
   CXXBuiltinInjectExpr(QualType Ty, Expr *Operand, SourceLocation KwLoc,
-                        SourceLocation LParenLoc, SourceLocation RParenLoc);
+                        SourceLocation LParenLoc, SourceLocation RParenLoc,
+                        Expr *TargetNS = nullptr);
   CXXBuiltinInjectExpr(EmptyShell Empty);
 
 public:
   static CXXBuiltinInjectExpr *Create(ASTContext &C, QualType Ty,
                                        Expr *Operand, SourceLocation KwLoc,
                                        SourceLocation LParenLoc,
-                                       SourceLocation RParenLoc);
+                                       SourceLocation RParenLoc,
+                                       Expr *TargetNS = nullptr);
   static CXXBuiltinInjectExpr *CreateEmpty(ASTContext &C);
 
-  Expr *getOperand() const { return cast<Expr>(Operand); }
-  void setOperand(Expr *E) { Operand = E; }
+  Expr *getOperand() const { return cast<Expr>(Args[0]); }
+  void setOperand(Expr *E) { Args[0] = E; }
+
+  bool hasTargetNS() const { return NumArgs > 1; }
+  Expr *getTargetNS() const {
+    assert(hasTargetNS() && "no target namespace");
+    return cast<Expr>(Args[1]);
+  }
+  void setTargetNS(Expr *E) { Args[1] = E; NumArgs = 2; }
 
   SourceLocation getKwLoc() const { return KwLoc; }
   void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
@@ -5666,9 +5677,11 @@ public:
   SourceLocation getBeginLoc() const LLVM_READONLY { return KwLoc; }
   SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
 
-  child_range children() { return child_range(&Operand, &Operand + 1); }
+  child_range children() {
+    return child_range(Args, Args + NumArgs);
+  }
   const_child_range children() const {
-    return const_child_range(&Operand, &Operand + 1);
+    return const_child_range(Args, Args + NumArgs);
   }
 
   static bool classof(const Stmt *T) {

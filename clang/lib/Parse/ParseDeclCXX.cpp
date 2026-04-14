@@ -1163,15 +1163,15 @@ Decl *Parser::ParseConstevalBlockDeclaration(SourceLocation &DeclEnd) {
 }
 
 void Parser::TokenInjectionCallback(void *P,
-    SmallVectorImpl<std::pair<SourceLocation, const TokenSequenceData *>>
-        &Injections) {
+    SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
   static_cast<Parser *>(P)->ProcessTokenInjections(Injections);
 }
 
 void Parser::ProcessTokenInjections(
-    SmallVectorImpl<std::pair<SourceLocation, const TokenSequenceData *>>
-        &Injections) {
-  for (auto &[Loc, TSD] : Injections) {
+    SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
+  for (auto &Inj : Injections) {
+    SourceLocation Loc = Inj.Loc;
+    const TokenSequenceData *TSD = Inj.TSD;
     // Build a token stream with an eof sentinel at the end.
     SmallVector<Token, 16> Toks(TSD->Tokens, TSD->Tokens + TSD->NumTokens);
     Token Eof;
@@ -1185,6 +1185,11 @@ void Parser::ProcessTokenInjections(
     PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
                         /*IsReinject=*/true);
     ConsumeAnyToken();
+
+    // If a target namespace was specified, switch to that context.
+    std::optional<Sema::ContextRAII> TargetCtx;
+    if (Inj.TargetDC)
+      TargetCtx.emplace(Actions, Inj.TargetDC);
 
     // Parse the injected tokens in the appropriate context.
     if (Actions.CurContext->isFunctionOrMethod()) {

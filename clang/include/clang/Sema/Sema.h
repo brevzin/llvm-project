@@ -15609,7 +15609,8 @@ public:
   ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,
                                    Expr *Operand,
-                                   SourceLocation RParenLoc);
+                                   SourceLocation RParenLoc,
+                                   Expr *TargetNS = nullptr);
 
   ExprResult ActOnCXXBuiltinId(SourceLocation KwLoc,
                                SourceLocation LParenLoc,
@@ -15738,8 +15739,7 @@ public:
   }
 
   // Token sequences pending injection from consteval block evaluation.
-  SmallVector<std::pair<SourceLocation, const TokenSequenceData *>>
-      PendingInjections;
+  SmallVector<Expr::EvalStatus::TokenInjection> PendingInjections;
 
   // Statements parsed from injected token sequences that need to be added
   // to the enclosing compound statement.
@@ -15749,7 +15749,7 @@ public:
   // so that Sema (during template instantiation) can feed injected tokens
   // back to the parser.
   typedef void TokenInjectionCB(void *P,
-      SmallVectorImpl<std::pair<SourceLocation, const TokenSequenceData *>> &);
+      SmallVectorImpl<Expr::EvalStatus::TokenInjection> &);
   TokenInjectionCB *TokenInjectionCallback = nullptr;
 
   void ProcessPendingTokenInjections();

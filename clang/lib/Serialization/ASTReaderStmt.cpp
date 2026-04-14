@@ -527,7 +527,10 @@ void ASTStmtReader::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
   E->setKwLoc(Record.readSourceLocation());
   E->setLParenLoc(Record.readSourceLocation());
   E->setRParenLoc(Record.readSourceLocation());
+  bool HasTargetNS = Record.readInt();
   E->setOperand(Record.readExpr());
+  if (HasTargetNS)
+    E->setTargetNS(Record.readExpr());
 }
 
 void ASTStmtReader::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {

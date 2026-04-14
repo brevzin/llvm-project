@@ -2054,23 +2054,33 @@ CXXSpliceExpr *CXXSpliceExpr::CreateEmpty(ASTContext &C) {
 CXXBuiltinInjectExpr::CXXBuiltinInjectExpr(QualType Ty, Expr *Operand,
                                              SourceLocation KwLoc,
                                              SourceLocation LParenLoc,
-                                             SourceLocation RParenLoc)
+                                             SourceLocation RParenLoc,
+                                             Expr *TargetNS)
     : Expr(CXXBuiltinInjectExprClass, Ty, VK_PRValue, OK_Ordinary),
-      Operand(Operand), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      NumArgs(TargetNS ? 2 : 1), KwLoc(KwLoc), LParenLoc(LParenLoc),
       RParenLoc(RParenLoc) {
-  setDependence(Operand->getDependence());
+  Args[0] = Operand;
+  Args[1] = TargetNS;
+  ExprDependence Deps = Operand->getDependence();
+  if (TargetNS)
+    Deps = Deps | TargetNS->getDependence();
+  setDependence(Deps);
 }
 
 CXXBuiltinInjectExpr::CXXBuiltinInjectExpr(EmptyShell Empty)
-    : Expr(CXXBuiltinInjectExprClass, Empty) {}
+    : Expr(CXXBuiltinInjectExprClass, Empty), NumArgs(1) {
+  Args[0] = nullptr;
+  Args[1] = nullptr;
+}
 
 CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::Create(ASTContext &C, QualType Ty,
                                                      Expr *Operand,
                                                      SourceLocation KwLoc,
                                                      SourceLocation LParenLoc,
-                                                     SourceLocation RParenLoc) {
+                                                     SourceLocation RParenLoc,
+                                                     Expr *TargetNS) {
   return new (C) CXXBuiltinInjectExpr(Ty, Operand, KwLoc, LParenLoc,
-                                       RParenLoc);
+                                       RParenLoc, TargetNS);
 }
 
 CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::CreateEmpty(ASTContext &C) {

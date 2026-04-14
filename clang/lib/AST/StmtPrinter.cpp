@@ -2789,6 +2789,10 @@ void StmtPrinter::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *S) {
 
 void StmtPrinter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *S) {
   OS << "__builtin_inject(";
+  if (S->hasTargetNS()) {
+    PrintExpr(S->getTargetNS());
+    OS << ", ";
+  }
   PrintExpr(S->getOperand());
   OS << ")";
 }

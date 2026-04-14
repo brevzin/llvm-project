@@ -640,10 +640,16 @@ public:
     /// to a string representation).
     SmallVectorImpl<PartialDiagnosticAt> *Diag = nullptr;
 
+    /// A token injection request from __builtin_inject.
+    struct TokenInjection {
+      SourceLocation Loc;
+      DeclContext *TargetDC = nullptr; // null = inject at current context
+      const TokenSequenceData *TSD;
+    };
+
     /// Token sequences pending injection from __builtin_inject calls
     /// during consteval block evaluation.
-    SmallVector<std::pair<SourceLocation, const TokenSequenceData *>>
-        PendingInjections;
+    SmallVector<TokenInjection> PendingInjections;
 
     EvalStatus() = default;
 

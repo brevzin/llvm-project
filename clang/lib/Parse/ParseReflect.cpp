@@ -204,18 +204,32 @@ ExprResult Parser::ParseCXXBuiltinInjectExpression() {
   if (Parens.expectAndConsume())
     return ExprError();
 
-  ExprResult Operand = ParseConstantExpression();
-  if (Operand.isInvalid()) {
+  ExprResult First = ParseConstantExpression();
+  if (First.isInvalid()) {
     Parens.skipToEnd();
     return ExprError();
+  }
+
+  Expr *TargetNS = nullptr;
+  Expr *Operand = First.get();
+
+  // Two-arg form: __builtin_inject(target_ns, token_sequence)
+  if (TryConsumeToken(tok::comma)) {
+    TargetNS = First.get();
+    ExprResult Second = ParseConstantExpression();
+    if (Second.isInvalid()) {
+      Parens.skipToEnd();
+      return ExprError();
+    }
+    Operand = Second.get();
   }
 
   if (Parens.consumeClose())
     return ExprError();
 
   return Actions.ActOnCXXBuiltinInject(KwLoc, Parens.getOpenLocation(),
-                                       Operand.get(),
-                                       Parens.getCloseLocation());
+                                       Operand, Parens.getCloseLocation(),
+                                       TargetNS);
 }
 
 ExprResult Parser::ParseCXXBuiltinIdExpression() {

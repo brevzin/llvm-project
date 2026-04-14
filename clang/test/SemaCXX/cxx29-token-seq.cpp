@@ -119,3 +119,35 @@ namespace N5 {
     static_assert(&xs.get<0>() == &xs._0);
     static_assert(&xs.get<1>() == &xs._1);
 }
+
+namespace N6 {
+    consteval auto make_var(int X) -> info {
+        return ^^{
+            constexpr int injected_value = \(X);
+        };
+    }
+
+    namespace inner { }
+
+    consteval {
+        __builtin_inject(^^inner, make_var(42));
+    }
+    static_assert(inner::injected_value == 42);
+
+    consteval auto make_type(int X) -> info {
+        auto L = [=] { return X;};
+        return ^^{
+            struct A {
+                \(^^decltype(L)) l = \(L);
+            };
+        };
+    }
+
+    auto check() -> void {
+        consteval {
+            __builtin_inject(^^inner, make_type(10));
+        }
+        inner::A a;
+        a.l();
+    }
+}

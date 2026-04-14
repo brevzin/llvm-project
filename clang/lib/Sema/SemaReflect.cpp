@@ -822,7 +822,7 @@ public:
   bool InjectTokens(const TokenSequenceData *Tokens,
                     Decl *ContainingDecl,
                     SourceLocation InjectLoc) override {
-    S.PendingInjections.push_back({InjectLoc, Tokens});
+    S.PendingInjections.push_back({InjectLoc, nullptr, Tokens});
     return false;
   }
 };
@@ -1013,9 +1013,10 @@ ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
 ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                        SourceLocation LParenLoc,
                                        Expr *Operand,
-                                       SourceLocation RParenLoc) {
+                                       SourceLocation RParenLoc,
+                                       Expr *TargetNS) {
   return CXXBuiltinInjectExpr::Create(Context, Context.VoidTy, Operand,
-                                       KwLoc, LParenLoc, RParenLoc);
+                                       KwLoc, LParenLoc, RParenLoc, TargetNS);
 }
 
 ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,
@@ -1855,8 +1856,8 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
     }
 
     // Collect any pending token injections from __builtin_inject calls.
-    for (auto &Injection : ER.PendingInjections)
-      PendingInjections.push_back(Injection);
+    PendingInjections.append(ER.PendingInjections.begin(),
+                             ER.PendingInjections.end());
   }
   return Result;
 }
@@ -1865,7 +1866,7 @@ void Sema::ProcessPendingTokenInjections() {
   if (PendingInjections.empty() || !TokenInjectionCallback)
     return;
   // Move the injections out so the callback doesn't re-process them.
-  SmallVector<std::pair<SourceLocation, const TokenSequenceData *>, 4>
+  SmallVector<Expr::EvalStatus::TokenInjection, 4>
       Injections = std::move(PendingInjections);
   PendingInjections.clear();
   TokenInjectionCallback(OpaqueParser, Injections);

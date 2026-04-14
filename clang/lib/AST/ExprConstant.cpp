@@ -16849,8 +16849,35 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
     return false;
   }
 
+  // Evaluate the optional target namespace.
+  DeclContext *TargetDC = nullptr;
+  if (E->hasTargetNS()) {
+    APValue TargetNS;
+    if (!::Evaluate(TargetNS, Info, E->getTargetNS()))
+      return false;
+    if (E->getTargetNS()->isGLValue()) {
+      LValue LV;
+      LV.setFrom(Info.Ctx, TargetNS);
+      if (!handleLValueToRValueConversion(Info, E->getTargetNS(),
+                                           E->getTargetNS()->getType(), LV,
+                                           TargetNS))
+        return false;
+    }
+
+    if (!TargetNS.isReflection() ||
+        TargetNS.getReflectionKind() != ReflectionKind::Namespace) {
+      Info.FFDiag(E->getTargetNS()->getExprLoc(),
+                  diag::err_builtin_inject_not_token_sequence)
+          << "target must be a namespace reflection";
+      return false;
+    }
+    Decl *NSDecl = TargetNS.getReflectedNamespace();
+    TargetDC = dyn_cast<DeclContext>(NSDecl);
+  }
+
   const TokenSequenceData *TSD = Operand.getReflectedTokenSequence();
-  Info.EvalStatus.PendingInjections.push_back({E->getBeginLoc(), TSD});
+  Info.EvalStatus.PendingInjections.push_back(
+      {E->getBeginLoc(), TargetDC, TSD});
   return true;
 }
 
@@ -17008,6 +17035,14 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
 
             if (Val.isReflectedType()) {
               QualType QT = Val.getReflectedType();
+
+              // Strip deduced type sugar (e.g. AutoType from 'auto L = ...')
+              // so the injected type is the concrete type, not 'auto'.
+              while (const auto *AT = dyn_cast<AutoType>(QT)) {
+                if (!AT->isDeduced())
+                  break;
+                QT = AT->getDeducedType();
+              }
 
               // Create an annot_typename token carrying the type.
               NewTokens[I] = TSD->Tokens[I];

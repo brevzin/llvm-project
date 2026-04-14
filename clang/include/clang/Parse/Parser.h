@@ -7997,11 +7997,9 @@ private:
 
   static void LateTemplateParserCallback(void *P, LateParsedTemplate &LPT);
   static void TokenInjectionCallback(void *P,
-      SmallVectorImpl<std::pair<SourceLocation, const TokenSequenceData *>>
-          &Injections);
+      SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections);
   void ProcessTokenInjections(
-      SmallVectorImpl<std::pair<SourceLocation, const TokenSequenceData *>>
-          &Injections);
+      SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections);
 
   /// We've parsed something that could plausibly be intended to be a template
   /// name (\p LHS) followed by a '<' token, and the following code can't

@@ -501,7 +501,10 @@ void ASTStmtWriter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
   Record.AddSourceLocation(E->getKwLoc());
   Record.AddSourceLocation(E->getLParenLoc());
   Record.AddSourceLocation(E->getRParenLoc());
+  Record.push_back(E->hasTargetNS());
   Record.AddStmt(E->getOperand());
+  if (E->hasTargetNS())
+    Record.AddStmt(E->getTargetNS());
   Code = serialization::EXPR_BUILTIN_INJECT;
 }
 
