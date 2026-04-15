@@ -1203,6 +1203,19 @@ void Parser::ProcessTokenInjections(
       // Inside a function body: parse statements and declarations.
       // Parsed statements are added to PendingInjectedStmts so the
       // enclosing compound statement can pick them up.
+      //
+      // During template instantiation, the parser scope may not include
+      // the function's parameters and local variables (since the function
+      // body wasn't parsed by the parser — it was instantiated by Sema).
+      // Create a DeclScope and add the function's declarations so name
+      // lookup can find them.
+      ParseScope FnScope(this, Scope::DeclScope);
+      if (auto *FD = dyn_cast<FunctionDecl>(Actions.CurContext)) {
+        getCurScope()->setEntity(FD);
+        for (auto *P : FD->parameters())
+          Actions.PushOnScopeChains(P, getCurScope(), /*AddToContext=*/false);
+      }
+
       StmtVector Stmts;
       while (Tok.isNot(tok::eof)) {
         StmtResult R =

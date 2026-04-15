@@ -188,3 +188,20 @@ namespace N7 {
     }
     static_assert(check() == 6);
 }
+
+namespace N8 {
+    template <int I, class... Ts>
+    constexpr auto nth(Ts... ts) {
+        consteval {
+            __builtin_inject(^^{
+                return ts...[\(I)];
+            });
+        }
+    }
+
+    constexpr int v = 1;
+    static_assert(nth<0>(1) == 1);
+    static_assert(nth<0>(&v) == &v);
+    static_assert(nth<0>(1, &v) == 1);
+    static_assert(nth<1>(1, &v) == &v);
+}

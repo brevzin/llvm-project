@@ -17075,16 +17075,109 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
                           diag::err_interpolation_not_type_reflection);
               return false;
             }
-          } else {
-            // Non-reflection interpolation: evaluate as rvalue and wrap
-            // in a ConstantExpr.
+          } else if (ExprTy->isRecordType()) {
+            // Record type: check for a conversion operator to the
+            // reflection type. If found, evaluate the conversion and
+            // treat the result as a reflection value.
+            auto *RD = ExprTy->getAsCXXRecordDecl();
+            const CXXConversionDecl *ConvDecl = nullptr;
+            if (RD) {
+              for (auto *D : RD->decls()) {
+                if (auto *Conv = dyn_cast<CXXConversionDecl>(D)) {
+                  if (Conv->getConversionType()
+                          .getCanonicalType()
+                          ->isReflectionType()) {
+                    ConvDecl = Conv;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (ConvDecl) {
+              // Set up an LValue for the object so we can call the
+              // conversion operator on it.
+              LValue ObjLV;
+              if (!EvaluateObjectArgument(Info, SubExpr, ObjLV))
+                return false;
+
+              // Call the conversion operator.
+              auto *Def = ConvDecl->getDefinition();
+              if (!Def || !Def->hasBody()) {
+                Info.FFDiag(SubExpr->getExprLoc())
+                    << "conversion operator has no body";
+                return false;
+              }
+
+              APValue ConvResult;
+              CallRef Call = Info.CurrentCall->createCall(Def);
+              if (!HandleFunctionCall(
+                      SubExpr->getExprLoc(), Def, &ObjLV, SubExpr,
+                      ArrayRef<const Expr *>(), Call, Def->getBody(),
+                      Info, ConvResult, nullptr))
+                return false;
+
+              // Process the reflection result.
+              Val = ConvResult;
+              if (Val.isReflectedType()) {
+                QualType QT = Val.getReflectedType();
+                while (const auto *AT = dyn_cast<AutoType>(QT)) {
+                  if (!AT->isDeduced()) break;
+                  QT = AT->getDeducedType();
+                }
+                Token Tok = TSD->Tokens[I];
+                Tok.setKind(tok::annot_typename);
+                Tok.setAnnotationValue(QT.getAsOpaquePtr());
+                NewTokens.push_back(Tok);
+              } else if (Val.isReflectedIdentifier()) {
+                IdentifierInfo *II = Val.getReflectedIdentifier();
+                Token Tok = TSD->Tokens[I];
+                Tok.setKind(tok::identifier);
+                Tok.setIdentifierInfo(II);
+                Tok.setLength(II->getLength());
+                NewTokens.push_back(Tok);
+              } else if (Val.isReflectedTokenSequence()) {
+                const TokenSequenceData *Inner =
+                    Val.getReflectedTokenSequence();
+                for (unsigned J = 0; J < Inner->NumTokens; ++J) {
+                  if (Inner->Tokens[J].is(tok::eof)) break;
+                  NewTokens.push_back(Inner->Tokens[J]);
+                }
+              } else {
+                Info.FFDiag(SubExpr->getExprLoc(),
+                            diag::err_interpolation_not_type_reflection);
+                return false;
+              }
+              continue;
+            }
+
+            // No conversion: interpolate as a literal value.
             if (!EvaluateAsRValue(Info, SubExpr, Val))
               return false;
 
-            // Force prvalue so the evaluator dispatches to the right
-            // evaluator kind rather than LValueExprEvaluator.
-            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, SubExpr, Val);
-            CE->setValueKind(VK_PRValue);
+            OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                OK_Ordinary, SubExpr);
+            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+
+            Token Tok = TSD->Tokens[I];
+            Tok.setAnnotationValue(static_cast<void *>(CE));
+            NewTokens.push_back(Tok);
+          } else {
+            // Non-reflection, non-record interpolation: evaluate as
+            // rvalue and wrap in a ConstantExpr.
+            if (!EvaluateAsRValue(Info, SubExpr, Val))
+              return false;
+
+            // Use an OpaqueValueExpr as the inner expression so that
+            // Expr::ClassifyImpl (which sees through ConstantExpr to
+            // the SubExpr) classifies this as a prvalue. Using the
+            // original SubExpr would fail if it were an lvalue (e.g.,
+            // a DeclRefExpr to a consteval local variable).
+            OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                OK_Ordinary, SubExpr);
+            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
 
             Token Tok = TSD->Tokens[I];
             Tok.setAnnotationValue(static_cast<void *>(CE));

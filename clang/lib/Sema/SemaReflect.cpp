@@ -21,6 +21,7 @@
 #include "clang/AST/Metafunction.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
+#include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Sema.h"
@@ -1007,6 +1008,25 @@ ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
   // concrete values when the token sequence is evaluated during consteval
   // evaluation. Evaluation happens in the ReflectionEvaluator when the
   // ^^{ ... } expression is evaluated.
+
+  // If the expression is not already of reflection type but is implicitly
+  // convertible to std::meta::info, insert the conversion. This allows
+  // types with 'operator std::meta::info()' to be used directly in
+  // interpolation contexts (e.g., \(exprs) where exprs has a conversion).
+  QualType ExprTy = E->getType();
+  if (!ExprTy->isDependentType() && !ExprTy->isReflectionType()) {
+    InitializedEntity Entity =
+        InitializedEntity::InitializeTemporary(Context.MetaInfoTy);
+    InitializationKind Kind =
+        InitializationKind::CreateCopy(E->getBeginLoc(), E->getBeginLoc());
+    InitializationSequence Seq(*this, Entity, Kind, E);
+    if (Seq) {
+      ExprResult Conv = Seq.Perform(*this, Entity, Kind, E);
+      if (!Conv.isInvalid())
+        return Conv;
+    }
+  }
+
   return E;
 }
 

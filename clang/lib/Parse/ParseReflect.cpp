@@ -18,6 +18,7 @@
 #include "clang/Lex/Token.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
+#include "clang/Sema/Lookup.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 using namespace clang;
 
@@ -84,6 +85,24 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
       return ExprError();
     }
     ConsumeBrace();
+
+    // Mark any identifiers in the token sequence that refer to local
+    // variables or parameters as referenced, to suppress false
+    // -Wunused-parameter / -Wunused-variable warnings. The token sequence
+    // will use them when injected.
+    for (const Token &T : Tokens) {
+      if (T.is(tok::identifier)) {
+        if (IdentifierInfo *II = T.getIdentifierInfo()) {
+          LookupResult R(Actions, II, T.getLocation(),
+                         Sema::LookupOrdinaryName);
+          if (Actions.LookupName(R, getCurScope(),
+                                 /*AllowBuiltinCreation=*/false)) {
+            if (auto *VD = R.getAsSingle<VarDecl>())
+              VD->setReferenced();
+          }
+        }
+      }
+    }
 
     SourceRange OperandRange(LBraceLoc, RBraceLoc);
     return Actions.ActOnCXXTokenSequenceReflection(OpLoc, OperandRange,
