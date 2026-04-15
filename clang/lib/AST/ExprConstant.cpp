@@ -17070,6 +17070,21 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
                   break;
                 NewTokens.push_back(Inner->Tokens[J]);
               }
+            } else if (Val.isReflectedDecl()) {
+              // Declaration reflection: create a DeclRefExpr for the
+              // reflected declaration and emit as annot_primary_expr.
+              ValueDecl *VD = Val.getReflectedDecl();
+              QualType DeclTy = VD->getType().getNonReferenceType();
+              ExprValueKind VK = VD->getType()->isReferenceType()
+                                     ? VK_LValue : VK_LValue;
+              DeclRefExpr *DRE = DeclRefExpr::Create(
+                  Info.Ctx, NestedNameSpecifierLoc(), SourceLocation(),
+                  VD, /*RefersToEnclosingVariableOrCapture=*/false,
+                  SubExpr->getExprLoc(), DeclTy, VK);
+
+              Token Tok = TSD->Tokens[I];
+              Tok.setAnnotationValue(static_cast<void *>(DRE));
+              NewTokens.push_back(Tok);
             } else {
               Info.FFDiag(SubExpr->getExprLoc(),
                           diag::err_interpolation_not_type_reflection);
@@ -17143,6 +17158,16 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
                   if (Inner->Tokens[J].is(tok::eof)) break;
                   NewTokens.push_back(Inner->Tokens[J]);
                 }
+              } else if (Val.isReflectedDecl()) {
+                ValueDecl *VD = Val.getReflectedDecl();
+                QualType DeclTy = VD->getType().getNonReferenceType();
+                DeclRefExpr *DRE = DeclRefExpr::Create(
+                    Info.Ctx, NestedNameSpecifierLoc(), SourceLocation(),
+                    VD, /*RefersToEnclosingVariableOrCapture=*/false,
+                    SubExpr->getExprLoc(), DeclTy, VK_LValue);
+                Token Tok = TSD->Tokens[I];
+                Tok.setAnnotationValue(static_cast<void *>(DRE));
+                NewTokens.push_back(Tok);
               } else {
                 Info.FFDiag(SubExpr->getExprLoc(),
                             diag::err_interpolation_not_type_reflection);

@@ -199,9 +199,24 @@ namespace N8 {
         }
     }
 
+    template <int I, class... Ts>
+    constexpr auto nth_local(Ts... ts) {
+        consteval {
+            info vars[] = {^^ts...};
+            __builtin_inject(^^{
+                return \(vars[I]);
+            });
+        }
+    }
+
     constexpr int v = 1;
     static_assert(nth<0>(1) == 1);
     static_assert(nth<0>(&v) == &v);
     static_assert(nth<0>(1, &v) == 1);
     static_assert(nth<1>(1, &v) == &v);
+
+    static_assert(nth_local<0>(1) == 1);
+    static_assert(nth_local<0>(&v) == &v);
+    static_assert(nth_local<0>(1, &v) == 1);
+    static_assert(nth_local<1>(1, &v) == &v);
 }

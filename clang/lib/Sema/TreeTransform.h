@@ -16217,6 +16217,8 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
   CXXRecordDecl *Class = getSema().createLambdaClosureType(
       E->getIntroducerRange(), /*Info=*/nullptr, DependencyKind,
       E->getCaptureDefault());
+  if (OldClass->isConstevalBlockLambda())
+    Class->setIsConstevalBlockLambda();
   getDerived().transformedLocalDecl(OldClass, {Class});
 
   CXXMethodDecl *NewCallOperator =

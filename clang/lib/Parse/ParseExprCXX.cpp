@@ -27,6 +27,7 @@
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/ParsedTemplate.h"
 #include "clang/Sema/Scope.h"
+#include "clang/Sema/ScopeInfo.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -1309,6 +1310,11 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
 
   Actions.PushLambdaScope();
   Actions.ActOnLambdaExpressionAfterIntroducer(Intro, getCurScope());
+
+  // Mark consteval block lambdas. ReturnTy is only set when called from
+  // ParseConstevalBlockDeclaration, which creates a consteval block lambda.
+  if (ReturnTy.isUsable())
+    Actions.getCurLambda()->Lambda->setIsConstevalBlockLambda();
 
   ParsedAttributes Attributes(AttrFactory);
   if (getLangOpts().CUDA) {

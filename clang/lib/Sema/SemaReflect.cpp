@@ -122,6 +122,11 @@ bool CheckReflectVar(Sema &S, VarDecl *VD, SourceRange Range) {
        DC = DC->getParent()) {
     assert(DC && "Var context not a parent of the current context");
     if (auto *RD = dyn_cast<CXXRecordDecl>(DC); RD && RD->isLambda()) {
+      // Consteval blocks are implemented as immediately-invoked lambdas.
+      // They shouldn't prevent reflecting on local entities since
+      // everything is resolved at compile time.
+      if (RD->isConstevalBlockLambda())
+        continue;
       S.Diag(Range.getBegin(), diag::err_reflect_intervening_lambda) << Range;
       return true;
     }
