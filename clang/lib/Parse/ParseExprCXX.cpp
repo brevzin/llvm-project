@@ -1285,8 +1285,8 @@ static void DiagnoseStaticSpecifierRestrictions(Parser &P,
 }
 
 ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
-                     LambdaIntroducer &Intro, SourceLocation ConstevalLoc,
-                     TypeResult ReturnTy) {
+                     LambdaIntroducer &Intro,
+                     std::optional<SourceLocation> ConstevalBlockLoc) {
   SourceLocation LambdaBeginLoc = Intro.Range.getBegin();
   if (getLangOpts().HLSL)
     Diag(LambdaBeginLoc, diag::ext_hlsl_lambda) << /*HLSL*/ 1;
@@ -1311,9 +1311,8 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
   Actions.PushLambdaScope();
   Actions.ActOnLambdaExpressionAfterIntroducer(Intro, getCurScope());
 
-  // Mark consteval block lambdas. ReturnTy is only set when called from
-  // ParseConstevalBlockDeclaration, which creates a consteval block lambda.
-  if (ReturnTy.isUsable())
+  // Mark consteval block lambdas.
+  if (ConstevalBlockLoc)
     Actions.getCurLambda()->Lambda->setIsConstevalBlockLambda();
 
   ParsedAttributes Attributes(AttrFactory);
@@ -1395,13 +1394,16 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
     MaybeParseCXX11Attributes(D);
   }
 
-  TypeResult TrailingReturnType = ReturnTy;
+  TypeResult TrailingReturnType = ConstevalBlockLoc
+      ? ParsedType::make(Actions.Context.VoidTy)
+      : TypeResult{};
   SourceLocation TrailingReturnTypeLoc;
   SourceLocation LParenLoc, RParenLoc;
   SourceLocation DeclEndLoc;
   bool HasParentheses = false;
   bool HasSpecifiers = false;
   SourceLocation MutableLoc;
+  SourceLocation ConstevalLoc = ConstevalBlockLoc.value_or(SourceLocation{});
 
   ParseScope Prototype(this, Scope::FunctionPrototypeScope |
                                  Scope::FunctionDeclarationScope |
@@ -1480,7 +1482,7 @@ ExprResult Parser::ParseLambdaExpressionAfterIntroducer(
   if (!HasParentheses)
     Actions.ActOnLambdaClosureQualifiers(Intro, MutableLoc);
 
-  if (HasSpecifiers || HasParentheses || ReturnTy.get().get() != QualType{}) {
+  if (HasSpecifiers || HasParentheses || ConstevalBlockLoc) {
     // Parse exception-specification[opt].
     ExceptionSpecificationType ESpecType = EST_None;
     SourceRange ESpecRange;

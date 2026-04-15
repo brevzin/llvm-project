@@ -4684,14 +4684,12 @@ private:
   ParseLambdaIntroducer(LambdaIntroducer &Intro,
                         LambdaIntroducerTentativeParse *Tentative = nullptr);
 
-  // Explicit 'ConstevalLoc' is allowed to facilitate C++2C consteval-blocks.
-  ExprResult ParseLambdaExpressionAfterIntroducer(LambdaIntroducer &Intro,
-                                                  SourceLocation ConstevalLoc,
-                                                  TypeResult ReturnTy = {});
-  ExprResult ParseLambdaExpressionAfterIntroducer(LambdaIntroducer &Intro) {
-    SourceLocation ConstevalLoc;
-    return ParseLambdaExpressionAfterIntroducer(Intro, ConstevalLoc);
-  }
+  /// Parse a lambda expression after the introducer.
+  /// \param ConstevalBlockLoc If set, this lambda is the implementation of a
+  ///        consteval block at the given location.
+  ExprResult ParseLambdaExpressionAfterIntroducer(
+      LambdaIntroducer &Intro,
+      std::optional<SourceLocation> ConstevalBlockLoc = {});
 
   //===--------------------------------------------------------------------===//
   // C++ 5.2p1: C++ Casts
