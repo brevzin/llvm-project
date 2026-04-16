@@ -244,3 +244,31 @@ namespace N10 {
         __builtin_report_tokens(sv, ^^{ int x; }); // expected-error {{expected string literal in '__builtin_report_tokens'}}
     }
 }
+
+namespace N11 {
+    static_assert(^^{ } == ^^{ });
+    static_assert(^^{ , } == ^^{ , });
+    static_assert(^^{ \(__builtin_id("x", 1)) } == ^^{ x1 });
+}
+
+namespace N12 {
+    // Test that __builtin_inject handles operator info() conversion.
+    struct Builder {
+        info body = ^^{};
+        consteval auto operator+=(info tok) -> void {
+            body = ^^{ \(body) \(tok) };
+        }
+        consteval operator info() const { return body; }
+    };
+
+    template <class T>
+    struct S {
+        consteval {
+            Builder b;
+            b += ^^{ static constexpr int x = 1; };
+            __builtin_inject(b);
+        }
+    };
+
+    static_assert(S<int>::x == 1);
+}

@@ -1246,6 +1246,10 @@ void Parser::ProcessTokenInjections(
       ParsingClassDefinition ParsingDef(*this, TagDecl,
                                         /*TopLevelClass=*/true,
                                         /*IsInterface=*/false);
+      // Create a scope with the class as entity so that
+      // CheckTemplateDeclScope can find it when parsing member templates.
+      ParseScope ClassScope(this, Scope::ClassScope | Scope::DeclScope);
+      getCurScope()->setEntity(Actions.CurContext);
       // Ensure the field collector has a scope, since ActOnCXXMemberDeclarator
       // unconditionally calls FieldCollector->Add() for field declarations.
       // During template instantiation, there may not be an active scope.

@@ -17009,6 +17009,47 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
       return false;
   }
 
+  // If the operand is a record type, try to find a conversion operator to
+  // std::meta::info and call it, same as __builtin_report_tokens does.
+  if (!Operand.isReflection()) {
+    QualType ExprTy = E->getOperand()->getType();
+    if (ExprTy->isRecordType()) {
+      auto *RD = ExprTy->getAsCXXRecordDecl();
+      const CXXConversionDecl *ConvDecl = nullptr;
+      if (RD) {
+        for (auto *D : RD->decls()) {
+          if (auto *Conv = dyn_cast<CXXConversionDecl>(D)) {
+            if (Conv->getConversionType()
+                    .getCanonicalType()
+                    ->isReflectionType()) {
+              ConvDecl = Conv;
+              break;
+            }
+          }
+        }
+      }
+      if (ConvDecl) {
+        LValue ObjLV;
+        if (!EvaluateObjectArgument(Info, E->getOperand(), ObjLV))
+          return false;
+        auto *Def = ConvDecl->getDefinition();
+        if (!Def || !Def->hasBody()) {
+          Info.FFDiag(E->getOperand()->getExprLoc())
+              << "conversion operator has no body";
+          return false;
+        }
+        APValue ConvResult;
+        CallRef Call = Info.CurrentCall->createCall(Def);
+        if (!HandleFunctionCall(
+                E->getOperand()->getExprLoc(), Def, &ObjLV,
+                E->getOperand(), ArrayRef<const Expr *>(), Call,
+                Def->getBody(), Info, ConvResult, nullptr))
+          return false;
+        Operand = ConvResult;
+      }
+    }
+  }
+
   if (!Operand.isReflectedTokenSequence()) {
     Info.FFDiag(E->getBeginLoc(),
                 diag::err_builtin_inject_not_token_sequence);

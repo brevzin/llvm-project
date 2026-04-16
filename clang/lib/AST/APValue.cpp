@@ -22,6 +22,7 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/LocInfoType.h"
 #include "clang/AST/Type.h"
+#include "clang/Lex/Token.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 using namespace clang;
@@ -563,10 +564,27 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
   case ReflectionKind::EntityProxy:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Annotation:
-  case ReflectionKind::TokenSequence:
   case ReflectionKind::Identifier:
     ID.AddPointer(V.getOpaqueReflectionData());
     return;
+  case ReflectionKind::TokenSequence: {
+    const TokenSequenceData *TSD = V.getReflectedTokenSequence();
+    for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+      const Token &Tok = TSD->Tokens[I];
+      if (Tok.is(tok::eof))
+        break;
+      ID.AddInteger(Tok.getKind());
+      if (Tok.is(tok::annot_typename))
+        QualType::getFromOpaquePtr(Tok.getAnnotationValue()).Profile(ID);
+      else if (Tok.is(tok::annot_primary_expr))
+        ID.AddPointer(Tok.getAnnotationValue());
+      else if (const auto *II = Tok.getIdentifierInfo())
+        ID.AddString(II->getName());
+      else if (Tok.isLiteral() && Tok.getLiteralData())
+        ID.AddString(StringRef(Tok.getLiteralData(), Tok.getLength()));
+    }
+    return;
+  }
   case ReflectionKind::DataMemberSpec: {
     TagDataMemberSpec *TDMS = V.getReflectedDataMemberSpec();
     TDMS->Ty.Profile(ID);
