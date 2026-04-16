@@ -1386,6 +1386,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Expr::CXXReflectExprClass:
   case Expr::CXXMetafunctionExprClass:
   case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinReportTokensExprClass:
   case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:

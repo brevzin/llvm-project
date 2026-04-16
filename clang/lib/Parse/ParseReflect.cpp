@@ -251,6 +251,42 @@ ExprResult Parser::ParseCXXBuiltinInjectExpression() {
                                        TargetNS);
 }
 
+ExprResult Parser::ParseCXXBuiltinReportTokensExpression() {
+  assert(Tok.is(tok::kw___builtin_report_tokens) &&
+         "expected '__builtin_report_tokens'");
+  SourceLocation KwLoc = ConsumeToken();
+
+  BalancedDelimiterTracker Parens(*this, tok::l_paren);
+  if (Parens.expectAndConsume())
+    return ExprError();
+
+  // First argument: message (string literal).
+  ExprResult Msg = ParseConstantExpression();
+  if (Msg.isInvalid()) {
+    Parens.skipToEnd();
+    return ExprError();
+  }
+
+  if (ExpectAndConsume(tok::comma)) {
+    Parens.skipToEnd();
+    return ExprError();
+  }
+
+  // Second argument: token sequence expression.
+  ExprResult Operand = ParseConstantExpression();
+  if (Operand.isInvalid()) {
+    Parens.skipToEnd();
+    return ExprError();
+  }
+
+  if (Parens.consumeClose())
+    return ExprError();
+
+  return Actions.ActOnCXXBuiltinReportTokens(KwLoc, Parens.getOpenLocation(),
+                                              Msg.get(), Operand.get(),
+                                              Parens.getCloseLocation());
+}
+
 ExprResult Parser::ParseCXXBuiltinIdExpression() {
   assert(Tok.is(tok::kw___builtin_id) && "expected '__builtin_id'");
   SourceLocation KwLoc = ConsumeToken();

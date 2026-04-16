@@ -2,6 +2,16 @@
 
 using info = decltype(^^::);
 using size_t = decltype(sizeof(0));
+struct string_view {
+private:
+    char const* p_;
+    size_t len_;
+
+public:
+    constexpr string_view(char const* p) : p_(p), len_(__builtin_strlen(p)) { }
+    constexpr auto data() const -> char const* { return p_; }
+    constexpr auto size() const -> size_t { return len_; }
+};
 
 namespace N1 {
     constexpr info tok = ^^{ constexpr int x = 42; };
@@ -153,17 +163,6 @@ namespace N6 {
 }
 
 namespace N7 {
-    struct string_view {
-    private:
-        char const* p_;
-        size_t len_;
-
-    public:
-        constexpr string_view(char const* p) : p_(p), len_(__builtin_strlen(p)) { }
-        constexpr auto data() const -> char const* { return p_; }
-        constexpr auto size() const -> size_t { return len_; }
-    };
-
     template <class S>
     consteval auto make_field(info type, S name, int val) -> info {
         return ^^{ \(type) \(__builtin_id(name)) = \(val); };
@@ -237,4 +236,11 @@ namespace N9 {
 
     static_assert(get_m(A{.m=1}) == 1);
     static_assert(get_m(B{.m=1}) == 1); // expected-error {{static assert}}
+}
+
+namespace N10 {
+    consteval void bad_report() {
+        string_view sv("hello");
+        __builtin_report_tokens(sv, ^^{ int x; }); // expected-error {{expected string literal in '__builtin_report_tokens'}}
+    }
 }

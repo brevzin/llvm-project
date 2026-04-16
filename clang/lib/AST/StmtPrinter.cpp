@@ -2797,6 +2797,15 @@ void StmtPrinter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *S) {
   OS << ")";
 }
 
+void StmtPrinter::VisitCXXBuiltinReportTokensExpr(
+    CXXBuiltinReportTokensExpr *S) {
+  OS << "__builtin_report_tokens(";
+  PrintExpr(S->getMessage());
+  OS << ", ";
+  PrintExpr(S->getOperand());
+  OS << ")";
+}
+
 void StmtPrinter::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *S) {
   OS << "__builtin_id(";
   for (unsigned I = 0; I < S->getNumArgs(); ++I) {

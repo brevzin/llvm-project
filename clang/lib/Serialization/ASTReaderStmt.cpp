@@ -533,6 +533,16 @@ void ASTStmtReader::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
     E->setTargetNS(Record.readExpr());
 }
 
+void ASTStmtReader::VisitCXXBuiltinReportTokensExpr(
+    CXXBuiltinReportTokensExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  E->setMessage(Record.readExpr());
+  E->setOperand(Record.readExpr());
+}
+
 void ASTStmtReader::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
   VisitExpr(E);
   E->setKwLoc(Record.readSourceLocation());
@@ -4681,6 +4691,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     }
     case EXPR_BUILTIN_INJECT: {
       S = CXXBuiltinInjectExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_BUILTIN_REPORT_TOKENS: {
+      S = CXXBuiltinReportTokensExpr::CreateEmpty(Context);
       break;
     }
     case EXPR_BUILTIN_ID: {

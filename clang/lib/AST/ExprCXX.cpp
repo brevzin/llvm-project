@@ -2087,6 +2087,35 @@ CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::CreateEmpty(ASTContext &C) {
   return new (C) CXXBuiltinInjectExpr(EmptyShell());
 }
 
+CXXBuiltinReportTokensExpr::CXXBuiltinReportTokensExpr(
+    QualType Ty, Expr *Msg, Expr *Operand, SourceLocation KwLoc,
+    SourceLocation LParenLoc, SourceLocation RParenLoc)
+    : Expr(CXXBuiltinReportTokensExprClass, Ty, VK_PRValue, OK_Ordinary),
+      KwLoc(KwLoc), LParenLoc(LParenLoc), RParenLoc(RParenLoc) {
+  Args[0] = Msg;
+  Args[1] = Operand;
+  setDependence(Msg->getDependence() | Operand->getDependence());
+}
+
+CXXBuiltinReportTokensExpr::CXXBuiltinReportTokensExpr(EmptyShell Empty)
+    : Expr(CXXBuiltinReportTokensExprClass, Empty) {
+  Args[0] = nullptr;
+  Args[1] = nullptr;
+}
+
+CXXBuiltinReportTokensExpr *CXXBuiltinReportTokensExpr::Create(
+    ASTContext &C, QualType Ty, Expr *Msg, Expr *Operand,
+    SourceLocation KwLoc, SourceLocation LParenLoc,
+    SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinReportTokensExpr(Ty, Msg, Operand, KwLoc,
+                                             LParenLoc, RParenLoc);
+}
+
+CXXBuiltinReportTokensExpr *
+CXXBuiltinReportTokensExpr::CreateEmpty(ASTContext &C) {
+  return new (C) CXXBuiltinReportTokensExpr(EmptyShell());
+}
+
 CXXBuiltinIdExpr::CXXBuiltinIdExpr(ASTContext &C, QualType Ty,
                                      ArrayRef<Expr *> Args,
                                      SourceLocation KwLoc,

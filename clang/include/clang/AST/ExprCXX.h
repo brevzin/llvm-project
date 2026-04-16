@@ -5689,6 +5689,56 @@ public:
   }
 };
 
+class CXXBuiltinReportTokensExpr : public Expr {
+  // Args[0] = Message (StringLiteral), Args[1] = Operand (token sequence)
+  Stmt *Args[2];
+  SourceLocation KwLoc;
+  SourceLocation LParenLoc;
+  SourceLocation RParenLoc;
+
+  CXXBuiltinReportTokensExpr(QualType Ty, Expr *Msg, Expr *Operand,
+                              SourceLocation KwLoc, SourceLocation LParenLoc,
+                              SourceLocation RParenLoc);
+  CXXBuiltinReportTokensExpr(EmptyShell Empty);
+
+public:
+  static CXXBuiltinReportTokensExpr *Create(ASTContext &C, QualType Ty,
+                                             Expr *Msg, Expr *Operand,
+                                             SourceLocation KwLoc,
+                                             SourceLocation LParenLoc,
+                                             SourceLocation RParenLoc);
+  static CXXBuiltinReportTokensExpr *CreateEmpty(ASTContext &C);
+
+  Expr *getMessage() const { return cast<Expr>(Args[0]); }
+  void setMessage(Expr *E) { Args[0] = E; }
+
+  Expr *getOperand() const { return cast<Expr>(Args[1]); }
+  void setOperand(Expr *E) { Args[1] = E; }
+
+  SourceLocation getKwLoc() const { return KwLoc; }
+  void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
+
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return KwLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() {
+    return child_range(Args, Args + 2);
+  }
+  const_child_range children() const {
+    return const_child_range(Args, Args + 2);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXBuiltinReportTokensExprClass;
+  }
+};
+
 class CXXBuiltinIdExpr : public Expr {
   Stmt **Args;
   unsigned NumArgs;

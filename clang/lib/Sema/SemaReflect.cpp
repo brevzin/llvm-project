@@ -1044,6 +1044,21 @@ ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                        KwLoc, LParenLoc, RParenLoc, TargetNS);
 }
 
+ExprResult Sema::ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
+                                              SourceLocation LParenLoc,
+                                              Expr *Msg, Expr *Operand,
+                                              SourceLocation RParenLoc) {
+  // Verify the message is a string literal.
+  if (!isa<StringLiteral>(Msg->IgnoreParenCasts())) {
+    Diag(Msg->getBeginLoc(), diag::err_expected_string_literal)
+        << /*in*/ 0 << "'__builtin_report_tokens'";
+    return ExprError();
+  }
+  return CXXBuiltinReportTokensExpr::Create(Context, Context.VoidTy, Msg,
+                                             Operand, KwLoc, LParenLoc,
+                                             RParenLoc);
+}
+
 ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,
                                    SmallVectorImpl<Expr *> &Args,

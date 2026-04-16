@@ -235,6 +235,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
     return E->getValueKind() == VK_LValue ? Cl::CL_LValue : Cl::CL_PRValue;
 
   case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinReportTokensExprClass:
   case Expr::CXXBuiltinIdExprClass:
     return Cl::CL_PRValue;
 

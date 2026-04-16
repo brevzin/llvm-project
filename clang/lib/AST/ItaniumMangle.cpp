@@ -5175,6 +5175,7 @@ recurse:
   case Expr::CXXParenListInitExprClass:
   case Expr::CXXMetafunctionExprClass:
   case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinReportTokensExprClass:
   case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::CXXDependentMemberSpliceExprClass:

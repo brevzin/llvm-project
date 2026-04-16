@@ -15612,6 +15612,11 @@ public:
                                    SourceLocation RParenLoc,
                                    Expr *TargetNS = nullptr);
 
+  ExprResult ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
+                                          SourceLocation LParenLoc,
+                                          Expr *Msg, Expr *Operand,
+                                          SourceLocation RParenLoc);
+
   ExprResult ActOnCXXBuiltinId(SourceLocation KwLoc,
                                SourceLocation LParenLoc,
                                SmallVectorImpl<Expr *> &Args,

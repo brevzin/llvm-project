@@ -9158,6 +9158,24 @@ TreeTransform<Derived>::TransformCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
 
 template <typename Derived>
 ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinReportTokensExpr(
+    CXXBuiltinReportTokensExpr *E) {
+  ExprResult Msg = getDerived().TransformExpr(E->getMessage());
+  if (Msg.isInvalid())
+    return ExprError();
+
+  ExprResult Operand = getDerived().TransformExpr(E->getOperand());
+  if (Operand.isInvalid())
+    return ExprError();
+
+  return getSema().ActOnCXXBuiltinReportTokens(E->getKwLoc(),
+                                                E->getLParenLoc(),
+                                                Msg.get(), Operand.get(),
+                                                E->getRParenLoc());
+}
+
+template <typename Derived>
+ExprResult
 TreeTransform<Derived>::TransformCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
   SmallVector<Expr *, 4> TransformedArgs;
   for (unsigned I = 0; I < E->getNumArgs(); ++I) {

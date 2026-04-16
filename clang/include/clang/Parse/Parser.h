@@ -8367,6 +8367,7 @@ private:
   ExprResult ParseCXXReflectExpression(SourceLocation OpLoc);
   ExprResult ParseCXXMetafunctionExpression();
   ExprResult ParseCXXBuiltinInjectExpression();
+  ExprResult ParseCXXBuiltinReportTokensExpression();
   ExprResult ParseCXXBuiltinIdExpression();
 
   bool ParseSpliceSpecifier(bool TryParseSpecialization = false);

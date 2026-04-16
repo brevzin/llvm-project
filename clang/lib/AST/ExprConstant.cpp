@@ -54,6 +54,7 @@
 #include "clang/AST/TypeLoc.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/DiagnosticMetafn.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/TargetBuiltins.h"
 #include "clang/Lex/Token.h"
@@ -16812,8 +16813,173 @@ public:
 
   bool VisitCXXDeleteExpr(const CXXDeleteExpr *E);
   bool VisitCXXBuiltinInjectExpr(const CXXBuiltinInjectExpr *E);
+  bool VisitCXXBuiltinReportTokensExpr(const CXXBuiltinReportTokensExpr *E);
 };
 } // end anonymous namespace
+
+static void PrintTokenSequenceToStderr(const TokenSequenceData *TSD,
+                                       ASTContext &Ctx) {
+  llvm::raw_fd_ostream &OS = llvm::errs();
+  PrintingPolicy PP(Ctx.getLangOpts());
+  OS << "^^{ ";
+
+  bool NeedSpace = false;
+  for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+    const Token &Tok = TSD->Tokens[I];
+    if (Tok.is(tok::eof))
+      break;
+
+    // Spacing: don't add space before closing/separating punctuation,
+    // or after opening punctuation.
+    bool IsOpenPunct = Tok.isOneOf(tok::l_paren, tok::l_brace, tok::l_square);
+    bool IsClosePunct = Tok.isOneOf(tok::r_paren, tok::r_brace, tok::r_square,
+                                    tok::comma, tok::semi, tok::ellipsis);
+    if (NeedSpace && !IsClosePunct)
+      OS << ' ';
+
+    if (Tok.is(tok::annot_typename)) {
+      // Interpolated type.
+      QualType QT = QualType::getFromOpaquePtr(Tok.getAnnotationValue());
+      OS << "\\(";
+      QT.print(OS, PP);
+      OS << ")";
+    } else if (Tok.is(tok::annot_primary_expr)) {
+      // Interpolated expression.
+      Expr *E = static_cast<Expr *>(Tok.getAnnotationValue());
+      OS << "\\(";
+      if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+        DRE->getDecl()->printQualifiedName(OS);
+      } else if (auto *CE = dyn_cast<ConstantExpr>(E)) {
+        if (CE->hasAPValueResult()) {
+          const APValue &V = CE->getAPValueResult();
+          if (V.isReflection()) {
+            switch (V.getReflectionKind()) {
+            case ReflectionKind::Type:
+              V.getReflectedType().print(OS, PP);
+              break;
+            case ReflectionKind::Declaration:
+              if (auto *ND = dyn_cast<NamedDecl>(V.getReflectedDecl()))
+                ND->printQualifiedName(OS);
+              else
+                OS << "<decl>";
+              break;
+            default:
+              V.printPretty(OS, PP, QualType());
+              break;
+            }
+          } else {
+            V.printPretty(OS, PP, CE->getType());
+          }
+        } else {
+          E->printPretty(OS, nullptr, PP);
+        }
+      } else {
+        E->printPretty(OS, nullptr, PP);
+      }
+      OS << ")";
+    } else if (Tok.isLiteral() && Tok.getLiteralData()) {
+      OS << StringRef(Tok.getLiteralData(), Tok.getLength());
+    } else if (const auto *II = Tok.getIdentifierInfo()) {
+      OS << II->getName();
+    } else if (const char *Punc = tok::getPunctuatorSpelling(Tok.getKind())) {
+      OS << Punc;
+    } else if (const char *Kw = tok::getKeywordSpelling(Tok.getKind())) {
+      OS << Kw;
+    } else {
+      OS << tok::getTokenName(Tok.getKind());
+    }
+
+    NeedSpace = !IsOpenPunct;
+  }
+
+  OS << " }";
+}
+
+bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
+    const CXXBuiltinReportTokensExpr *E) {
+  if (Info.checkingPotentialConstantExpression())
+    return false;
+
+  // Get the message string.
+  const auto *SL = cast<StringLiteral>(E->getMessage()->IgnoreParenCasts());
+  StringRef Msg = SL->getString();
+
+  // Evaluate the operand to get the token sequence reflection.
+  APValue Operand;
+  if (!::Evaluate(Operand, Info, E->getOperand()))
+    return false;
+  if (E->getOperand()->isGLValue()) {
+    LValue LV;
+    LV.setFrom(Info.Ctx, Operand);
+    if (!handleLValueToRValueConversion(Info, E->getOperand(),
+                                         E->getOperand()->getType(), LV,
+                                         Operand))
+      return false;
+  }
+
+  // If the operand is a record type, try to find a conversion operator to
+  // std::meta::info and call it, same as token sequence interpolation does.
+  if (!Operand.isReflection()) {
+    QualType ExprTy = E->getOperand()->getType();
+    if (ExprTy->isRecordType()) {
+      auto *RD = ExprTy->getAsCXXRecordDecl();
+      const CXXConversionDecl *ConvDecl = nullptr;
+      if (RD) {
+        for (auto *D : RD->decls()) {
+          if (auto *Conv = dyn_cast<CXXConversionDecl>(D)) {
+            if (Conv->getConversionType()
+                    .getCanonicalType()
+                    ->isReflectionType()) {
+              ConvDecl = Conv;
+              break;
+            }
+          }
+        }
+      }
+      if (ConvDecl) {
+        LValue ObjLV;
+        if (!EvaluateObjectArgument(Info, E->getOperand(), ObjLV))
+          return false;
+        auto *Def = ConvDecl->getDefinition();
+        if (!Def || !Def->hasBody()) {
+          Info.FFDiag(E->getOperand()->getExprLoc())
+              << "conversion operator has no body";
+          return false;
+        }
+        APValue ConvResult;
+        CallRef Call = Info.CurrentCall->createCall(Def);
+        if (!HandleFunctionCall(
+                E->getOperand()->getExprLoc(), Def, &ObjLV,
+                E->getOperand(), ArrayRef<const Expr *>(), Call,
+                Def->getBody(), Info, ConvResult, nullptr))
+          return false;
+        Operand = ConvResult;
+      }
+    }
+  }
+
+  if (!Operand.isReflectedTokenSequence()) {
+    Info.FFDiag(E->getBeginLoc(),
+                diag::err_builtin_inject_not_token_sequence);
+    return false;
+  }
+
+  // Print the report.
+  SourceLocation Loc = E->getKwLoc();
+  PresumedLoc PLoc = Info.Ctx.getSourceManager().getPresumedLoc(Loc);
+
+  llvm::raw_fd_ostream &OS = llvm::errs();
+  OS << "__builtin_report_tokens";
+  if (PLoc.isValid())
+    OS << " at " << PLoc.getFilename() << ":" << PLoc.getLine();
+  OS << " \"" << Msg << "\":\n  ";
+
+  const TokenSequenceData *TSD = Operand.getReflectedTokenSequence();
+  PrintTokenSequenceToStderr(TSD, Info.Ctx);
+  OS << "\n";
+
+  return true;
+}
 
 bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
     const CXXBuiltinInjectExpr *E) {
@@ -18206,6 +18372,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXReflectExprClass:
   case Expr::CXXMetafunctionExprClass:
   case Expr::CXXBuiltinInjectExprClass:
+  case Expr::CXXBuiltinReportTokensExprClass:
   case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
