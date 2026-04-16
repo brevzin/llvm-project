@@ -5068,7 +5068,8 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
     break;
   }
   case ReflectionKind::TokenSequence:
-    llvm_unreachable("token sequences cannot be mangled");
+  case ReflectionKind::Identifier:
+    llvm_unreachable("token sequences and identifiers cannot be mangled");
   }
   Out << 'E';
 }

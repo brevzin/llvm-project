@@ -16817,6 +16817,52 @@ public:
 };
 } // end anonymous namespace
 
+/// If \p Result is not a reflection and \p SubExpr has a record type with a
+/// conversion operator to std::meta::info, evaluate the conversion and replace
+/// \p Result with the converted value. Returns false on evaluation failure.
+static bool TryConvertToReflection(EvalInfo &Info, const Expr *SubExpr,
+                                   APValue &Result) {
+  if (Result.isReflection())
+    return true;
+
+  QualType ExprTy = SubExpr->getType();
+  if (!ExprTy->isRecordType())
+    return true;
+
+  auto *RD = ExprTy->getAsCXXRecordDecl();
+  if (!RD)
+    return true;
+
+  const CXXConversionDecl *ConvDecl = nullptr;
+  for (auto *D : RD->decls()) {
+    if (auto *Conv = dyn_cast<CXXConversionDecl>(D)) {
+      if (Conv->getConversionType().getCanonicalType()->isReflectionType()) {
+        ConvDecl = Conv;
+        break;
+      }
+    }
+  }
+  if (!ConvDecl)
+    return true;
+
+  LValue ObjLV;
+  if (!EvaluateObjectArgument(Info, SubExpr, ObjLV))
+    return false;
+  auto *Def = ConvDecl->getDefinition();
+  if (!Def || !Def->hasBody()) {
+    Info.FFDiag(SubExpr->getExprLoc()) << "conversion operator has no body";
+    return false;
+  }
+  APValue ConvResult;
+  CallRef Call = Info.CurrentCall->createCall(Def);
+  if (!HandleFunctionCall(SubExpr->getExprLoc(), Def, &ObjLV, SubExpr,
+                          ArrayRef<const Expr *>(), Call, Def->getBody(), Info,
+                          ConvResult, nullptr))
+    return false;
+  Result = ConvResult;
+  return true;
+}
+
 static void PrintTokenSequenceToStderr(const TokenSequenceData *TSD,
                                        ASTContext &Ctx) {
   llvm::raw_fd_ostream &OS = llvm::errs();
@@ -16917,46 +16963,8 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
       return false;
   }
 
-  // If the operand is a record type, try to find a conversion operator to
-  // std::meta::info and call it, same as token sequence interpolation does.
-  if (!Operand.isReflection()) {
-    QualType ExprTy = E->getOperand()->getType();
-    if (ExprTy->isRecordType()) {
-      auto *RD = ExprTy->getAsCXXRecordDecl();
-      const CXXConversionDecl *ConvDecl = nullptr;
-      if (RD) {
-        for (auto *D : RD->decls()) {
-          if (auto *Conv = dyn_cast<CXXConversionDecl>(D)) {
-            if (Conv->getConversionType()
-                    .getCanonicalType()
-                    ->isReflectionType()) {
-              ConvDecl = Conv;
-              break;
-            }
-          }
-        }
-      }
-      if (ConvDecl) {
-        LValue ObjLV;
-        if (!EvaluateObjectArgument(Info, E->getOperand(), ObjLV))
-          return false;
-        auto *Def = ConvDecl->getDefinition();
-        if (!Def || !Def->hasBody()) {
-          Info.FFDiag(E->getOperand()->getExprLoc())
-              << "conversion operator has no body";
-          return false;
-        }
-        APValue ConvResult;
-        CallRef Call = Info.CurrentCall->createCall(Def);
-        if (!HandleFunctionCall(
-                E->getOperand()->getExprLoc(), Def, &ObjLV,
-                E->getOperand(), ArrayRef<const Expr *>(), Call,
-                Def->getBody(), Info, ConvResult, nullptr))
-          return false;
-        Operand = ConvResult;
-      }
-    }
-  }
+  if (!TryConvertToReflection(Info, E->getOperand(), Operand))
+    return false;
 
   if (!Operand.isReflectedTokenSequence()) {
     Info.FFDiag(E->getBeginLoc(),
@@ -17009,46 +17017,8 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
       return false;
   }
 
-  // If the operand is a record type, try to find a conversion operator to
-  // std::meta::info and call it, same as __builtin_report_tokens does.
-  if (!Operand.isReflection()) {
-    QualType ExprTy = E->getOperand()->getType();
-    if (ExprTy->isRecordType()) {
-      auto *RD = ExprTy->getAsCXXRecordDecl();
-      const CXXConversionDecl *ConvDecl = nullptr;
-      if (RD) {
-        for (auto *D : RD->decls()) {
-          if (auto *Conv = dyn_cast<CXXConversionDecl>(D)) {
-            if (Conv->getConversionType()
-                    .getCanonicalType()
-                    ->isReflectionType()) {
-              ConvDecl = Conv;
-              break;
-            }
-          }
-        }
-      }
-      if (ConvDecl) {
-        LValue ObjLV;
-        if (!EvaluateObjectArgument(Info, E->getOperand(), ObjLV))
-          return false;
-        auto *Def = ConvDecl->getDefinition();
-        if (!Def || !Def->hasBody()) {
-          Info.FFDiag(E->getOperand()->getExprLoc())
-              << "conversion operator has no body";
-          return false;
-        }
-        APValue ConvResult;
-        CallRef Call = Info.CurrentCall->createCall(Def);
-        if (!HandleFunctionCall(
-                E->getOperand()->getExprLoc(), Def, &ObjLV,
-                E->getOperand(), ArrayRef<const Expr *>(), Call,
-                Def->getBody(), Info, ConvResult, nullptr))
-          return false;
-        Operand = ConvResult;
-      }
-    }
-  }
+  if (!TryConvertToReflection(Info, E->getOperand(), Operand))
+    return false;
 
   if (!Operand.isReflectedTokenSequence()) {
     Info.FFDiag(E->getBeginLoc(),
@@ -17312,45 +17282,11 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
             // Record type: check for a conversion operator to the
             // reflection type. If found, evaluate the conversion and
             // treat the result as a reflection value.
-            auto *RD = ExprTy->getAsCXXRecordDecl();
-            const CXXConversionDecl *ConvDecl = nullptr;
-            if (RD) {
-              for (auto *D : RD->decls()) {
-                if (auto *Conv = dyn_cast<CXXConversionDecl>(D)) {
-                  if (Conv->getConversionType()
-                          .getCanonicalType()
-                          ->isReflectionType()) {
-                    ConvDecl = Conv;
-                    break;
-                  }
-                }
-              }
-            }
+            APValue ConvResult;
+            if (!TryConvertToReflection(Info, SubExpr, ConvResult))
+              return false;
 
-            if (ConvDecl) {
-              // Set up an LValue for the object so we can call the
-              // conversion operator on it.
-              LValue ObjLV;
-              if (!EvaluateObjectArgument(Info, SubExpr, ObjLV))
-                return false;
-
-              // Call the conversion operator.
-              auto *Def = ConvDecl->getDefinition();
-              if (!Def || !Def->hasBody()) {
-                Info.FFDiag(SubExpr->getExprLoc())
-                    << "conversion operator has no body";
-                return false;
-              }
-
-              APValue ConvResult;
-              CallRef Call = Info.CurrentCall->createCall(Def);
-              if (!HandleFunctionCall(
-                      SubExpr->getExprLoc(), Def, &ObjLV, SubExpr,
-                      ArrayRef<const Expr *>(), Call, Def->getBody(),
-                      Info, ConvResult, nullptr))
-                return false;
-
-              // Process the reflection result.
+            if (ConvResult.isReflection()) {
               Val = ConvResult;
               if (Val.isReflectedType()) {
                 QualType QT = Val.getReflectedType();

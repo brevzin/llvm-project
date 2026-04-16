@@ -1246,10 +1246,6 @@ void Parser::ProcessTokenInjections(
       ParsingClassDefinition ParsingDef(*this, TagDecl,
                                         /*TopLevelClass=*/true,
                                         /*IsInterface=*/false);
-      // No template depth adjustment needed here during initial parsing.
-      // Member templates are parsed at depth 0, matching the instantiated
-      // context.  Any depth collision with the class template's args
-      // must be handled separately.
       // Create a scope with the class as entity so that
       // CheckTemplateDeclScope can find it when parsing member templates.
       ParseScope ClassScope(this, Scope::ClassScope | Scope::DeclScope);

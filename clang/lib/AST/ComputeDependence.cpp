@@ -1011,6 +1011,7 @@ ExprDependence clang::computeDependence(CXXReflectExpr *E,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::TokenSequence:
+  case ReflectionKind::Identifier:
     return ExprDependence::None;
   case ReflectionKind::EntityProxy:
     llvm_unreachable("should already have been unwrapped");
