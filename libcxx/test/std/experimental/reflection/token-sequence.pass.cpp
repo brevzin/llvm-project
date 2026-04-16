@@ -21,6 +21,18 @@
 #include "concat_macros.h"
 
 namespace N {
+    struct Builder {
+        std::meta::info body = ^^{};
+
+        consteval auto operator+=(std::meta::info tok) -> void {
+            body = ^^{ \(body) \(tok) };
+        }
+
+        consteval operator std::meta::info const() {
+            return body;
+        }
+    };
+
     struct DebugFormatter {
         constexpr auto parse(auto& ctx) { return ctx.begin(); }
 
@@ -51,10 +63,55 @@ namespace N {
 
     struct DeriveDebug {
         consteval auto on_complete(std::meta::info ty) const -> void {
+            #if 1
+            auto fmt_body = Builder();
+            fmt_body += ^^{
+                auto out = std::format_to(ctx.out(), "{}{{", \(display_string_of(ty)));
+            };
+
+            auto delim = [first=true, &fmt_body]() mutable {
+                if (not first) {
+                    fmt_body += ^^{
+                        *out++ = ',';
+                        *out++ = ' ';
+                    };
+                }
+                first = false;
+            };
+
+            auto unchecked = std::meta::access_context::unchecked();
+            for (auto nsdm : nonstatic_data_members_of(ty, unchecked)) {
+                delim();
+                fmt_body += ^^{
+                    out = std::format_to(out,
+                        ".{}={}",
+                        \(identifier_of(nsdm)),
+                        object.\(nsdm)
+                    );
+                };
+            }
+
+            fmt_body += ^^{
+                *out++ = '}';
+                return out;
+            };
+
+            __builtin_inject(^^std, ^^{
+                template <>
+                struct formatter<\(ty)> {
+                    constexpr auto parse(auto& ctx) { return ctx.begin(); }
+
+                    auto format(\(ty) const& object, auto& ctx) const {
+                        \(fmt_body);
+                    }
+                };
+            });
+            #else
             __builtin_inject(^^std, ^^{
                 template <>
                 struct formatter<\(ty)> : ::N::DebugFormatter { };
             });
+            #endif
         }
     };
 

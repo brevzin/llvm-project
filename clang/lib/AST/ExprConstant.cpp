@@ -17070,10 +17070,12 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
                   break;
                 NewTokens.push_back(Inner->Tokens[J]);
               }
-            } else if (Val.isReflectedDecl()) {
-              // Declaration reflection: create a DeclRefExpr for the
-              // reflected declaration and emit as annot_primary_expr.
-              ValueDecl *VD = Val.getReflectedDecl();
+            } else if (Val.isReflectedDecl() &&
+                       isa<ValueDecl>(Val.getReflectedDecl()) &&
+                       !isa<FieldDecl>(Val.getReflectedDecl())) {
+              // Non-field declaration reflection: create a DeclRefExpr for
+              // the reflected declaration and emit as annot_primary_expr.
+              ValueDecl *VD = cast<ValueDecl>(Val.getReflectedDecl());
               QualType DeclTy = VD->getType().getNonReferenceType();
               ExprValueKind VK = VD->getType()->isReferenceType()
                                      ? VK_LValue : VK_LValue;
@@ -17086,9 +17088,18 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
               Tok.setAnnotationValue(static_cast<void *>(DRE));
               NewTokens.push_back(Tok);
             } else {
-              Info.FFDiag(SubExpr->getExprLoc(),
-                          diag::err_interpolation_not_type_reflection);
-              return false;
+              // For FieldDecl, base specifiers, and other reflection kinds:
+              // emit as annot_primary_expr with a ConstantExpr carrying the
+              // reflection value. The parser handles this in member access
+              // context by treating it as a splice.
+              OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                  SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                  OK_Ordinary, SubExpr);
+              ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+
+              Token Tok = TSD->Tokens[I];
+              Tok.setAnnotationValue(static_cast<void *>(CE));
+              NewTokens.push_back(Tok);
             }
           } else if (ExprTy->isRecordType()) {
             // Record type: check for a conversion operator to the
@@ -17158,8 +17169,10 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
                   if (Inner->Tokens[J].is(tok::eof)) break;
                   NewTokens.push_back(Inner->Tokens[J]);
                 }
-              } else if (Val.isReflectedDecl()) {
-                ValueDecl *VD = Val.getReflectedDecl();
+              } else if (Val.isReflectedDecl() &&
+                         isa<ValueDecl>(Val.getReflectedDecl()) &&
+                         !isa<FieldDecl>(Val.getReflectedDecl())) {
+                ValueDecl *VD = cast<ValueDecl>(Val.getReflectedDecl());
                 QualType DeclTy = VD->getType().getNonReferenceType();
                 DeclRefExpr *DRE = DeclRefExpr::Create(
                     Info.Ctx, NestedNameSpecifierLoc(), SourceLocation(),
@@ -17169,9 +17182,13 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
                 Tok.setAnnotationValue(static_cast<void *>(DRE));
                 NewTokens.push_back(Tok);
               } else {
-                Info.FFDiag(SubExpr->getExprLoc(),
-                            diag::err_interpolation_not_type_reflection);
-                return false;
+                OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                    SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                    OK_Ordinary, SubExpr);
+                ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+                Token Tok = TSD->Tokens[I];
+                Tok.setAnnotationValue(static_cast<void *>(CE));
+                NewTokens.push_back(Tok);
               }
               continue;
             }
@@ -17180,28 +17197,25 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
             if (!EvaluateAsRValue(Info, SubExpr, Val))
               return false;
 
-            OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
-                SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                OK_Ordinary, SubExpr);
-            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+            {
+              OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                  SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                  OK_Ordinary, SubExpr);
+              ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
 
-            Token Tok = TSD->Tokens[I];
-            Tok.setAnnotationValue(static_cast<void *>(CE));
-            NewTokens.push_back(Tok);
+              Token Tok = TSD->Tokens[I];
+              Tok.setAnnotationValue(static_cast<void *>(CE));
+              NewTokens.push_back(Tok);
+            }
           } else {
             // Non-reflection, non-record interpolation: evaluate as
             // rvalue and wrap in a ConstantExpr.
             if (!EvaluateAsRValue(Info, SubExpr, Val))
               return false;
-
-            // Use an OpaqueValueExpr as the inner expression so that
-            // Expr::ClassifyImpl (which sees through ConstantExpr to
-            // the SubExpr) classifies this as a prvalue. Using the
-            // original SubExpr would fail if it were an lvalue (e.g.,
-            // a DeclRefExpr to a consteval local variable).
             OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
                 SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
                 OK_Ordinary, SubExpr);
+            OVE->setIsUnique(true);
             ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
 
             Token Tok = TSD->Tokens[I];

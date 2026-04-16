@@ -22,24 +22,25 @@
 #include "test_macros.h"
 #include "MoveOnly.h"
 
+struct list_builder {
+    std::meta::info lst = ^^{ };
+    bool first = true;
+
+    consteval auto append(std::meta::info tok) -> void {
+        if (not first) {
+            lst = ^^{ \(lst) , };
+        }
+        first = false;
+        lst = ^^{ \(lst) \(tok) };
+    }
+
+    consteval operator std::meta::info() const { return lst; }
+};
+
+
 template <class... Ts>
 constexpr auto tuple_cat2(Ts&&... ts) {
     consteval {
-        struct list_builder {
-            std::meta::info lst = ^^{ };
-            bool first = true;
-
-            consteval auto append(std::meta::info tok) -> void {
-                if (not first) {
-                    lst = ^^{ \(lst) , };
-                }
-                first = false;
-                lst = ^^{ \(lst) \(tok) };
-            }
-
-            consteval operator std::meta::info() const { return lst; }
-        };
-
         std::meta::info arg_types[] = {^^Ts...};
         std::vector<std::meta::info> ctypes;
         list_builder exprs;

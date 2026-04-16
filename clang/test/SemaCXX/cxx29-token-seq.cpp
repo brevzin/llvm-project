@@ -220,3 +220,21 @@ namespace N8 {
     static_assert(nth_local<0>(1, &v) == 1);
     static_assert(nth_local<1>(1, &v) == &v);
 }
+
+namespace N9 {
+    struct A { int m; };
+    struct B { int m; };
+
+    template <class T>
+    consteval auto get_m(T x) -> int {
+        consteval {
+            auto r = ^^A::m;
+            __builtin_inject(^^{
+                return x.\(r); // expected-error {{class 'N9::B' not derived from}}
+            });
+        }
+    }
+
+    static_assert(get_m(A{.m=1}) == 1);
+    static_assert(get_m(B{.m=1}) == 1); // expected-error {{static assert}}
+}

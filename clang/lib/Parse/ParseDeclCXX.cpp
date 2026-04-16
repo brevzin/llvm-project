@@ -1188,10 +1188,29 @@ void Parser::ProcessTokenInjections(
     // We need both ContextRAII (to set CurContext) and a ParseScope with
     // the scope entity set to the target DeclContext, so that name lookup
     // finds declarations in the target namespace.
+    //
+    // When injecting into a target namespace during template instantiation
+    // (which may happen inside a function body), we must re-root the scope
+    // chain at file scope. Otherwise the new scope would be parented on
+    // the current function-body scope, causing CppLookupName to hit a
+    // non-file-context DeclContext during unqualified lookup.
     std::optional<Sema::ContextRAII> TargetCtx;
     std::optional<ParseScope> TargetScope;
+    Scope *SavedScope = nullptr;
     if (Inj.TargetDC) {
       TargetCtx.emplace(Actions, Inj.TargetDC);
+
+      // Walk up to find the file-scope so the new scope is parented
+      // correctly for unqualified name lookup.
+      Scope *FileScope = getCurScope();
+      while (FileScope->getParent() &&
+             !(FileScope->getEntity() &&
+               FileScope->getEntity()->isFileContext()))
+        FileScope = FileScope->getParent();
+
+      SavedScope = getCurScope();
+      Actions.CurScope = FileScope;
+
       TargetScope.emplace(this, Scope::DeclScope);
       getCurScope()->setEntity(Inj.TargetDC);
     }
@@ -1249,6 +1268,14 @@ void Parser::ProcessTokenInjections(
         ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
       }
     }
+
+    // If we re-rooted the scope chain for a target namespace injection,
+    // the TargetScope destructor will ExitScope back to the file scope
+    // we set. Restore the original scope chain.
+    TargetScope.reset();
+    TargetCtx.reset();
+    if (SavedScope)
+      Actions.CurScope = SavedScope;
 
     // Consume the eof sentinel and restore the saved token.
     Tok = SavedTok;
