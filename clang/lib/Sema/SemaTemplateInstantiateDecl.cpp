@@ -5905,6 +5905,15 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
       else
         DC = (*It)->getLexicalDeclContext();
       Innermost.emplace(Function->getTemplateSpecializationArgs()->asArray());
+
+      // If this function template was injected into a class template
+      // specialization (rather than instantiated from a member of the class
+      // template pattern), its template parameters are at depth 0. We should
+      // not walk up to the enclosing class template specialization to add
+      // its template arguments, as that would create a depth collision.
+      if (!Primary->getInstantiatedFromMemberTemplate() &&
+          isa<ClassTemplateSpecializationDecl>(Function->getDeclContext()))
+        DC = Function->getASTContext().getTranslationUnitDecl();
     }
     MultiLevelTemplateArgumentList TemplateArgs = getTemplateInstantiationArgs(
         Function, DC, /*Final=*/false, Innermost, false, PatternDecl);

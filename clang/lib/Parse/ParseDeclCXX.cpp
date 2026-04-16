@@ -1246,6 +1246,10 @@ void Parser::ProcessTokenInjections(
       ParsingClassDefinition ParsingDef(*this, TagDecl,
                                         /*TopLevelClass=*/true,
                                         /*IsInterface=*/false);
+      // No template depth adjustment needed here during initial parsing.
+      // Member templates are parsed at depth 0, matching the instantiated
+      // context.  Any depth collision with the class template's args
+      // must be handled separately.
       // Create a scope with the class as entity so that
       // CheckTemplateDeclScope can find it when parsing member templates.
       ParseScope ClassScope(this, Scope::ClassScope | Scope::DeclScope);
@@ -1259,10 +1263,12 @@ void Parser::ProcessTokenInjections(
         ParsedTemplateInfo TemplateInfo;
         ParseCXXClassMemberDeclaration(AS_public, DeclAttrs, TemplateInfo);
       }
-      // Process any late-parsed member initializers that were deferred
-      // during class member declaration parsing. This must happen before
+      // Process late-parsed members: method declarations, member
+      // initializers, and method definitions. This must happen before
       // PopParsingClass destroys the LateParsedDeclarations.
+      ParseLexedMethodDeclarations(getCurrentClass());
       ParseLexedMemberInitializers(getCurrentClass());
+      ParseLexedMethodDefs(getCurrentClass());
       Actions.FieldCollector->FinishClass();
     } else {
       // Namespace/global scope: parse external declarations.

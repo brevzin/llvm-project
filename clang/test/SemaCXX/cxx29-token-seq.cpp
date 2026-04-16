@@ -272,3 +272,23 @@ namespace N12 {
 
     static_assert(S<int>::x == 1);
 }
+
+namespace N13 {
+    // Injected member function templates should correctly substitute their
+    // own template arguments, not the enclosing class template's arguments.
+    template <class Outer> struct S {
+        template <class T> static constexpr int val = sizeof(T);
+
+        consteval {
+            __builtin_inject(^^{
+                template <class T> constexpr auto get(T ) -> int {
+                    return val<T>;
+                }
+            });
+        }
+    };
+
+    static_assert(S<char>::val<int> == sizeof(int));
+    static_assert(S<char>{}.get(42) == sizeof(int));
+    static_assert(S<char>{}.get('x') == sizeof(char));
+}

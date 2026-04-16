@@ -208,6 +208,12 @@ HandleVarTemplateSpec(const VarTemplateSpecializationDecl *VarTemplSpec,
           /*Final=*/false);
     if (Tmpl->isMemberSpecialization())
       return Response::Done();
+    // If this variable template was injected into a class template
+    // specialization, its template parameters are at depth 0 and we
+    // should not add the enclosing class template's arguments.
+    if (!Tmpl->getInstantiatedFromMemberTemplate() &&
+        isa<ClassTemplateSpecializationDecl>(VarTemplSpec->getDeclContext()))
+      return Response::Done();
   }
   return Response::DontClearRelativeToPrimaryNextDecl(VarTemplSpec);
 }
@@ -313,6 +319,17 @@ Response HandleFunction(Sema &SemaRef, const FunctionDecl *Function,
         isGenericLambdaCallOperatorOrStaticInvokerSpecialization(Function))
       return Response::Done();
 
+    // If this function template was injected into a class template
+    // specialization (rather than instantiated from a member of the class
+    // template pattern), its template parameters are at depth 0 and we
+    // should not add the enclosing class template's arguments as an
+    // additional level.
+    if (FunctionTemplateDecl *FTD = Function->getPrimaryTemplate()) {
+      if (!FTD->getInstantiatedFromMemberTemplate() &&
+          isa<ClassTemplateSpecializationDecl>(Function->getDeclContext()))
+        return Response::Done();
+    }
+
   } else if (Function->getDescribedFunctionTemplate()) {
     assert(
         (ForConstraintInstantiation || Result.getNumSubstitutedLevels() == 0) &&
@@ -383,6 +400,16 @@ Response HandleFunctionTemplateDecl(Sema &SemaRef,
 
       NNS = NNS->getPrefix();
     }
+  } else if (!FTD->getInstantiatedFromMemberTemplate()) {
+    // This function template was injected into a class template
+    // specialization. Its template parameters are at depth 0 and we should
+    // not add the enclosing class template's arguments.
+    Result.addOuterTemplateArguments(
+        const_cast<FunctionTemplateDecl *>(FTD),
+        const_cast<FunctionTemplateDecl *>(FTD)->getInjectedTemplateArgs(
+            SemaRef.Context),
+        /*Final=*/false);
+    return Response::Done();
   }
 
   return Response::ChangeDecl(FTD->getLexicalDeclContext());
