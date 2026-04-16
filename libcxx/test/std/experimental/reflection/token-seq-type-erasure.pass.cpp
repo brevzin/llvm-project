@@ -12,35 +12,12 @@
 // RUN: %{build}
 // RUN: %{exec} %t.exe
 
-#include <experimental/meta>
+#include <meta>
 #include <format>
 #include <cassert>
 
 #include "test_macros.h"
 #include "assert_macros.h"
-
-struct Builder {
-    std::meta::info body = ^^{};
-    std::meta::info delim;
-    bool first = true;
-
-    // default to no delimiter
-    consteval Builder(std::meta::info delim = ^^{ }) : delim(delim) { }
-
-    consteval auto operator+=(std::meta::info tok) -> void {
-        if (tok != ^^{ }) {
-            if (not first) {
-                body = ^^{ \(body) \(delim) };
-            }
-            first = false;
-            body = ^^{ \(body) \(tok) };
-        }
-    }
-
-    consteval operator std::meta::info() const {
-        return body;
-    }
-};
 
 consteval auto interface_functions_of(std::meta::info ty) -> std::vector<std::meta::info> {
     auto v = members_of(ty, std::meta::access_context::current());
@@ -54,7 +31,7 @@ consteval auto param_tokens(std::vector<std::meta::info> params,
                             std::string_view  name_prefix = "")
     -> std::meta::info
 {
-  auto result = Builder(^^{ , });
+  auto result = std::meta::list_builder(^^{ , });
   for (int k = 0; std::meta::info p : params) {
     if (is_function_parameter(p)) p = type_of(p);
     if (not name_prefix.empty()) {
@@ -69,11 +46,11 @@ consteval auto param_tokens(std::vector<std::meta::info> params,
 }
 
 consteval auto inject_Vtable(std::meta::info interface) -> void {
-  auto vtable_members = Builder();
+  auto vtable_members = std::meta::list_builder();
   for (std::meta::info mem : interface_functions_of(interface)) {
     std::meta::info  r = return_type_of(mem);
     auto name = identifier_of(mem);
-    auto params = Builder(^^{ , });
+    auto params = std::meta::list_builder(^^{ , });
     params += is_const(type_of(mem)) ? ^^{ void const* } : ^^{ void* };
     params += param_tokens(parameters_of(mem));
     vtable_members += ^^{
@@ -91,11 +68,11 @@ consteval auto inject_Vtable(std::meta::info interface) -> void {
 }
 
 consteval auto inject_vtable_for(std::meta::info interface) -> void {
-  auto inits = Builder(^^{ , });
+  auto inits = std::meta::list_builder(^^{ , });
   for (std::meta::info mem : interface_functions_of(interface)) {
     std::meta::info r = return_type_of(mem);
     auto name = identifier_of(mem);
-    Builder params(^^{ , }), args(^^{ , });
+    std::meta::list_builder params(^^{ , }), args(^^{ , });
     params += is_const(type_of(mem)) ? ^^{ void const* obj } : ^^{ void* obj };
     params += param_tokens(parameters_of(mem), "p");
     std::meta::info cast_type = is_const(type_of(mem)) ? ^^{ T const* } : ^^{ T* };
@@ -119,12 +96,12 @@ consteval auto inject_vtable_for(std::meta::info interface) -> void {
 
 
 consteval auto inject_interface(std::meta::info interface) -> void {
-  auto forwarders = Builder();
+  auto forwarders = std::meta::list_builder();
   for (std::meta::info mem : interface_functions_of(interface)) {
     std::meta::info r = return_type_of(mem);
     auto name = __builtin_id(identifier_of(mem));
     auto param_list = parameters_of(mem);
-    Builder params(^^{ , }), args(^^{ , });
+    std::meta::list_builder params(^^{ , }), args(^^{ , });
     params += param_tokens(param_list, "p");
     args += ^^{ data };
     for (int k = 0; k < param_list.size(); ++k) {

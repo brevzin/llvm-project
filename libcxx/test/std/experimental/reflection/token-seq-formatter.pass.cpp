@@ -12,7 +12,7 @@
 // RUN: %{build}
 // RUN: %{exec} %t.exe
 
-#include <experimental/meta>
+#include <meta>
 #include <format>
 #include <cassert>
 
@@ -21,18 +21,6 @@
 #include "concat_macros.h"
 
 namespace N {
-    struct Builder {
-        std::meta::info body = ^^{};
-
-        consteval auto operator+=(std::meta::info tok) -> void {
-            body = ^^{ \(body) \(tok) };
-        }
-
-        consteval operator std::meta::info const() {
-            return body;
-        }
-    };
-
     struct DebugFormatter {
         constexpr auto parse(auto& ctx) { return ctx.begin(); }
 
@@ -64,7 +52,7 @@ namespace N {
     struct DeriveDebug {
         consteval auto on_complete(std::meta::info ty) const -> void {
             #if 1
-            auto fmt_body = Builder();
+            auto fmt_body = std::meta::list_builder();
             fmt_body += ^^{
                 auto out = std::format_to(ctx.out(), "{}{{", \(display_string_of(ty)));
             };

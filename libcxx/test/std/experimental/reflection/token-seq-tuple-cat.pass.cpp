@@ -12,7 +12,7 @@
 // RUN: %{build}
 // RUN: %{exec} %t.exe
 
-#include <experimental/meta>
+#include <meta>
 #include <tuple>
 #include <utility>
 #include <array>
@@ -22,35 +22,19 @@
 #include "test_macros.h"
 #include "MoveOnly.h"
 
-struct list_builder {
-    std::meta::info lst = ^^{ };
-    bool first = true;
-
-    consteval auto append(std::meta::info tok) -> void {
-        if (not first) {
-            lst = ^^{ \(lst) , };
-        }
-        first = false;
-        lst = ^^{ \(lst) \(tok) };
-    }
-
-    consteval operator std::meta::info() const { return lst; }
-};
-
-
 template <class... Ts>
 constexpr auto tuple_cat2(Ts&&... ts) {
     consteval {
         std::meta::info arg_types[] = {^^Ts...};
         std::vector<std::meta::info> ctypes;
-        list_builder exprs;
+        auto exprs = std::meta::list_builder(^^{ , });
 
         for (size_t i = 0; i != sizeof...(Ts); ++i) {
             for (size_t k = 0; k != tuple_size(remove_reference(arg_types[i])); ++k) {
                 ctypes.push_back(tuple_element(k, remove_cvref(arg_types[i])));
-                exprs.append(^^{
+                exprs += ^^{
                     std::get<\(k)>(std::forward<\(arg_types[i])>(ts...[\(i)]))
-                });
+                };
             }
         }
 
