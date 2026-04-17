@@ -51,15 +51,8 @@ inline Expr *IgnoreImplicitCastsSingleStep(Expr *E) {
   if (auto *ICE = dyn_cast<ImplicitCastExpr>(E))
     return ICE->getSubExpr();
 
-  if (auto *FE = dyn_cast<FullExpr>(E)) {
-    // Don't strip ConstantExpr with a stored APValue result - it carries
-    // essential semantic information (e.g., from token sequence interpolation)
-    // that codegen needs.
-    if (auto *CE = dyn_cast<ConstantExpr>(FE))
-      if (CE->hasAPValueResult())
-        return E;
+  if (auto *FE = dyn_cast<FullExpr>(E))
     return FE->getSubExpr();
-  }
 
   return E;
 }
@@ -85,12 +78,8 @@ inline Expr *IgnoreCastsSingleStep(Expr *E) {
   if (auto *CE = dyn_cast<CastExpr>(E))
     return CE->getSubExpr();
 
-  if (auto *FE = dyn_cast<FullExpr>(E)) {
-    if (auto *CE = dyn_cast<ConstantExpr>(FE))
-      if (CE->hasAPValueResult())
-        return E;
+  if (auto *FE = dyn_cast<FullExpr>(E))
     return FE->getSubExpr();
-  }
 
   if (auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E))
     return MTE->getSubExpr();

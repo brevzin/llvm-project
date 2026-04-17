@@ -4374,10 +4374,12 @@ ExprResult TreeTransform<Derived>::TransformInitializer(Expr *Init,
     return Init;
 
   if (auto *FE = dyn_cast<FullExpr>(Init)) {
-    // Don't strip ConstantExpr with a stored APValue result - it carries
-    // essential semantic information (e.g., from token sequence interpolation)
-    // that codegen needs.
-    if (auto *CE = dyn_cast<ConstantExpr>(FE); !CE || !CE->hasAPValueResult())
+    // Don't strip ConstantExpr that wraps an OpaqueValueExpr with a stored
+    // APValue result - it was created by token sequence interpolation and
+    // can't be re-evaluated.
+    if (auto *CE = dyn_cast<ConstantExpr>(FE);
+        !CE || !CE->hasAPValueResult() ||
+        !isa<OpaqueValueExpr>(CE->getSubExpr()))
       Init = FE->getSubExpr();
   }
 
@@ -13515,10 +13517,11 @@ ExprResult TreeTransform<Derived>::TransformOpenACCAsteriskSizeExpr(
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformConstantExpr(ConstantExpr *E) {
-  // If this ConstantExpr has a stored APValue result, it's already fully
-  // evaluated (e.g., from token sequence interpolation). Preserve it as-is
-  // so the APValue survives template instantiation and reaches codegen.
-  if (E->hasAPValueResult())
+  // If this ConstantExpr wraps an OpaqueValueExpr and has a stored APValue
+  // result, it was created by token sequence interpolation and can't be
+  // re-evaluated. Preserve it as-is so the APValue survives template
+  // instantiation and reaches codegen.
+  if (E->hasAPValueResult() && isa<OpaqueValueExpr>(E->getSubExpr()))
     return E;
   if (auto *SE = E->getSubExpr())
     return TransformExpr(SE);
