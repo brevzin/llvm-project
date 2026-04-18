@@ -1151,13 +1151,17 @@ Decl *Parser::ParseConstevalBlockDeclaration(SourceLocation &DeclEnd) {
   // Process any pending token injections from __builtin_inject calls.
   // (During template instantiation, BuildConstevalBlockDeclaration calls
   // ProcessPendingTokenInjections via the callback instead.)
-  while (!Actions.PendingInjections.empty()) {
-    auto Injections = std::move(Actions.PendingInjections);
-    Actions.PendingInjections.clear();
-    ProcessTokenInjections(Injections);
-  }
+  DrainPendingTokenInjections();
 
   return Result;
+}
+
+void Parser::DrainPendingTokenInjections() {
+  while (!Actions.PendingInjections.empty()) {
+    SmallVector<Expr::EvalStatus::TokenInjection, 4> Injections;
+    Injections.swap(Actions.PendingInjections);
+    ProcessTokenInjections(Injections);
+  }
 }
 
 void Parser::TokenInjectionCallback(void *P,
@@ -1196,7 +1200,7 @@ void Parser::ProcessTokenInjections(
     // non-file-context DeclContext during unqualified lookup.
     std::optional<Sema::ContextRAII> TargetCtx;
     std::optional<ParseScope> TargetScope;
-    Scope *SavedScope = nullptr;
+    std::optional<llvm::SaveAndRestore<Scope *>> ScopeSwap;
     if (Inj.TargetDC) {
       TargetCtx.emplace(Actions, Inj.TargetDC);
 
@@ -1208,8 +1212,9 @@ void Parser::ProcessTokenInjections(
                FileScope->getEntity()->isFileContext()))
         FileScope = FileScope->getParent();
 
-      SavedScope = getCurScope();
-      Actions.CurScope = FileScope;
+      // Re-root the scope chain at file scope. RAII restores the original
+      // CurScope on any exit path, including parser bail-outs.
+      ScopeSwap.emplace(Actions.CurScope, FileScope);
 
       TargetScope.emplace(this, Scope::DeclScope);
       getCurScope()->setEntity(Inj.TargetDC);
@@ -1275,24 +1280,17 @@ void Parser::ProcessTokenInjections(
       }
     }
 
-    // If we re-rooted the scope chain for a target namespace injection,
-    // the TargetScope destructor will ExitScope back to the file scope
-    // we set. Restore the original scope chain.
+    // TargetScope/TargetCtx/ScopeSwap RAII unwinds the re-rooted scope.
     TargetScope.reset();
     TargetCtx.reset();
-    if (SavedScope)
-      Actions.CurScope = SavedScope;
+    ScopeSwap.reset();
 
     // Consume the eof sentinel and restore the saved token.
     Tok = SavedTok;
   }
 
-  // Recursively process any injections that were produced by injected code.
-  while (!Actions.PendingInjections.empty()) {
-    auto NewInjections = std::move(Actions.PendingInjections);
-    Actions.PendingInjections.clear();
-    ProcessTokenInjections(NewInjections);
-  }
+  // Recursively process any injections produced by parsing the injected code.
+  DrainPendingTokenInjections();
 }
 
 SourceLocation Parser::ParseDecltypeSpecifier(DeclSpec &DS) {

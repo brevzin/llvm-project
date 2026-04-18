@@ -79,17 +79,20 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
       ConsumeAnyToken();
     }
 
-    SourceLocation RBraceLoc = Tok.getLocation();
     if (Tok.isNot(tok::r_brace)) {
       Diag(LBraceLoc, diag::err_expected) << tok::r_brace;
       return ExprError();
     }
+    SourceLocation RBraceLoc = Tok.getLocation();
     ConsumeBrace();
 
-    // Mark any identifiers in the token sequence that refer to local
-    // variables or parameters as referenced, to suppress false
-    // -Wunused-parameter / -Wunused-variable warnings. The token sequence
-    // will use them when injected.
+    // Mark any identifiers in the token sequence that refer to local variables
+    // or parameters as referenced, to suppress -Wunused-parameter and
+    // -Wunused-variable warnings. The token sequence will use them when
+    // injected. Lookup happens in the capture scope — for the common case
+    // where capture and injection share a scope this is correct; for
+    // cross-scope cases this is a heuristic and may match unrelated names of
+    // the same spelling. Use \(expr) to interpolate when precision matters.
     for (const Token &T : Tokens) {
       if (T.is(tok::identifier)) {
         if (IdentifierInfo *II = T.getIdentifierInfo()) {

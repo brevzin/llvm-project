@@ -7999,6 +7999,11 @@ private:
   void ProcessTokenInjections(
       SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections);
 
+  /// Drain any pending token injections accumulated on Sema, processing
+  /// each batch and any further injections produced by parsing them, until
+  /// no injections remain.
+  void DrainPendingTokenInjections();
+
   /// We've parsed something that could plausibly be intended to be a template
   /// name (\p LHS) followed by a '<' token, and the following code can't
   /// possibly be an expression. Determine if this is likely to be a template-id
