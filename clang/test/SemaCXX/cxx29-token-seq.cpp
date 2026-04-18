@@ -292,3 +292,85 @@ namespace N13 {
     static_assert(S<char>{}.get(42) == sizeof(int));
     static_assert(S<char>{}.get('x') == sizeof(char));
 }
+
+namespace N14 {
+    struct Base {
+        consteval operator info() const {
+            return ^^{ static constexpr int inherited_conv_ok = 1; };
+        }
+    };
+    struct Derived : Base { };
+
+    consteval {
+        Derived d;
+        __builtin_inject(d);
+    }
+    static_assert(inherited_conv_ok == 1);
+
+    struct OnlyRvalue {
+        consteval operator info() && {
+            return ^^{ static constexpr int refqual_conv_bug = 1; };
+        }
+    };
+
+    consteval { // expected-error {{evaluating expression of a consteval block must be a constant expression}}
+        OnlyRvalue x;
+        __builtin_inject(x);
+    }
+    static_assert(refqual_conv_bug == 1); // expected-error {{use of undeclared identifier 'refqual_conv_bug'}}
+}
+
+namespace N15 {
+    // Conversion overload ranking should pick the non-const overload for a
+    // non-const lvalue object.
+    struct X {
+        consteval operator info() const {
+            return ^^{ static constexpr int choose = 1; };
+        }
+        consteval operator info() {
+            return ^^{ static constexpr int choose = 2; };
+        }
+    };
+
+    consteval {
+        X x;
+        __builtin_inject(x);
+    }
+    static_assert(choose == 2);
+}
+
+namespace N16 {
+    // Conversion function templates to info should participate.
+    struct X {
+        template <class T>
+        requires __is_same(T, info)
+        consteval operator T() const {
+            return ^^{ static constexpr int conv_template_ok = 1; };
+        }
+    };
+
+    consteval {
+        X x;
+        __builtin_inject(x);
+    }
+    static_assert(conv_template_ok == 1);
+}
+
+namespace N17 {
+    // Using-declarations that introduce operator info() should be considered.
+    struct B {
+        consteval operator info() const {
+            return ^^{ static constexpr int using_conv_ok = 1; };
+        }
+    };
+
+    struct D : B {
+        using B::operator info;
+    };
+
+    consteval {
+        D d;
+        __builtin_inject(d);
+    }
+    static_assert(using_conv_ok == 1);
+}

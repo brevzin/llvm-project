@@ -1007,6 +1007,24 @@ ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
   return CXXReflectExpr::Create(Context, OpLoc, OperandRange, RV);
 }
 
+static Expr *TryConvertToMetaInfoIfPossible(Sema &S, Expr *E) {
+  QualType ExprTy = E->getType();
+  if (!ExprTy->isDependentType() && !ExprTy->isReflectionType()) {
+    InitializedEntity Entity =
+        InitializedEntity::InitializeTemporary(S.Context.MetaInfoTy);
+    InitializationKind Kind =
+        InitializationKind::CreateCopy(E->getBeginLoc(), E->getBeginLoc());
+    InitializationSequence Seq(S, Entity, Kind, E);
+    if (Seq) {
+      ExprResult Conv = Seq.Perform(S, Entity, Kind, E);
+      if (!Conv.isInvalid())
+        return Conv.get();
+    }
+  }
+
+  return E;
+}
+
 ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
   // Don't evaluate here — the expression may reference consteval function
   // parameters that aren't constant expressions at parse time but will have
@@ -1018,21 +1036,7 @@ ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
   // convertible to std::meta::info, insert the conversion. This allows
   // types with 'operator std::meta::info()' to be used directly in
   // interpolation contexts (e.g., \(exprs) where exprs has a conversion).
-  QualType ExprTy = E->getType();
-  if (!ExprTy->isDependentType() && !ExprTy->isReflectionType()) {
-    InitializedEntity Entity =
-        InitializedEntity::InitializeTemporary(Context.MetaInfoTy);
-    InitializationKind Kind =
-        InitializationKind::CreateCopy(E->getBeginLoc(), E->getBeginLoc());
-    InitializationSequence Seq(*this, Entity, Kind, E);
-    if (Seq) {
-      ExprResult Conv = Seq.Perform(*this, Entity, Kind, E);
-      if (!Conv.isInvalid())
-        return Conv;
-    }
-  }
-
-  return E;
+  return TryConvertToMetaInfoIfPossible(*this, E);
 }
 
 ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
@@ -1040,6 +1044,7 @@ ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                        Expr *Operand,
                                        SourceLocation RParenLoc,
                                        Expr *TargetNS) {
+  Operand = TryConvertToMetaInfoIfPossible(*this, Operand);
   return CXXBuiltinInjectExpr::Create(Context, Context.VoidTy, Operand,
                                        KwLoc, LParenLoc, RParenLoc, TargetNS);
 }
@@ -1048,6 +1053,7 @@ ExprResult Sema::ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
                                               SourceLocation LParenLoc,
                                               Expr *Msg, Expr *Operand,
                                               SourceLocation RParenLoc) {
+  Operand = TryConvertToMetaInfoIfPossible(*this, Operand);
   // Verify the message is a string literal.
   if (!isa<StringLiteral>(Msg->IgnoreParenCasts())) {
     Diag(Msg->getBeginLoc(), diag::err_expected_string_literal)

@@ -16833,14 +16833,33 @@ static bool TryConvertToReflection(EvalInfo &Info, const Expr *SubExpr,
   if (!RD)
     return true;
 
-  const CXXConversionDecl *ConvDecl = nullptr;
-  for (auto *D : RD->decls()) {
-    if (auto *Conv = dyn_cast<CXXConversionDecl>(D)) {
-      if (Conv->getConversionType().getCanonicalType()->isReflectionType()) {
-        ConvDecl = Conv;
-        break;
-      }
+  auto IsObjectCompatibleWithRefQualifier =
+      [&](const CXXConversionDecl *Conv) -> bool {
+    switch (Conv->getRefQualifier()) {
+    case RQ_None:
+      return true;
+    case RQ_LValue:
+      return SubExpr->isLValue();
+    case RQ_RValue:
+      return SubExpr->isPRValue() || SubExpr->isXValue();
     }
+    llvm_unreachable("unknown ref-qualifier");
+  };
+
+  const CXXConversionDecl *ConvDecl = nullptr;
+  for (NamedDecl *D : RD->getVisibleConversionFunctions()) {
+    const auto *Conv = dyn_cast<CXXConversionDecl>(D);
+    if (!Conv)
+      continue;
+
+    if (!Conv->getConversionType().getCanonicalType()->isReflectionType())
+      continue;
+
+    if (!IsObjectCompatibleWithRefQualifier(Conv))
+      continue;
+
+    ConvDecl = Conv;
+    break;
   }
   if (!ConvDecl)
     return true;
