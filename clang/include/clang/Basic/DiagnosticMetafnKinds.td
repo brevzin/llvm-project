@@ -115,12 +115,12 @@ def metafn_injected_decl_non_plainly_consteval : Note<
 def metafn_cannot_annotate : Note<"cannot attach an annotation to %1">;
 
 // Token injection.
-def err_builtin_inject_not_token_sequence : Note<
+def metafn_builtin_inject_not_token_sequence : Note<
   "argument to __builtin_inject is not a token sequence reflection">;
-def err_builtin_inject_target_not_namespace : Note<
+def metafn_builtin_inject_target_not_namespace : Note<
   "first argument of two-argument __builtin_inject must be a namespace "
   "reflection">;
-def err_interpolation_not_type_reflection : Note<
+def metafn_interpolation_not_type_reflection : Note<
   "interpolated reflection is not a type reflection">;
 
 }  // end of metafn component

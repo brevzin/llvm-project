@@ -16994,7 +16994,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
 
   if (!Operand.isReflectedTokenSequence()) {
     Info.FFDiag(E->getBeginLoc(),
-                diag::err_builtin_inject_not_token_sequence);
+                diag::metafn_builtin_inject_not_token_sequence);
     return false;
   }
 
@@ -17039,7 +17039,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
 
   if (!Operand.isReflectedTokenSequence()) {
     Info.FFDiag(E->getBeginLoc(),
-                diag::err_builtin_inject_not_token_sequence);
+                diag::metafn_builtin_inject_not_token_sequence);
     return false;
   }
 
@@ -17061,7 +17061,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
     if (!TargetNS.isReflection() ||
         TargetNS.getReflectionKind() != ReflectionKind::Namespace) {
       Info.FFDiag(E->getTargetNS()->getExprLoc(),
-                  diag::err_builtin_inject_target_not_namespace);
+                  diag::metafn_builtin_inject_target_not_namespace);
       return false;
     }
     Decl *NSDecl = TargetNS.getReflectedNamespace();
