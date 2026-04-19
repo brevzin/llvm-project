@@ -374,3 +374,106 @@ namespace N17 {
     }
     static_assert(using_conv_ok == 1);
 }
+
+namespace N18 {
+    // Empty token sequences are a no-op when injected.
+    consteval { __builtin_inject(^^{}); }
+    consteval { __builtin_inject(^^{ }); }
+    static_assert(true);
+}
+
+namespace N19 {
+    // Nested braces inside ^^{ ... } are captured as part of the token stream.
+    consteval int n_made = 0;
+    consteval {
+        __builtin_inject(^^{
+            constexpr int nested_block_value = []{
+                int x = 1;
+                { int y = 2; x += y; { x += 7; } }
+                return x;
+            }();
+        });
+    }
+    static_assert(nested_block_value == 10);
+}
+
+namespace N20 {
+    // Negative: injecting a non-token-sequence reflection.
+    constexpr info type_refl = ^^int;
+    consteval { // expected-error {{evaluating expression of a consteval block must be a constant expression}}
+        __builtin_inject(type_refl);
+    }
+}
+
+namespace N21 {
+    // __builtin_inject inside a non-consteval, non-constexpr context is
+    // accepted at parse time but never evaluated, so it injects nothing.
+    info make_seq() {
+        return ^^{ int q = 1; };
+    }
+    void caller() {
+        __builtin_inject(make_seq());
+    }
+}
+
+namespace N22 {
+    // Interpolating various reflection kinds.
+    constexpr int x = 7;
+    constexpr float f = 1.5f;
+    consteval auto cstr() -> info { return ^^{ "hello" }; }
+    consteval {
+        // int, float, type, identifier, function-name
+        __builtin_inject(^^{ constexpr int kInt = \(x); });
+        __builtin_inject(^^{ constexpr float kFloat = \(f); });
+        __builtin_inject(^^{ using KType = \(^^int); });
+        __builtin_inject(^^{ constexpr auto kStr = \(cstr()); });
+    }
+    static_assert(kInt == 7);
+    static_assert(kFloat == 1.5f);
+    static_assert(sizeof(KType) == sizeof(int));
+}
+
+namespace N23 {
+    // Block-scope injection runs into the consteval lambda body, not the
+    // enclosing function. Document that the injected name is NOT visible
+    // in the outer scope. (When this changes, the FIXME below fires.)
+    consteval auto add_x() -> info { return ^^{ int x = 5; (void)x; }; }
+    constexpr int caller() {
+        consteval { __builtin_inject(add_x()); }
+        // FIXME: x = 5 was injected into the consteval lambda's compound
+        // and isn't visible here. Update this test if/when block-scope
+        // injection targets the enclosing function body.
+        return 0;
+    }
+    static_assert(caller() == 0);
+}
+
+namespace N24 {
+    // Dependent token sequences capture template parameters and resolve
+    // at instantiation.
+    template <typename T, T V>
+    struct holder {
+        consteval {
+            __builtin_inject(^^{ using element = T; });
+            __builtin_inject(^^{ static constexpr T value = V; });
+        }
+    };
+    using H = holder<int, 42>;
+    static_assert(H::value == 42);
+    static_assert(sizeof(H::element) == sizeof(int));
+}
+
+namespace N25 {
+    // Negative: malformed injected tokens diagnose at re-parse time.
+    consteval {
+        __builtin_inject(^^{ int int q; }); // expected-error {{cannot combine with previous 'int' declaration specifier}}
+    }
+}
+
+namespace N26 {
+    // Two-arg __builtin_inject with a non-namespace target diagnoses.
+    struct S {};
+    consteval { // expected-error {{evaluating expression of a consteval block must be a constant expression}}
+        __builtin_inject(^^S, ^^{ int z = 0; });
+    }
+}

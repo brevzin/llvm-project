@@ -2765,14 +2765,17 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
           NewTokens[I].setKind(tok::annot_typename);
           NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
           NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
-        } else if (auto *NTTP = dyn_cast<NonTypeTemplateParmDecl>(PI.Param)) {
+        } else if (isa<NonTypeTemplateParmDecl>(PI.Param)) {
           // Non-type template parameter: substitute with annot_token_seq_expr.
           Expr *Val = nullptr;
           if (Arg.getKind() == TemplateArgument::Expression) {
             Val = Arg.getAsExpr();
           } else if (Arg.getKind() == TemplateArgument::Integral) {
+            // Use the integral argument's own type rather than the NTTP's
+            // declared type, which during instantiation may still be a
+            // dependent type (e.g. a TemplateTypeParmType for T in `T V`).
             Val = IntegerLiteral::Create(
-                Ctx, Arg.getAsIntegral(), NTTP->getType(),
+                Ctx, Arg.getAsIntegral(), Arg.getIntegralType(),
                 TSD->Tokens[I].getLocation());
           }
           if (Val) {
