@@ -16817,21 +16817,34 @@ public:
 };
 } // end anonymous namespace
 
-/// If \p Result is not a reflection and \p SubExpr has a record type with a
-/// conversion operator to std::meta::info, evaluate the conversion and replace
-/// \p Result with the converted value. Returns false on evaluation failure.
+/// Evaluate \p SubExpr to an APValue, applying a user-defined conversion to
+/// std::meta::info if one is available on its (record) type. The caller must
+/// not have evaluated \p SubExpr already — for record-typed operands this
+/// helper performs the evaluation itself, so that any conversion operator
+/// runs exactly once. For non-record operands, the helper just evaluates as
+/// rvalue. Returns false on evaluation failure.
 static bool TryConvertToReflection(EvalInfo &Info, const Expr *SubExpr,
                                    APValue &Result) {
-  if (Result.isReflection())
+  auto EvalAsRValue = [&]() {
+    if (!::Evaluate(Result, Info, SubExpr))
+      return false;
+    if (SubExpr->isGLValue()) {
+      LValue LV;
+      LV.setFrom(Info.Ctx, Result);
+      if (!handleLValueToRValueConversion(Info, SubExpr, SubExpr->getType(),
+                                          LV, Result))
+        return false;
+    }
     return true;
+  };
 
   QualType ExprTy = SubExpr->getType();
   if (!ExprTy->isRecordType())
-    return true;
+    return EvalAsRValue();
 
   auto *RD = ExprTy->getAsCXXRecordDecl();
   if (!RD)
-    return true;
+    return EvalAsRValue();
 
   auto IsObjectCompatibleWithRefQualifier =
       [&](const CXXConversionDecl *Conv) -> bool {
@@ -16862,7 +16875,10 @@ static bool TryConvertToReflection(EvalInfo &Info, const Expr *SubExpr,
     break;
   }
   if (!ConvDecl)
-    return true;
+    // No conversion: evaluate the record operand as an rvalue so the
+    // caller can either interpolate the value literally or diagnose
+    // "not a reflection".
+    return EvalAsRValue();
 
   LValue ObjLV;
   if (!EvaluateObjectArgument(Info, SubExpr, ObjLV))
@@ -16969,19 +16985,10 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
   const auto *SL = cast<StringLiteral>(E->getMessage()->IgnoreParenCasts());
   StringRef Msg = SL->getString();
 
-  // Evaluate the operand to get the token sequence reflection.
+  // Evaluate the operand to get the token sequence reflection. For
+  // record-typed operands this also runs any user-defined conversion
+  // operator to std::meta::info exactly once.
   APValue Operand;
-  if (!::Evaluate(Operand, Info, E->getOperand()))
-    return false;
-  if (E->getOperand()->isGLValue()) {
-    LValue LV;
-    LV.setFrom(Info.Ctx, Operand);
-    if (!handleLValueToRValueConversion(Info, E->getOperand(),
-                                         E->getOperand()->getType(), LV,
-                                         Operand))
-      return false;
-  }
-
   if (!TryConvertToReflection(Info, E->getOperand(), Operand))
     return false;
 
@@ -17023,19 +17030,10 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
     return false;
   }
 
-  // Evaluate the operand to get the token sequence reflection.
+  // Evaluate the operand to get the token sequence reflection. For
+  // record-typed operands this also runs any user-defined conversion
+  // operator to std::meta::info exactly once.
   APValue Operand;
-  if (!::Evaluate(Operand, Info, E->getOperand()))
-    return false;
-  if (E->getOperand()->isGLValue()) {
-    LValue LV;
-    LV.setFrom(Info.Ctx, Operand);
-    if (!handleLValueToRValueConversion(Info, E->getOperand(),
-                                         E->getOperand()->getType(), LV,
-                                         Operand))
-      return false;
-  }
-
   if (!TryConvertToReflection(Info, E->getOperand(), Operand))
     return false;
 
@@ -17063,8 +17061,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
     if (!TargetNS.isReflection() ||
         TargetNS.getReflectionKind() != ReflectionKind::Namespace) {
       Info.FFDiag(E->getTargetNS()->getExprLoc(),
-                  diag::err_builtin_inject_not_token_sequence)
-          << "target must be a namespace reflection";
+                  diag::err_builtin_inject_target_not_namespace);
       return false;
     }
     Decl *NSDecl = TargetNS.getReflectedNamespace();
@@ -17237,11 +17234,9 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
 
               // Strip deduced type sugar (e.g. AutoType from 'auto L = ...')
               // so the injected type is the concrete type, not 'auto'.
-              while (const auto *AT = dyn_cast<AutoType>(QT)) {
-                if (!AT->isDeduced())
-                  break;
-                QT = AT->getDeducedType();
-              }
+              if (const auto *AT = dyn_cast<AutoType>(QT))
+                if (AT->isDeduced())
+                  QT = AT->getDeducedType();
 
               // Create an annot_typename token carrying the type.
               Token Tok = TSD->Tokens[I];
@@ -17298,9 +17293,9 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
               NewTokens.push_back(Tok);
             }
           } else if (ExprTy->isRecordType()) {
-            // Record type: check for a conversion operator to the
-            // reflection type. If found, evaluate the conversion and
-            // treat the result as a reflection value.
+            // Record type: evaluate via the conversion operator to
+            // std::meta::info if one exists, otherwise as a record value.
+            // Either way the operand is evaluated only once.
             APValue ConvResult;
             if (!TryConvertToReflection(Info, SubExpr, ConvResult))
               return false;
@@ -17309,10 +17304,9 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
               Val = ConvResult;
               if (Val.isReflectedType()) {
                 QualType QT = Val.getReflectedType();
-                while (const auto *AT = dyn_cast<AutoType>(QT)) {
-                  if (!AT->isDeduced()) break;
-                  QT = AT->getDeducedType();
-                }
+                if (const auto *AT = dyn_cast<AutoType>(QT))
+                  if (AT->isDeduced())
+                    QT = AT->getDeducedType();
                 Token Tok = TSD->Tokens[I];
                 Tok.setKind(tok::annot_typename);
                 Tok.setAnnotationValue(QT.getAsOpaquePtr());
@@ -17355,10 +17349,9 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
               continue;
             }
 
-            // No conversion: interpolate as a literal value.
-            if (!EvaluateAsRValue(Info, SubExpr, Val))
-              return false;
-
+            // No conversion: TryConvertToReflection already evaluated the
+            // operand into ConvResult; interpolate it as a literal value.
+            Val = ConvResult;
             {
               OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
                   SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
