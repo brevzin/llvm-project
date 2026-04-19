@@ -598,7 +598,15 @@ let Class = PropertyTypeCase<APValue, "Reflection"> in {
       TDMS->NoUniqueAddress = *baseTdmsNoUniqueAddress;
 
       V = APValue(kind, TDMS);
+      break;
     }
+    case ReflectionKind::TokenSequence:
+    case ReflectionKind::Identifier:
+      // Not yet supported through the property-based serializer; the writer
+      // side diagnoses (see ASTStmtWriter::VisitCXXReflectExpr). Round-trip
+      // as a Null reflection to avoid corrupted state.
+      V = APValue(ReflectionKind::Null, nullptr);
+      break;
     }
 
     for (unsigned k = 0; k < depth; ++k)

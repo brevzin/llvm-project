@@ -569,6 +569,7 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
     return;
   case ReflectionKind::TokenSequence: {
     const TokenSequenceData *TSD = V.getReflectedTokenSequence();
+    ID.AddInteger(TSD->NumTokens);
     for (unsigned I = 0; I < TSD->NumTokens; ++I) {
       const Token &Tok = TSD->Tokens[I];
       if (Tok.is(tok::eof))
@@ -577,6 +578,10 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
       if (Tok.is(tok::annot_typename))
         QualType::getFromOpaquePtr(Tok.getAnnotationValue()).Profile(ID);
       else if (Tok.is(tok::annot_token_seq_expr))
+        // FIXME: structurally-equal interpolation expressions in distinct
+        // translation units (or distinct AST instances within one TU) will
+        // profile differently because we hash by pointer. Use StmtProfiler
+        // when this matters for ODR/template merging.
         ID.AddPointer(Tok.getAnnotationValue());
       else if (const auto *II = Tok.getIdentifierInfo())
         ID.AddString(II->getName());

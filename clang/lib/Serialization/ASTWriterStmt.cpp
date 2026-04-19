@@ -474,6 +474,11 @@ void ASTStmtWriter::VisitCXXReflectExpr(CXXReflectExpr *E) {
   if (E->hasDependentSubExpr()) {
     Record.AddStmt(E->getDependentSubExpr());
   } else {
+    // FIXME: TokenSequence and Identifier reflections currently round-trip
+    // through PCH/modules as a Null reflection (see PropertiesBase.td).
+    // Implement proper serialization (Token array round-trip, including
+    // annot_typename and annot_token_seq_expr payloads) when these become
+    // load-bearing.
     Record.AddAPValue(E->getReflection());
     Record.AddSourceRange(E->getOperandRange());
   }
