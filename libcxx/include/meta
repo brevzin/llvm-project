@@ -3060,6 +3060,11 @@ public:
   }
 };
 
+template <class... Ts>
+consteval auto id(Ts const&... args) -> info {
+  return __builtin_id(args...);
+}
+
 _LIBCPP_END_NAMESPACE_REFLECTION_V2
 
 #endif  // __has_feature(reflection)

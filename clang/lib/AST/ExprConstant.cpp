@@ -17429,11 +17429,21 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
           Str = Str.drop_back();
         Name.append(Str);
       } else {
-        // Fall back to rvalue evaluation for non-literal strings
-        // (e.g. a const char* parameter).
+        // Non-literal: evaluate and follow the LValue base back to a
+        // StringLiteral. For array-typed glvalues (e.g. a forwarding
+        // reference parameter `Ts const&` bound to a string literal), we
+        // must use EvaluateLValue rather than EvaluateAsRValue — the
+        // latter would lvalue-to-rvalue-load the array contents into an
+        // Array APValue and lose the base we want to follow.
         APValue Val;
-        if (!EvaluateAsRValue(Info, Arg, Val))
+        if (Arg->getType()->isArrayType()) {
+          LValue LV;
+          if (!EvaluateLValue(Arg, LV, Info))
+            return false;
+          LV.moveInto(Val);
+        } else if (!EvaluateAsRValue(Info, Arg, Val)) {
           return false;
+        }
 
         if (!Val.isLValue()) {
           Info.FFDiag(Arg->getExprLoc());

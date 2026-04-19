@@ -305,6 +305,14 @@ ExprResult Parser::ParseCXXBuiltinIdExpression() {
       Parens.skipToEnd();
       return ExprError();
     }
+
+    // Allow pack expansion: __builtin_id(args...).
+    if (Tok.is(tok::ellipsis))
+      Arg = Actions.ActOnPackExpansion(Arg.get(), ConsumeToken());
+    if (Arg.isInvalid()) {
+      Parens.skipToEnd();
+      return ExprError();
+    }
     Args.push_back(Arg.get());
 
     if (!TryConsumeToken(tok::comma))

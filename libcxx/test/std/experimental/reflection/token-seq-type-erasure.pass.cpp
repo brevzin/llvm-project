@@ -19,6 +19,8 @@
 #include "test_macros.h"
 #include "assert_macros.h"
 
+using std::meta::id;
+
 consteval auto interface_functions_of(std::meta::info ty) -> std::vector<std::meta::info> {
     auto v = members_of(ty, std::meta::access_context::current());
     std::erase_if(v, [](std::meta::info m){
@@ -35,7 +37,7 @@ consteval auto param_tokens(std::vector<std::meta::info> params,
   for (int k = 0; std::meta::info p : params) {
     if (is_function_parameter(p)) p = type_of(p);
     if (not name_prefix.empty()) {
-      result += ^^{ \(p) \(__builtin_id(name_prefix, k++)) };
+      result += ^^{ \(p) \(id(name_prefix, k++)) };
     } else {
       result += ^^{ \(p) };
     }
@@ -54,7 +56,7 @@ consteval auto inject_Vtable(std::meta::info interface) -> void {
     params += is_const(type_of(mem)) ? ^^{ void const* } : ^^{ void* };
     params += param_tokens(parameters_of(mem));
     vtable_members += ^^{
-      \(r) (*\(__builtin_id(name)))(\(params));
+      \(r) (*\(id(name)))(\(params));
     };
   }
 
@@ -77,12 +79,12 @@ consteval auto inject_vtable_for(std::meta::info interface) -> void {
     params += param_tokens(parameters_of(mem), "p");
     std::meta::info cast_type = is_const(type_of(mem)) ? ^^{ T const* } : ^^{ T* };
     for (int k = 0; std::meta::info _ : parameters_of(mem)) {
-      args += ^^{ \(__builtin_id("p", k++)) };
+      args += ^^{ \(id("p", k++)) };
     }
 
     inits += ^^{
       +[](\(params))-> \(r) {
-        return static_cast<\(cast_type)>(obj)->\(__builtin_id(name))( \(args) );
+        return static_cast<\(cast_type)>(obj)->\(id(name))( \(args) );
       }
     };
   }
@@ -99,13 +101,13 @@ consteval auto inject_interface(std::meta::info interface) -> void {
   auto forwarders = std::meta::list_builder();
   for (std::meta::info mem : interface_functions_of(interface)) {
     std::meta::info r = return_type_of(mem);
-    auto name = __builtin_id(identifier_of(mem));
+    auto name = id(identifier_of(mem));
     auto param_list = parameters_of(mem);
     std::meta::list_builder params(^^{ , }), args(^^{ , });
     params += param_tokens(param_list, "p");
     args += ^^{ data };
     for (int k = 0; k < param_list.size(); ++k) {
-      args += ^^{ \(__builtin_id("p", k)) };
+      args += ^^{ \(id("p", k)) };
     }
     auto suffix = is_const(type_of(mem)) ? ^^{ const } : ^^{ };
 

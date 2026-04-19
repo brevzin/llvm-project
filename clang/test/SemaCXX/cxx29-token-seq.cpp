@@ -229,7 +229,7 @@ namespace N9 {
         consteval {
             auto r = ^^A::m;
             __builtin_inject(^^{
-                return x.\(r); // expected-error {{class 'N9::B' not derived from}}
+                return x.\(r); // expected-error {{class 'B' not derived from}}
             });
         }
     }
