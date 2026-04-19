@@ -38,7 +38,6 @@ class FunctionTemplateDecl;
 class NamedDecl;
 struct TagDataMemberSpec;
 class TemplateDecl;
-struct TokenSequenceData;
 class TypeAliasTemplateDecl;
 class VarDecl;
 class VarTemplateDecl;
@@ -153,15 +152,6 @@ public:
 
   virtual AttributeCommonInfo *SynthesizeAnnotation(Expr *CE,
                                                     SourceLocation Loc) = 0;
-
-                         // ===========================
-                         // Token Injection Support
-                         // ===========================
-
-  // Queues the given token sequence for injection into the enclosing scope.
-  virtual bool InjectTokens(const TokenSequenceData *Tokens,
-                            Decl *ContainingDecl,
-                            SourceLocation InjectLoc) = 0;
 };
 } // namespace clang
 

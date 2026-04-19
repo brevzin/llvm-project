@@ -824,13 +824,6 @@ public:
     return ParsedAttrs.addNew(&II, Range, {}, nullptr, 0,
                               ParsedAttr::Form::Annotation(), Loc);
   }
-
-  bool InjectTokens(const TokenSequenceData *Tokens,
-                    Decl *ContainingDecl,
-                    SourceLocation InjectLoc) override {
-    S.PendingInjections.push_back({InjectLoc, nullptr, Tokens});
-    return false;
-  }
 };
 }  // anonymous namespace
 
