@@ -2431,9 +2431,11 @@ ExprResult TemplateInstantiator::transformNonTypeTemplateParmRef(
     return ExprError();
 
   Expr *resultExpr = result.get();
-  return new (SemaRef.Context) SubstNonTypeTemplateParmExpr(
+  auto *E = new (SemaRef.Context) SubstNonTypeTemplateParmExpr(
       resultExpr->getType(), resultExpr->getValueKind(), loc, resultExpr,
       AssociatedDecl, parm->getIndex(), PackIndex, refParam, Final);
+  SemaRef.MarkSubstNonTypeTemplateParmExprReferenced(E);
+  return E;
 }
 
 ExprResult

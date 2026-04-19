@@ -5141,7 +5141,6 @@ RecordDecl::RecordDecl(Kind DK, TagKind TK, const ASTContext &C,
   setParamDestroyedInCallee(false);
   setArgPassingRestrictions(RecordArgPassingKind::CanPassInRegs);
   setIsRandomized(false);
-  setIsConstevalOnly(false);
   setODRHash(0);
 }
 
@@ -5216,23 +5215,6 @@ void RecordDecl::completeDefinition() {
   TagDecl::completeDefinition();
 
   ASTContext &Ctx = getASTContext();
-
-  // Compute whether this is a consteval-only type.
-  for (FieldDecl *FD : fields()) {
-    if (FD->getType()->isConstevalOnly()) {
-      setIsConstevalOnly(true);
-      break;
-    }
-  }
-  if (auto CXXRD = dyn_cast<CXXRecordDecl>(this);
-      CXXRD && !isConstevalOnly()) {
-    for (CXXBaseSpecifier BaseSpecifier : CXXRD->bases()) {
-      if (BaseSpecifier.getType()->isConstevalOnly()) {
-        setIsConstevalOnly(true);
-        break;
-      }
-    }
-  }
 
   // Layouts are dumped when computed, so if we are dumping for all complete
   // types, we need to force usage to get types that wouldn't be used elsewhere.

@@ -338,9 +338,6 @@ def err_non_default_visibility_dllimport : Error<
 def err_ifunc_resolver_return : Error<
   "ifunc resolver function must return a pointer">;
 
-def err_runtime_consteval_only_type : Error<
-  "cannot emit a runtime definition of consteval-only type">;
-
 def warn_atomic_op_misaligned : Warning<
   "misaligned atomic operation may incur "
   "significant performance penalty"

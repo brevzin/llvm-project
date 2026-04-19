@@ -1851,9 +1851,6 @@ private:
     LLVM_PREFERRED_TYPE(TypeClass)
     unsigned TC : 8;
 
-    /// Whether this is a consteval-only type ([basic.types.general], P2996).
-    unsigned ConstevalOnly : 1;
-
     /// Store information on the type dependency.
     LLVM_PREFERRED_TYPE(TypeDependence)
     unsigned Dependence : llvm::BitWidth<TypeDependence>;
@@ -2316,8 +2313,7 @@ private:
 protected:
   friend class ASTContext;
 
-  Type(TypeClass tc, QualType canon, TypeDependence Dependence,
-       bool ConstevalOnly)
+  Type(TypeClass tc, QualType canon, TypeDependence Dependence)
       : ExtQualsTypeCommonBase(this,
                                canon.isNull() ? QualType(this_(), 0) : canon) {
     static_assert(sizeof(*this) <=
@@ -2326,7 +2322,6 @@ protected:
     static_assert(alignof(decltype(*this)) % TypeAlignment == 0,
                   "Insufficient alignment!");
     TypeBits.TC = tc;
-    TypeBits.ConstevalOnly = ConstevalOnly;
     TypeBits.Dependence = static_cast<unsigned>(Dependence);
     TypeBits.CacheValid = false;
     TypeBits.CachedLocalOrUnnamed = false;
@@ -2342,10 +2337,6 @@ protected:
   }
 
   void addDependence(TypeDependence D) { setDependence(getDependence() | D); }
-
-  void setConstevalOnly(bool C = true) {
-    TypeBits.ConstevalOnly = C;
-  }
 
 public:
   friend class ASTReader;
@@ -2606,7 +2597,6 @@ public:
   bool isClassType() const;
   bool isStructureType() const;
   bool isStructureTypeWithFlexibleArrayMember() const;
-  bool isConstevalOnly() const;
   bool isObjCBoxableRecordType() const;
   bool isInterfaceType() const;
   bool isStructureOrClassType() const;
@@ -3143,8 +3133,7 @@ private:
   BuiltinType(Kind K)
       : Type(Builtin, QualType(),
              K == Dependent ? TypeDependence::DependentInstantiation
-                            : TypeDependence::None,
-             /*ConstevalOnly=*/(K == MetaInfo)) {
+                            : TypeDependence::None) {
     static_assert(Kind::LastKind <
                       (1 << BuiltinTypeBitfields::NumOfBuiltinTypeBits) &&
                   "Defined builtin type exceeds the allocated space for serial "
@@ -3222,8 +3211,7 @@ class ComplexType : public Type, public llvm::FoldingSetNode {
   QualType ElementType;
 
   ComplexType(QualType Element, QualType CanonicalPtr)
-      : Type(Complex, CanonicalPtr, Element->getDependence(),
-             /*ConstevalOnly=*/false),
+      : Type(Complex, CanonicalPtr, Element->getDependence()),
         ElementType(Element) {}
 
 public:
@@ -3250,8 +3238,7 @@ class ParenType : public Type, public llvm::FoldingSetNode {
   QualType Inner;
 
   ParenType(QualType InnerType, QualType CanonType)
-      : Type(Paren, CanonType, InnerType->getDependence(),
-             /*ConstevalOnly=*/false),
+      : Type(Paren, CanonType, InnerType->getDependence()),
         Inner(InnerType) {}
 
 public:
@@ -3278,8 +3265,7 @@ class PointerType : public Type, public llvm::FoldingSetNode {
   QualType PointeeType;
 
   PointerType(QualType Pointee, QualType CanonicalPtr)
-      : Type(Pointer, CanonicalPtr, Pointee->getDependence(),
-             Pointee->isConstevalOnly()),
+      : Type(Pointer, CanonicalPtr, Pointee->getDependence()),
         PointeeType(Pointee) {}
 
 public:
@@ -3443,8 +3429,7 @@ protected:
 
   AdjustedType(TypeClass TC, QualType OriginalTy, QualType AdjustedTy,
                QualType CanonicalPtr)
-      : Type(TC, CanonicalPtr, OriginalTy->getDependence(),
-             /*ConstevalOnly=*/false),
+      : Type(TC, CanonicalPtr, OriginalTy->getDependence()),
         OriginalTy(OriginalTy), AdjustedTy(AdjustedTy) {}
 
 public:
@@ -3493,8 +3478,7 @@ class BlockPointerType : public Type, public llvm::FoldingSetNode {
   QualType PointeeType;
 
   BlockPointerType(QualType Pointee, QualType CanonicalCls)
-      : Type(BlockPointer, CanonicalCls, Pointee->getDependence(),
-             /*ConstevalOnly=*/false),
+      : Type(BlockPointer, CanonicalCls, Pointee->getDependence()),
         PointeeType(Pointee) {}
 
 public:
@@ -3524,8 +3508,7 @@ class ReferenceType : public Type, public llvm::FoldingSetNode {
 protected:
   ReferenceType(TypeClass tc, QualType Referencee, QualType CanonicalRef,
                 bool SpelledAsLValue)
-      : Type(tc, CanonicalRef, Referencee->getDependence(),
-             Referencee->isConstevalOnly()),
+      : Type(tc, CanonicalRef, Referencee->getDependence()),
         PointeeType(Referencee) {
     ReferenceTypeBits.SpelledAsLValue = SpelledAsLValue;
     ReferenceTypeBits.InnerRef = Referencee->isReferenceType();
@@ -3613,7 +3596,7 @@ class MemberPointerType : public Type, public llvm::FoldingSetNode {
       : Type(MemberPointer, CanonicalPtr,
              (toTypeDependence(Qualifier->getDependence()) &
               ~TypeDependence::VariablyModified) |
-                 Pointee->getDependence(), /*ConstevalOnly=*/false),
+                 Pointee->getDependence()),
         PointeeType(Pointee), Qualifier(Qualifier) {}
 
 public:
@@ -4720,8 +4703,7 @@ public:
 protected:
   FunctionType(TypeClass tc, QualType res, QualType Canonical,
                TypeDependence Dependence, ExtInfo Info)
-      : Type(tc, Canonical, Dependence,
-             /*ConstevalOnly=*/res->isConstevalOnly()), ResultType(res) {
+      : Type(tc, Canonical, Dependence), ResultType(res) {
     FunctionTypeBits.ExtInfo = Info.Bits;
   }
 
@@ -5778,7 +5760,7 @@ class UnresolvedUsingType : public Type {
 
   UnresolvedUsingType(const UnresolvedUsingTypenameDecl *D)
       : Type(UnresolvedUsing, QualType(),
-             TypeDependence::DependentInstantiation, /*ConstevalOnly=*/false),
+             TypeDependence::DependentInstantiation),
         Decl(const_cast<UnresolvedUsingTypenameDecl *>(D)) {}
 
 public:
@@ -5877,8 +5859,7 @@ class MacroQualifiedType : public Type {
 
   MacroQualifiedType(QualType UnderlyingTy, QualType CanonTy,
                      const IdentifierInfo *MacroII)
-      : Type(MacroQualified, CanonTy, UnderlyingTy->getDependence(),
-             UnderlyingTy->isConstevalOnly()),
+      : Type(MacroQualified, CanonTy, UnderlyingTy->getDependence()),
         UnderlyingTy(UnderlyingTy), MacroII(MacroII) {
     assert(isa<AttributedType>(UnderlyingTy) &&
            "Expected a macro qualified type to only wrap attributed types.");
@@ -6309,8 +6290,7 @@ private:
 
   BTFTagAttributedType(QualType Canon, QualType Wrapped,
                        const BTFTypeTagAttr *BTFAttr)
-      : Type(BTFTagAttributed, Canon, Wrapped->getDependence(),
-             /*ConstevalOnly=*/false),
+      : Type(BTFTagAttributed, Canon, Wrapped->getDependence()),
         WrappedType(Wrapped), BTFAttr(BTFAttr) {}
 
 public:
@@ -6374,8 +6354,7 @@ private:
                              const Attributes &Attrs)
       : Type(HLSLAttributedResource, QualType(),
              Contained.isNull() ? TypeDependence::None
-                                : Contained->getDependence(),
-             /*ConstevalOnly=*/false),
+                                : Contained->getDependence()),
         WrappedType(Wrapped), ContainedType(Contained), Attrs(Attrs) {}
 
 public:
@@ -6500,8 +6479,7 @@ private:
 
   HLSLInlineSpirvType(uint32_t Opcode, uint32_t Size, uint32_t Alignment,
                       ArrayRef<SpirvOperand> Operands)
-      : Type(HLSLInlineSpirv, QualType(), TypeDependence::None,
-             /*ConstevalOnly=*/false),
+      : Type(HLSLInlineSpirv, QualType(), TypeDependence::None),
         Opcode(Opcode), Size(Size), Alignment(Alignment),
         NumOperands(Operands.size()) {
     for (size_t I = 0; I < NumOperands; I++) {
@@ -6552,8 +6530,7 @@ class TemplateTypeParmType : public Type, public llvm::FoldingSetNode {
                        TemplateTypeParmDecl *TTPDecl, QualType Canon)
       : Type(TemplateTypeParm, Canon,
              TypeDependence::DependentInstantiation |
-                 (PP ? TypeDependence::UnexpandedPack : TypeDependence::None),
-             /*ConstevalOnly=*/false),
+                 (PP ? TypeDependence::UnexpandedPack : TypeDependence::None)),
         TTPDecl(TTPDecl) {
     assert(!TTPDecl == Canon.isNull());
     TemplateTypeParmTypeBits.Depth = D;
@@ -6741,9 +6718,7 @@ protected:
              ExtraDependence | (DeducedAsType.isNull()
                                     ? TypeDependence::None
                                     : DeducedAsType->getDependence() &
-                                          ~TypeDependence::VariablyModified),
-             /*ConstevalOnly=*/!DeducedAsType.isNull() ?
-                               DeducedAsType->isConstevalOnly() : false),
+                                          ~TypeDependence::VariablyModified)),
         DeducedAsType(DeducedAsType) {}
 
 public:
@@ -7026,7 +7001,7 @@ class InjectedClassNameType : public Type {
 
   InjectedClassNameType(CXXRecordDecl *D, QualType TST)
       : Type(InjectedClassName, QualType(),
-             TypeDependence::DependentInstantiation, /*ConstevalOnly=*/false),
+             TypeDependence::DependentInstantiation),
         Decl(D), InjectedType(TST) {
     assert(isa<TemplateSpecializationType>(TST));
     assert(!TST.hasQualifiers());
@@ -7106,8 +7081,7 @@ class TypeWithKeyword : public Type {
 protected:
   TypeWithKeyword(ElaboratedTypeKeyword Keyword, TypeClass tc,
                   QualType Canonical, TypeDependence Dependence)
-      : Type(tc, Canonical, Dependence,
-             !Canonical.isNull() ? Canonical->isConstevalOnly() : false) {
+      : Type(tc, Canonical, Dependence) {
     TypeWithKeywordBits.Keyword = llvm::to_underlying(Keyword);
   }
 
@@ -7367,7 +7341,7 @@ class PackExpansionType : public Type, public llvm::FoldingSetNode {
       : Type(PackExpansion, Canon,
              (Pattern->getDependence() | TypeDependence::Dependent |
               TypeDependence::Instantiation) &
-                 ~TypeDependence::UnexpandedPack, /*ConstevalOnly=*/false),
+                 ~TypeDependence::UnexpandedPack),
         Pattern(Pattern) {
     PackExpansionTypeBits.NumExpansions =
         NumExpansions ? *NumExpansions + 1 : 0;
@@ -7648,8 +7622,7 @@ protected:
                  bool isKindOf);
 
   ObjCObjectType(enum Nonce_ObjCInterface)
-      : Type(ObjCInterface, QualType(), TypeDependence::None,
-             /*ConstevalOnly=*/false),
+      : Type(ObjCInterface, QualType(), TypeDependence::None),
         BaseType(QualType(this_(), 0)) {
     ObjCObjectTypeBits.NumProtocols = 0;
     ObjCObjectTypeBits.NumTypeArgs = 0;
@@ -7863,8 +7836,7 @@ class ObjCObjectPointerType : public Type, public llvm::FoldingSetNode {
   QualType PointeeType;
 
   ObjCObjectPointerType(QualType Canonical, QualType Pointee)
-      : Type(ObjCObjectPointer, Canonical, Pointee->getDependence(),
-             /*ConstevalOnly=*/false),
+      : Type(ObjCObjectPointer, Canonical, Pointee->getDependence()),
         PointeeType(Pointee) {}
 
 public:
@@ -8034,8 +8006,7 @@ class AtomicType : public Type, public llvm::FoldingSetNode {
   QualType ValueType;
 
   AtomicType(QualType ValTy, QualType Canonical)
-      : Type(Atomic, Canonical, ValTy->getDependence(),
-             /*ConstevalOnly=*/false),
+      : Type(Atomic, Canonical, ValTy->getDependence()),
         ValueType(ValTy) {}
 
 public:
@@ -8067,8 +8038,7 @@ class PipeType : public Type, public llvm::FoldingSetNode {
   bool isRead;
 
   PipeType(QualType elemType, QualType CanonicalPtr, bool isRead)
-      : Type(Pipe, CanonicalPtr, elemType->getDependence(),
-             /*ConstevalOnly=*/false),
+      : Type(Pipe, CanonicalPtr, elemType->getDependence()),
         ElementType(elemType), isRead(isRead) {}
 
 public:
