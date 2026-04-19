@@ -67,7 +67,7 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
 
         Token AnnTok;
         AnnTok.startToken();
-        AnnTok.setKind(tok::annot_primary_expr);
+        AnnTok.setKind(tok::annot_token_seq_expr);
         AnnTok.setLocation(BackslashLoc);
         AnnTok.setAnnotationEndLoc(RParenLoc);
         setExprAnnotation(AnnTok, CE);

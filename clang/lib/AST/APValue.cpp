@@ -576,7 +576,7 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
       ID.AddInteger(Tok.getKind());
       if (Tok.is(tok::annot_typename))
         QualType::getFromOpaquePtr(Tok.getAnnotationValue()).Profile(ID);
-      else if (Tok.is(tok::annot_primary_expr))
+      else if (Tok.is(tok::annot_token_seq_expr))
         ID.AddPointer(Tok.getAnnotationValue());
       else if (const auto *II = Tok.getIdentifierInfo())
         ID.AddString(II->getName());

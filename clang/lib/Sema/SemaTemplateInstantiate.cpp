@@ -2695,7 +2695,7 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
     }
 
     // Scan tokens for identifiers matching template parameters, or
-    // annot_primary_expr tokens containing expressions that need transformation.
+    // annot_token_seq_expr tokens containing expressions that need transformation.
     bool HasSubstitutions = false;
     for (unsigned I = 0; I < TSD->NumTokens; ++I) {
       if (TSD->Tokens[I].is(tok::identifier)) {
@@ -2704,8 +2704,8 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
           HasSubstitutions = true;
           break;
         }
-      } else if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
-        // All annotation expressions need to be transformed during
+      } else if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
+        // All interpolation expressions need to be transformed during
         // instantiation, since they may reference local declarations
         // from the template that have been instantiated to new decls.
         HasSubstitutions = true;
@@ -2719,7 +2719,7 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
       for (unsigned I = 0; I < TSD->NumTokens; ++I) {
         NewTokens[I] = TSD->Tokens[I];
 
-        if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
+        if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
           // Transform all expressions inside interpolation tokens.
           // This handles both dependent expressions (e.g., ^^T) and
           // references to local declarations (e.g., loop variables)
@@ -2754,7 +2754,7 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
           NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
           NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
         } else if (auto *NTTP = dyn_cast<NonTypeTemplateParmDecl>(PI.Param)) {
-          // Non-type template parameter: substitute with annot_primary_expr.
+          // Non-type template parameter: substitute with annot_token_seq_expr.
           Expr *Val = nullptr;
           if (Arg.getKind() == TemplateArgument::Expression) {
             Val = Arg.getAsExpr();
@@ -2764,7 +2764,7 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
                 TSD->Tokens[I].getLocation());
           }
           if (Val) {
-            NewTokens[I].setKind(tok::annot_primary_expr);
+            NewTokens[I].setKind(tok::annot_token_seq_expr);
             NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
             NewTokens[I].setAnnotationValue(static_cast<void *>(Val));
           }

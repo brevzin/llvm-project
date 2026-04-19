@@ -16908,7 +16908,7 @@ static void PrintTokenSequenceToStderr(const TokenSequenceData *TSD,
       OS << "\\(";
       QT.print(OS, PP);
       OS << ")";
-    } else if (Tok.is(tok::annot_primary_expr)) {
+    } else if (Tok.is(tok::annot_token_seq_expr)) {
       // Interpolated expression.
       Expr *E = static_cast<Expr *>(Tok.getAnnotationValue());
       OS << "\\(";
@@ -17205,7 +17205,7 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
     const TokenSequenceData *TSD = Refl.getReflectedTokenSequence();
     bool HasInterpolations = false;
     for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-      if (TSD->Tokens[I].is(tok::annot_primary_expr))  {
+      if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
         HasInterpolations = true;
         break;
       }
@@ -17218,7 +17218,7 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
       SmallVector<Token, 32> NewTokens;
       NewTokens.reserve(TSD->NumTokens);
       for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-        if (TSD->Tokens[I].is(tok::annot_primary_expr)) {
+        if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
           // Extract the unevaluated expression from the annotation token.
           // The annotation value is the Expr* stored by setExprAnnotation.
           Expr *SubExpr = static_cast<Expr *>(

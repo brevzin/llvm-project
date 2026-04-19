@@ -1357,9 +1357,9 @@ bool Parser::ConsumeAndStoreInitializer(CachedTokens &Toks,
       // If it's an annotation token, then we've run out of tokens and should
       // bail out. Otherwise, cache the token and consume it.
       if (Tok.isAnnotation()) {
-        // annot_typename and annot_primary_expr can appear in initializers
+        // annot_typename and annot_token_seq_expr can appear in initializers
         // when using token sequence injection (e.g., = \(type)()).
-        if (Tok.isOneOf(tok::annot_typename, tok::annot_primary_expr)) {
+        if (Tok.isOneOf(tok::annot_typename, tok::annot_token_seq_expr)) {
           Toks.push_back(Tok);
           ConsumeAnnotationToken();
           break;
