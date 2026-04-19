@@ -28,6 +28,7 @@
 #include "clang/Sema/SemaOpenMP.h"
 #include "clang/Sema/TypoCorrection.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/ScopeExit.h"
 #include <optional>
 
 using namespace clang;
@@ -1165,6 +1166,14 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
   ParsedStmtContext SubStmtCtx =
       ParsedStmtContext::Compound |
       (isStmtExpr ? ParsedStmtContext::InStmtExpr : ParsedStmtContext());
+
+  // Save outer pending injected stmts so a nested compound being parsed
+  // through this loop can't drain stmts that belong to the enclosing scope.
+  SmallVector<Stmt *> SavedPendingInjected;
+  SavedPendingInjected.swap(Actions.PendingInjectedStmts);
+  auto RestorePending = llvm::make_scope_exit([&] {
+    SavedPendingInjected.swap(Actions.PendingInjectedStmts);
+  });
 
   bool LastIsError = false;
   while (!tryParseMisplacedModuleImport() && Tok.isNot(tok::r_brace) &&

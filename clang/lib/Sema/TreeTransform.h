@@ -8178,6 +8178,11 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
   bool SubStmtInvalid = false;
   bool SubStmtChanged = false;
   SmallVector<Stmt*, 8> Statements;
+  // Save any pending injected statements from an outer compound; we'll
+  // restore them at the end so a nested transform can't drain stmts that
+  // belong to the enclosing scope.
+  SmallVector<Stmt *> SavedPendingInjected;
+  SavedPendingInjected.swap(getSema().PendingInjectedStmts);
   for (auto *B : S->body()) {
     StmtResult Result = getDerived().TransformStmt(
         B, IsStmtExpr && B == ExprResult ? StmtDiscardKind::StmtExprResult
@@ -8186,8 +8191,10 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
     if (Result.isInvalid()) {
       // Immediately fail if this was a DeclStmt, since it's very
       // likely that this will cause problems for future statements.
-      if (isa<DeclStmt>(B))
+      if (isa<DeclStmt>(B)) {
+        SavedPendingInjected.swap(getSema().PendingInjectedStmts);
         return StmtError();
+      }
 
       // Otherwise, just keep processing substatements and fail later.
       SubStmtInvalid = true;
@@ -8206,6 +8213,8 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
       SubStmtChanged = true;
     }
   }
+  // Restore the outer compound's pending stmts (typically empty).
+  SavedPendingInjected.swap(getSema().PendingInjectedStmts);
 
   if (SubStmtInvalid)
     return StmtError();

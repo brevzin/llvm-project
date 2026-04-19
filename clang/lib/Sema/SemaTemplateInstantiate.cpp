@@ -2681,10 +2681,22 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
       if (!AssocDecl)
         continue;
       TemplateParameterList *TPL = nullptr;
-      if (auto *TD = dyn_cast<TemplateDecl>(AssocDecl))
+      // Partial specializations have their own parameter list with names
+      // distinct from the primary template; prefer those when available.
+      if (auto *Partial =
+              dyn_cast<ClassTemplatePartialSpecializationDecl>(AssocDecl))
+        TPL = Partial->getTemplateParameters();
+      else if (auto *Partial =
+                   dyn_cast<VarTemplatePartialSpecializationDecl>(AssocDecl))
+        TPL = Partial->getTemplateParameters();
+      else if (auto *TD = dyn_cast<TemplateDecl>(AssocDecl))
         TPL = TD->getTemplateParameters();
-      else if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(AssocDecl))
+      else if (auto *CTSD =
+                   dyn_cast<ClassTemplateSpecializationDecl>(AssocDecl))
         TPL = CTSD->getSpecializedTemplate()->getTemplateParameters();
+      else if (auto *VTSD =
+                   dyn_cast<VarTemplateSpecializationDecl>(AssocDecl))
+        TPL = VTSD->getSpecializedTemplate()->getTemplateParameters();
       if (!TPL)
         continue;
       for (unsigned I = 0; I < TPL->size(); ++I) {
