@@ -548,8 +548,11 @@ void ASTStmtReader::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
   E->setKwLoc(Record.readSourceLocation());
   E->setLParenLoc(Record.readSourceLocation());
   E->setRParenLoc(Record.readSourceLocation());
-  for (unsigned I = 0; I < E->getNumArgs(); ++I)
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
     E->setArg(I, Record.readExpr());
+    E->setSizeCall(I, Record.readExpr());
+    E->setDataCall(I, Record.readExpr());
+  }
 }
 
 void ASTStmtReader::VisitCXXSpliceExpr(CXXSpliceExpr *E) {

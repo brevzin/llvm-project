@@ -17411,6 +17411,32 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
   for (unsigned I = 0; I < E->getNumArgs(); ++I) {
     Expr *Arg = E->getArg(I);
 
+    // User-defined string-like argument: Sema pre-built the size() and data()
+    // calls. Evaluate them inline against the current Info so that any
+    // function parameters in the surrounding call frame are visible.
+    if (Expr *SizeCall = E->getSizeCall(I)) {
+      Expr *DataCall = E->getDataCall(I);
+      assert(DataCall && "size without data");
+      APSInt SizeValue;
+      if (!::EvaluateInteger(SizeCall, SizeValue, Info))
+        return false;
+      uint64_t Size = SizeValue.getZExtValue();
+      LValue Pointer;
+      if (!::EvaluatePointer(DataCall, Pointer, Info))
+        return false;
+      QualType CharTy = DataCall->getType()->getPointeeType();
+      for (uint64_t J = 0; J < Size; ++J) {
+        APValue Char;
+        if (!handleLValueToRValueConversion(Info, DataCall, CharTy, Pointer,
+                                             Char))
+          return false;
+        Name.push_back(static_cast<char>(Char.getInt().getExtValue()));
+        if (!HandleLValueArrayAdjustment(Info, DataCall, Pointer, CharTy, 1))
+          return false;
+      }
+      continue;
+    }
+
     if (Arg->getType()->isIntegralOrEnumerationType()) {
       // Integer argument: convert to decimal string.
       APValue Val;
@@ -17472,66 +17498,10 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
           return false;
         }
       }
-    } else if (Arg->getType()->isRecordType()) {
-      // Record type (e.g. string_view): evaluate as rvalue, then extract
-      // the string data from a pointer field and length from an integer field.
-      APValue Val;
-      if (!EvaluateAsRValue(Info, Arg, Val))
-        return false;
-
-      if (Val.getKind() != APValue::Struct) {
-        Info.FFDiag(Arg->getExprLoc());
-        return false;
-      }
-
-      // Find the pointer and length fields.
-      const auto *RD = Arg->getType()->getAsCXXRecordDecl();
-      int PtrIdx = -1, LenIdx = -1;
-      unsigned FieldIdx = 0;
-      for (const auto *FD : RD->fields()) {
-        QualType FT = FD->getType();
-        if (FT->isPointerType() && PtrIdx == -1)
-          PtrIdx = FieldIdx;
-        else if (FT->isIntegralOrEnumerationType() && LenIdx == -1)
-          LenIdx = FieldIdx;
-        ++FieldIdx;
-      }
-
-      if (PtrIdx == -1 || LenIdx == -1) {
-        Info.FFDiag(Arg->getExprLoc());
-        return false;
-      }
-
-      const APValue &PtrField = Val.getStructField(PtrIdx);
-      const APValue &LenField = Val.getStructField(LenIdx);
-
-      if (!PtrField.isLValue() || !LenField.isInt()) {
-        Info.FFDiag(Arg->getExprLoc());
-        return false;
-      }
-
-      int64_t Len = LenField.getInt().getExtValue();
-      APValue::LValueBase Base = PtrField.getLValueBase();
-      if (!Base) {
-        Info.FFDiag(Arg->getExprLoc());
-        return false;
-      }
-
-      if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
-              Base.dyn_cast<const Expr *>())) {
-        StringRef Str = SLit->getString();
-        int64_t Off = PtrField.getLValueOffset().getQuantity();
-        if (Off >= 0 && Len >= 0 && (uint64_t)(Off + Len) <= (uint64_t)Str.size())
-          Name.append(Str.substr(Off, Len));
-        else {
-          Info.FFDiag(Arg->getExprLoc());
-          return false;
-        }
-      } else {
-        Info.FFDiag(Arg->getExprLoc());
-        return false;
-      }
     } else {
+      // Class-typed args reach here only if Sema didn't pre-build the
+      // size()/data() calls — which means the early-out above already
+      // rejected the type. Anything else is unsupported.
       Info.FFDiag(Arg->getExprLoc());
       return false;
     }

@@ -9188,12 +9188,16 @@ TreeTransform<Derived>::TransformCXXBuiltinReportTokensExpr(
 template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
-  // Use TransformExprs so that any PackExpansionExpr arguments (from
-  // __builtin_id(args...) inside a variadic template) are expanded.
-  SmallVector<Expr *, 4> TransformedArgs;
+  // Transform only the original arguments (slot 0). The size()/data() calls
+  // for user-defined string-like args were synthesized by Sema based on the
+  // arg's type and will be re-synthesized by ActOnCXXBuiltinId once the
+  // transformed args are no longer dependent. Use TransformExprs so any
+  // PackExpansionExpr (from __builtin_id(args...) in a variadic template)
+  // is expanded.
   SmallVector<Expr *, 4> Inputs;
   for (unsigned I = 0; I < E->getNumArgs(); ++I)
     Inputs.push_back(E->getArg(I));
+  SmallVector<Expr *, 4> TransformedArgs;
   if (getDerived().TransformExprs(Inputs.data(), Inputs.size(),
                                   /*IsCall=*/true, TransformedArgs))
     return ExprError();

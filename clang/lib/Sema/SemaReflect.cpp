@@ -17,6 +17,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/MetaActions.h"
+#include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/Token.h"
 #include "clang/AST/Metafunction.h"
 #include "clang/Basic/DiagnosticSema.h"
@@ -1062,8 +1063,93 @@ ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,
                                    SmallVectorImpl<Expr *> &Args,
                                    SourceLocation RParenLoc) {
+  // For each argument, classify and (for user-defined string-like types)
+  // build the size() and data() member calls so the constant evaluator
+  // doesn't need Sema-level lookup. Uses the same data()/size() member
+  // duck-typing rule as user-defined static_assert messages.
+  SmallVector<Expr *, 4> SizeCalls(Args.size(), nullptr);
+  SmallVector<Expr *, 4> DataCalls(Args.size(), nullptr);
+
+  QualType SizeT = Context.getSizeType();
+  QualType ConstCharPtr = Context.getPointerType(
+      Context.getConstType(Context.CharTy));
+
+  for (unsigned I = 0; I < Args.size(); ++I) {
+    Expr *Arg = Args[I];
+
+    // Defer to instantiation for dependent args.
+    if (Arg->isTypeDependent() || Arg->isValueDependent())
+      continue;
+
+    QualType T = Arg->getType().getNonReferenceType();
+
+    // Integer and string-literal / pointer / array args evaluate directly.
+    if (T->isIntegralOrEnumerationType() || T->isPointerType() ||
+        T->isArrayType())
+      continue;
+
+    // Class type: must have data() returning const char* and size() returning
+    // size_t (matching static_assert user-defined message rules).
+    auto *RD = T->getAsCXXRecordDecl();
+    if (!RD) {
+      Diag(Arg->getExprLoc(), diag::err_user_defined_msg_invalid)
+          << /*StringEvaluationContext::StaticAssert=*/0;
+      return ExprError();
+    }
+
+    SourceLocation Loc = Arg->getBeginLoc();
+    auto FindMember = [&](StringRef Name) -> std::optional<LookupResult> {
+      DeclarationName DN = PP.getIdentifierInfo(Name);
+      LookupResult R(*this, DN, Loc, Sema::LookupMemberName);
+      LookupQualifiedName(R, RD);
+      if (R.empty())
+        return std::nullopt;
+      return std::move(R);
+    };
+    auto Size = FindMember("size");
+    auto Data = FindMember("data");
+    if (!Size || !Data) {
+      Diag(Loc, diag::err_user_defined_msg_missing_member_function)
+          << /*StringEvaluationContext::StaticAssert=*/0
+          << ((!Size && !Data) ? 2 : !Size ? 0 : 1);
+      return ExprError();
+    }
+
+    auto BuildCall = [&](LookupResult &LR) -> ExprResult {
+      ExprResult Ref = BuildMemberReferenceExpr(
+          Arg, Arg->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
+          SourceLocation(), nullptr, LR, nullptr, nullptr);
+      if (Ref.isInvalid())
+        return ExprError();
+      ExprResult Call = BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc, nullptr,
+                                       false, true);
+      if (Call.isInvalid())
+        return ExprError();
+      return TemporaryMaterializationConversion(Call.get());
+    };
+
+    ExprResult SizeCall = BuildCall(*Size);
+    ExprResult DataCall = BuildCall(*Data);
+    if (SizeCall.isInvalid() || DataCall.isInvalid())
+      return ExprError();
+
+    ExprResult SizeConv = BuildConvertedConstantExpression(
+        SizeCall.get(), SizeT, CCEKind::StaticAssertMessageSize);
+    ExprResult DataConv = BuildConvertedConstantExpression(
+        DataCall.get(), ConstCharPtr, CCEKind::StaticAssertMessageData);
+    if (SizeConv.isInvalid() || DataConv.isInvalid()) {
+      Diag(Loc, diag::err_user_defined_msg_invalid_mem_fn_ret_ty)
+          << /*StringEvaluationContext::StaticAssert=*/0
+          << (SizeConv.isInvalid() ? /*size*/ 0 : /*data*/ 1);
+      return ExprError();
+    }
+
+    SizeCalls[I] = SizeConv.get();
+    DataCalls[I] = DataConv.get();
+  }
+
   return CXXBuiltinIdExpr::Create(Context, Context.MetaInfoTy,
-                                  ArrayRef<Expr *>(Args),
+                                  ArrayRef<Expr *>(Args), SizeCalls, DataCalls,
                                   KwLoc, LParenLoc, RParenLoc);
 }
 

@@ -5740,6 +5740,15 @@ public:
 };
 
 class CXXBuiltinIdExpr : public Expr {
+  // Per-arg storage: 3 slots per logical argument.
+  //   [3*I + 0] = original argument expression (always set; carries type
+  //               and source location)
+  //   [3*I + 1] = size() call expression converted to size_t, only for
+  //               user-defined string-like arguments; null otherwise
+  //   [3*I + 2] = data() call expression converted to const char*, only
+  //               for user-defined string-like arguments; null otherwise
+  // For integer or string-literal arguments slots 1 and 2 are null and
+  // the constant evaluator works directly off slot 0.
   Stmt **Args;
   unsigned NumArgs;
   SourceLocation KwLoc;
@@ -5747,13 +5756,17 @@ class CXXBuiltinIdExpr : public Expr {
   SourceLocation RParenLoc;
 
   CXXBuiltinIdExpr(ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+                    ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
                     SourceLocation KwLoc, SourceLocation LParenLoc,
                     SourceLocation RParenLoc);
   CXXBuiltinIdExpr(EmptyShell Empty, unsigned NumArgs);
 
 public:
   static CXXBuiltinIdExpr *Create(ASTContext &C, QualType Ty,
-                                   ArrayRef<Expr *> Args, SourceLocation KwLoc,
+                                   ArrayRef<Expr *> Args,
+                                   ArrayRef<Expr *> SizeCalls,
+                                   ArrayRef<Expr *> DataCalls,
+                                   SourceLocation KwLoc,
                                    SourceLocation LParenLoc,
                                    SourceLocation RParenLoc);
   static CXXBuiltinIdExpr *CreateEmpty(ASTContext &C, unsigned NumArgs);
@@ -5761,11 +5774,31 @@ public:
   unsigned getNumArgs() const { return NumArgs; }
   Expr *getArg(unsigned I) const {
     assert(I < NumArgs && "argument index out of range");
-    return cast<Expr>(Args[I]);
+    return cast<Expr>(Args[3 * I]);
   }
   void setArg(unsigned I, Expr *E) {
     assert(I < NumArgs && "argument index out of range");
-    Args[I] = E;
+    Args[3 * I] = E;
+  }
+
+  /// User-defined string args carry pre-built size() and data() calls so
+  /// the constant evaluator doesn't need Sema. Returns null for integer
+  /// and string-literal args.
+  Expr *getSizeCall(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast_or_null<Expr>(Args[3 * I + 1]);
+  }
+  Expr *getDataCall(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast_or_null<Expr>(Args[3 * I + 2]);
+  }
+  void setSizeCall(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[3 * I + 1] = E;
+  }
+  void setDataCall(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[3 * I + 2] = E;
   }
 
   SourceLocation getKwLoc() const { return KwLoc; }
@@ -5780,9 +5813,9 @@ public:
   SourceLocation getBeginLoc() const LLVM_READONLY { return KwLoc; }
   SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
 
-  child_range children() { return child_range(Args, Args + NumArgs); }
+  child_range children() { return child_range(Args, Args + 3 * NumArgs); }
   const_child_range children() const {
-    return const_child_range(Args, Args + NumArgs);
+    return const_child_range(Args, Args + 3 * NumArgs);
   }
 
   static bool classof(const Stmt *T) {

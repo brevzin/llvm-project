@@ -128,6 +128,18 @@ namespace N5 {
     static_assert(xs._1 == &i);
     static_assert(&xs.get<0>() == &xs._0);
     static_assert(&xs.get<1>() == &xs._1);
+
+    struct Stringish {
+        constexpr auto data() const -> char const* { return "hello"; }
+        constexpr auto size() const -> size_t { return 2; }
+    };
+
+    consteval {
+        __builtin_inject(^^{
+            constexpr int \(__builtin_id(Stringish{})) = 2;
+        });
+    }
+    static_assert(he == 2);
 }
 
 namespace N6 {

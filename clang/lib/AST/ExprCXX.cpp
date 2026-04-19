@@ -2118,17 +2118,26 @@ CXXBuiltinReportTokensExpr::CreateEmpty(ASTContext &C) {
 
 CXXBuiltinIdExpr::CXXBuiltinIdExpr(ASTContext &C, QualType Ty,
                                      ArrayRef<Expr *> Args,
+                                     ArrayRef<Expr *> SizeCalls,
+                                     ArrayRef<Expr *> DataCalls,
                                      SourceLocation KwLoc,
                                      SourceLocation LParenLoc,
                                      SourceLocation RParenLoc)
     : Expr(CXXBuiltinIdExprClass, Ty, VK_PRValue, OK_Ordinary),
       NumArgs(Args.size()), KwLoc(KwLoc), LParenLoc(LParenLoc),
       RParenLoc(RParenLoc) {
-  this->Args = new (C) Stmt *[NumArgs];
+  assert(SizeCalls.size() == NumArgs && DataCalls.size() == NumArgs);
+  this->Args = new (C) Stmt *[3 * NumArgs];
   ExprDependence Deps = ExprDependence::None;
   for (unsigned I = 0; I < NumArgs; ++I) {
-    this->Args[I] = Args[I];
+    this->Args[3 * I + 0] = Args[I];
+    this->Args[3 * I + 1] = SizeCalls[I];
+    this->Args[3 * I + 2] = DataCalls[I];
     Deps |= Args[I]->getDependence();
+    if (SizeCalls[I])
+      Deps |= SizeCalls[I]->getDependence();
+    if (DataCalls[I])
+      Deps |= DataCalls[I]->getDependence();
   }
   setDependence(Deps);
 }
@@ -2138,16 +2147,19 @@ CXXBuiltinIdExpr::CXXBuiltinIdExpr(EmptyShell Empty, unsigned NumArgs)
 
 CXXBuiltinIdExpr *CXXBuiltinIdExpr::Create(ASTContext &C, QualType Ty,
                                              ArrayRef<Expr *> Args,
+                                             ArrayRef<Expr *> SizeCalls,
+                                             ArrayRef<Expr *> DataCalls,
                                              SourceLocation KwLoc,
                                              SourceLocation LParenLoc,
                                              SourceLocation RParenLoc) {
-  return new (C) CXXBuiltinIdExpr(C, Ty, Args, KwLoc, LParenLoc, RParenLoc);
+  return new (C) CXXBuiltinIdExpr(C, Ty, Args, SizeCalls, DataCalls, KwLoc,
+                                  LParenLoc, RParenLoc);
 }
 
 CXXBuiltinIdExpr *CXXBuiltinIdExpr::CreateEmpty(ASTContext &C,
                                                    unsigned NumArgs) {
   auto *E = new (C) CXXBuiltinIdExpr(EmptyShell(), NumArgs);
-  E->Args = new (C) Stmt *[NumArgs];
+  E->Args = new (C) Stmt *[3 * NumArgs];
   return E;
 }
 
