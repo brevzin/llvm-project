@@ -558,3 +558,34 @@ namespace N26 {
         __builtin_inject(^^S, ^^{ int z = 0; });
     }
 }
+
+namespace N27 {
+    // Direct token_sequence interpolation into another token_sequence.
+    constexpr token_sequence inner = ^^{ constexpr int ts_x = 1; };
+    constexpr token_sequence outer = ^^{ \(inner) constexpr int ts_y = 2; };
+    consteval {
+        __builtin_inject(outer);
+    }
+    static_assert(ts_x == 1);
+    static_assert(ts_y == 2);
+
+    // Nested token_sequence interpolation.
+    constexpr token_sequence a = ^^{ constexpr int a_var = 10; };
+    constexpr token_sequence b = ^^{ \(a) constexpr int b_var = 20; };
+    constexpr token_sequence c = ^^{ \(b) constexpr int c_var = 30; };
+    consteval {
+        __builtin_inject(c);
+    }
+    static_assert(a_var == 10);
+    static_assert(b_var == 20);
+    static_assert(c_var == 30);
+
+    // Token sequence interpolation in function.
+    consteval auto wrap(token_sequence ts) -> token_sequence {
+        return ^^{ struct Wrapped { \(ts) }; };
+    }
+    consteval {
+        __builtin_inject(wrap(^^{ int member = 42; }));
+    }
+    static_assert(Wrapped{}.member == 42);
+}

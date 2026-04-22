@@ -17265,15 +17265,6 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
               Tok.setIdentifierInfo(II);
               Tok.setLength(II->getLength());
               NewTokens.push_back(Tok);
-            } else if (Val.isTokenSequence()) {
-              // Token sequence concatenation: splice the tokens inline,
-              // excluding the trailing eof.
-              const TokenSequenceData *Inner = Val.getTokenSequence();
-              for (unsigned J = 0; J < Inner->NumTokens; ++J) {
-                if (Inner->Tokens[J].is(tok::eof))
-                  break;
-                NewTokens.push_back(Inner->Tokens[J]);
-              }
             } else if (Val.isReflectedDecl() &&
                        isa<ValueDecl>(Val.getReflectedDecl()) &&
                        !isa<FieldDecl>(Val.getReflectedDecl())) {
