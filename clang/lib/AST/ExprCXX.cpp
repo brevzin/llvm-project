@@ -1935,6 +1935,30 @@ CXXReflectExpr::CXXReflectExpr(const ASTContext &C, QualType ExprTy, APValue RV)
   setDependence(computeDependence(this, C));
 }
 
+CXXTokenSequenceExpr::CXXTokenSequenceExpr(const ASTContext &C, QualType ExprTy,
+                                           const TokenSequenceData *TSD)
+    : Expr(CXXTokenSequenceExprClass, ExprTy, VK_PRValue, OK_Ordinary),
+      TokSeq(TSD) {
+  setDependence(computeDependence(this));
+}
+
+CXXTokenSequenceExpr::CXXTokenSequenceExpr(EmptyShell Empty)
+    : Expr(CXXTokenSequenceExprClass, Empty), TokSeq(nullptr) {}
+
+CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(ASTContext &C,
+                                                   SourceLocation OperatorLoc,
+                                                   SourceRange OperandRange,
+                                                   const TokenSequenceData *TSD) {
+  auto *E = new (C) CXXTokenSequenceExpr(C, C.TokenSequenceTy, TSD);
+  E->setOperatorLoc(OperatorLoc);
+  E->setOperandRange(OperandRange);
+  return E;
+}
+
+CXXTokenSequenceExpr *CXXTokenSequenceExpr::CreateEmpty(const ASTContext &C) {
+  return new (C) CXXTokenSequenceExpr(EmptyShell{});
+}
+
 CXXReflectExpr::CXXReflectExpr(EmptyShell Empty)
     : Expr(CXXReflectExprClass, Empty), Kind(OperandKind::Unset) {
 }
@@ -1954,6 +1978,16 @@ CXXReflectExpr *CXXReflectExpr::Create(ASTContext &C,
                                        SourceLocation OperatorLoc,
                                        SourceRange OperandRange, APValue RV) {
   CXXReflectExpr *E = new (C) CXXReflectExpr(C, C.MetaInfoTy, RV);
+  E->setOperatorLoc(OperatorLoc);
+  E->setOperandRange(OperandRange);
+  return E;
+}
+
+CXXReflectExpr *CXXReflectExpr::Create(ASTContext &C,
+                                       SourceLocation OperatorLoc,
+                                       SourceRange OperandRange, APValue RV,
+                                       QualType Ty) {
+  CXXReflectExpr *E = new (C) CXXReflectExpr(C, Ty, RV);
   E->setOperatorLoc(OperatorLoc);
   E->setOperandRange(OperandRange);
   return E;

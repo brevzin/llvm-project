@@ -435,6 +435,13 @@ let Class = PropertyTypeCase<APValue, "AddrLabelDiff"> in {
     return APValue(cast<AddrLabelExpr>(lhs), cast<AddrLabelExpr>(rhs));
   }]>;
 }
+let Class = PropertyTypeCase<APValue, "TokenSequence"> in {
+  // FIXME: Token sequences currently don't round-trip through PCH/modules.
+  // Implement proper Token array serialization when this becomes load-bearing.
+  def : Creator<[{
+    return APValue(static_cast<const TokenSequenceData *>(nullptr));
+  }]>;
+}
 let Class = PropertyTypeCase<APValue, "Reflection"> in {
   def : ReadHelper<[{
     APValue base = node;
@@ -600,7 +607,6 @@ let Class = PropertyTypeCase<APValue, "Reflection"> in {
       V = APValue(kind, TDMS);
       break;
     }
-    case ReflectionKind::TokenSequence:
     case ReflectionKind::Identifier:
       // Not yet supported through the property-based serializer; the writer
       // side diagnoses (see ASTStmtWriter::VisitCXXReflectExpr). Round-trip

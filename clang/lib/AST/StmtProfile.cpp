@@ -2377,6 +2377,11 @@ void StmtProfiler::VisitCXXReflectExpr(const CXXReflectExpr *E) {
   }
 }
 
+void StmtProfiler::VisitCXXTokenSequenceExpr(const CXXTokenSequenceExpr *E) {
+  VisitExpr(E);
+  E->getValue().Profile(ID);
+}
+
 void StmtProfiler::VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E) {
   VisitExpr(E);
 }

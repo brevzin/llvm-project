@@ -4796,6 +4796,8 @@ struct CompoundAssignSubobjectHandler {
       return foundPointer(Subobj, SubobjType);
     case APValue::Vector:
       return foundVector(Subobj, SubobjType);
+    case APValue::TokenSequence:
+      return foundTokenSequence(Subobj, SubobjType);
     case APValue::Indeterminate:
       Info.FFDiag(E, diag::note_constexpr_access_uninit)
           << /*read of=*/0 << /*uninitialized object=*/1
@@ -4881,6 +4883,43 @@ struct CompoundAssignSubobjectHandler {
     if (!HandleLValueArrayAdjustment(Info, E, LVal, PointeeType, Offset))
       return false;
     LVal.moveInto(Subobj);
+    return true;
+  }
+
+  bool foundTokenSequence(APValue &Subobj, QualType SubobjType) {
+    if (!checkConst(SubobjType))
+      return false;
+
+    if (!SubobjType->isTokenSequenceType() || Opcode != BO_Add) {
+      Info.FFDiag(E);
+      return false;
+    }
+
+    if (!RHS.isTokenSequence() || !Subobj.isTokenSequence()) {
+      Info.FFDiag(E);
+      return false;
+    }
+
+    const TokenSequenceData *LHSTSD = Subobj.getTokenSequence();
+    const TokenSequenceData *RHSTSD = RHS.getTokenSequence();
+
+    SmallVector<Token, 32> NewTokens;
+    for (unsigned I = 0; I < LHSTSD->NumTokens; ++I) {
+      if (LHSTSD->Tokens[I].is(tok::eof))
+        break;
+      NewTokens.push_back(LHSTSD->Tokens[I]);
+    }
+    for (unsigned I = 0; I < RHSTSD->NumTokens; ++I)
+      NewTokens.push_back(RHSTSD->Tokens[I]);
+
+    Token *StoredTokens = new (Info.Ctx) Token[NewTokens.size()];
+    std::copy(NewTokens.begin(), NewTokens.end(), StoredTokens);
+
+    auto *NewTSD = new (Info.Ctx) TokenSequenceData();
+    NewTSD->Tokens = StoredTokens;
+    NewTSD->NumTokens = NewTokens.size();
+
+    Subobj = APValue(NewTSD);
     return true;
   }
 };
@@ -9576,6 +9615,20 @@ bool LValueExprEvaluator::VisitCompoundAssignOperator(
     if (!Info.noteFailure())
       return false;
     Success = false;
+  }
+
+  // For reflection/token_sequence types, perform lvalue-to-rvalue conversion
+  // on the RHS since handleCompoundAssignment expects the actual value.
+  QualType RHSTy = CAO->getRHS()->getType();
+  if (Success && CAO->getRHS()->isGLValue() &&
+      (RHSTy->isReflectionType() || RHSTy->isTokenSequenceType())) {
+    LValue LV;
+    LV.setFrom(Info.Ctx, RHS);
+    if (!handleLValueToRValueConversion(Info, CAO->getRHS(), RHSTy, LV, RHS)) {
+      if (!Info.noteFailure())
+        return false;
+      Success = false;
+    }
   }
 
   // The overall lvalue result is the result of evaluating the LHS.
@@ -14949,7 +15002,8 @@ EvaluateComparisonBinaryOperator(EvalInfo &Info, const BinaryOperator *E,
     return Success(CmpResult::Equal, E);
   }
 
-  if (LHSTy->isReflectionType() && RHSTy->isReflectionType()) {
+  if ((LHSTy->isReflectionType() && RHSTy->isReflectionType()) ||
+      (LHSTy->isTokenSequenceType() && RHSTy->isTokenSequenceType())) {
     APValue LHSValue, RHSValue;
     llvm::FoldingSetNodeID LID, RID;
     if (!Evaluate(LHSValue, Info, E->getLHS()))
@@ -16817,84 +16871,21 @@ public:
 };
 } // end anonymous namespace
 
-/// Evaluate \p SubExpr to an APValue, applying a user-defined conversion to
-/// std::meta::info if one is available on its (record) type. The caller must
-/// not have evaluated \p SubExpr already — for record-typed operands this
-/// helper performs the evaluation itself, so that any conversion operator
-/// runs exactly once. For non-record operands, the helper just evaluates as
-/// rvalue. Returns false on evaluation failure.
-static bool TryConvertToReflection(EvalInfo &Info, const Expr *SubExpr,
-                                   APValue &Result) {
-  auto EvalAsRValue = [&]() {
-    if (!::Evaluate(Result, Info, SubExpr))
+/// Evaluate \p SubExpr to an APValue rvalue. Sema is responsible for
+/// inserting any user-defined conversion to std::meta::info or
+/// std::meta::token_sequence at AST construction time, so this helper
+/// simply evaluates and applies lvalue-to-rvalue conversion if needed.
+static bool EvaluateOperandAsRValue(EvalInfo &Info, const Expr *SubExpr,
+                                    APValue &Result) {
+  if (!::Evaluate(Result, Info, SubExpr))
+    return false;
+  if (SubExpr->isGLValue()) {
+    LValue LV;
+    LV.setFrom(Info.Ctx, Result);
+    if (!handleLValueToRValueConversion(Info, SubExpr, SubExpr->getType(),
+                                        LV, Result))
       return false;
-    if (SubExpr->isGLValue()) {
-      LValue LV;
-      LV.setFrom(Info.Ctx, Result);
-      if (!handleLValueToRValueConversion(Info, SubExpr, SubExpr->getType(),
-                                          LV, Result))
-        return false;
-    }
-    return true;
-  };
-
-  QualType ExprTy = SubExpr->getType();
-  if (!ExprTy->isRecordType())
-    return EvalAsRValue();
-
-  auto *RD = ExprTy->getAsCXXRecordDecl();
-  if (!RD)
-    return EvalAsRValue();
-
-  auto IsObjectCompatibleWithRefQualifier =
-      [&](const CXXConversionDecl *Conv) -> bool {
-    switch (Conv->getRefQualifier()) {
-    case RQ_None:
-      return true;
-    case RQ_LValue:
-      return SubExpr->isLValue();
-    case RQ_RValue:
-      return SubExpr->isPRValue() || SubExpr->isXValue();
-    }
-    llvm_unreachable("unknown ref-qualifier");
-  };
-
-  const CXXConversionDecl *ConvDecl = nullptr;
-  for (NamedDecl *D : RD->getVisibleConversionFunctions()) {
-    const auto *Conv = dyn_cast<CXXConversionDecl>(D);
-    if (!Conv)
-      continue;
-
-    if (!Conv->getConversionType().getCanonicalType()->isReflectionType())
-      continue;
-
-    if (!IsObjectCompatibleWithRefQualifier(Conv))
-      continue;
-
-    ConvDecl = Conv;
-    break;
   }
-  if (!ConvDecl)
-    // No conversion: evaluate the record operand as an rvalue so the
-    // caller can either interpolate the value literally or diagnose
-    // "not a reflection".
-    return EvalAsRValue();
-
-  LValue ObjLV;
-  if (!EvaluateObjectArgument(Info, SubExpr, ObjLV))
-    return false;
-  auto *Def = ConvDecl->getDefinition();
-  if (!Def || !Def->hasBody()) {
-    Info.FFDiag(SubExpr->getExprLoc()) << "conversion operator has no body";
-    return false;
-  }
-  APValue ConvResult;
-  CallRef Call = Info.CurrentCall->createCall(Def);
-  if (!HandleFunctionCall(SubExpr->getExprLoc(), Def, &ObjLV, SubExpr,
-                          ArrayRef<const Expr *>(), Call, Def->getBody(), Info,
-                          ConvResult, nullptr))
-    return false;
-  Result = ConvResult;
   return true;
 }
 
@@ -16985,14 +16976,13 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
   const auto *SL = cast<StringLiteral>(E->getMessage()->IgnoreParenCasts());
   StringRef Msg = SL->getString();
 
-  // Evaluate the operand to get the token sequence reflection. For
-  // record-typed operands this also runs any user-defined conversion
-  // operator to std::meta::info exactly once.
+  // Evaluate the operand. Sema has already inserted any user-defined
+  // conversion to std::meta::token_sequence on the operand expression.
   APValue Operand;
-  if (!TryConvertToReflection(Info, E->getOperand(), Operand))
+  if (!EvaluateOperandAsRValue(Info, E->getOperand(), Operand))
     return false;
 
-  if (!Operand.isReflectedTokenSequence()) {
+  if (!Operand.isTokenSequence()) {
     Info.FFDiag(E->getBeginLoc(),
                 diag::metafn_builtin_inject_not_token_sequence);
     return false;
@@ -17008,7 +16998,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
     OS << " at " << PLoc.getFilename() << ":" << PLoc.getLine();
   OS << " \"" << Msg << "\":\n  ";
 
-  const TokenSequenceData *TSD = Operand.getReflectedTokenSequence();
+  const TokenSequenceData *TSD = Operand.getTokenSequence();
   PrintTokenSequenceToStderr(TSD, Info.Ctx);
   OS << "\n";
 
@@ -17030,14 +17020,13 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
     return false;
   }
 
-  // Evaluate the operand to get the token sequence reflection. For
-  // record-typed operands this also runs any user-defined conversion
-  // operator to std::meta::info exactly once.
+  // Evaluate the operand. Sema has already inserted any user-defined
+  // conversion to std::meta::token_sequence on the operand expression.
   APValue Operand;
-  if (!TryConvertToReflection(Info, E->getOperand(), Operand))
+  if (!EvaluateOperandAsRValue(Info, E->getOperand(), Operand))
     return false;
 
-  if (!Operand.isReflectedTokenSequence()) {
+  if (!Operand.isTokenSequence()) {
     Info.FFDiag(E->getBeginLoc(),
                 diag::metafn_builtin_inject_not_token_sequence);
     return false;
@@ -17068,7 +17057,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
     TargetDC = dyn_cast<DeclContext>(NSDecl);
   }
 
-  const TokenSequenceData *TSD = Operand.getReflectedTokenSequence();
+  const TokenSequenceData *TSD = Operand.getTokenSequence();
   Info.EvalStatus.PendingInjections.push_back(
       {E->getBeginLoc(), TargetDC, TSD});
   return true;
@@ -17180,7 +17169,13 @@ public:
   }
 
   bool ZeroInitialization(const Expr *E) {
-    Result = APValue(ReflectionKind::Null, nullptr);
+    if (E->getType()->isTokenSequenceType()) {
+      // Zero-init for token_sequence is the empty sequence (null TSD).
+      Result = APValue(static_cast<const TokenSequenceData *>(nullptr));
+    } else {
+      // Zero-init for info is the null reflection.
+      Result = APValue(ReflectionKind::Null, nullptr);
+    }
     return true;
   }
 
@@ -17189,17 +17184,24 @@ public:
   }
 
   bool VisitCXXReflectExpr(const CXXReflectExpr *E);
+  bool VisitCXXTokenSequenceExpr(const CXXTokenSequenceExpr *E);
   bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
   bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
   bool VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E);
+  bool VisitBinaryOperator(const BinaryOperator *E);
 };
 
 bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
-  APValue Refl(E->getReflection());
+  return Success(E->getReflection(), E);
+}
 
-  // For token sequences, resolve any interpolation expressions.
-  if (Refl.isReflectedTokenSequence()) {
-    const TokenSequenceData *TSD = Refl.getReflectedTokenSequence();
+bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
+    const CXXTokenSequenceExpr *E) {
+  APValue Refl(E->getValue());
+
+  // Resolve any interpolation expressions in the token sequence.
+  {
+    const TokenSequenceData *TSD = Refl.getTokenSequence();
     bool HasInterpolations = false;
     for (unsigned I = 0; I < TSD->NumTokens; ++I) {
       if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
@@ -17224,7 +17226,18 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
           // Evaluate the expression in the current constexpr context.
           APValue Val;
           QualType ExprTy = SubExpr->getType();
-          if (ExprTy->isReflectionType()) {
+          if (ExprTy->isTokenSequenceType()) {
+            // Token sequence interpolation: splice tokens inline.
+            if (!EvaluateAsRValue(Info, SubExpr, Val))
+              return false;
+            assert(Val.isTokenSequence());
+            const TokenSequenceData *Inner = Val.getTokenSequence();
+            for (unsigned J = 0; J < Inner->NumTokens; ++J) {
+              if (Inner->Tokens[J].is(tok::eof))
+                break;
+              NewTokens.push_back(Inner->Tokens[J]);
+            }
+          } else if (ExprTy->isReflectionType()) {
             // Reflection-typed expression: evaluate and check kind.
             if (!EvaluateAsRValue(Info, SubExpr, Val))
               return false;
@@ -17252,10 +17265,10 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
               Tok.setIdentifierInfo(II);
               Tok.setLength(II->getLength());
               NewTokens.push_back(Tok);
-            } else if (Val.isReflectedTokenSequence()) {
+            } else if (Val.isTokenSequence()) {
               // Token sequence concatenation: splice the tokens inline,
               // excluding the trailing eof.
-              const TokenSequenceData *Inner = Val.getReflectedTokenSequence();
+              const TokenSequenceData *Inner = Val.getTokenSequence();
               for (unsigned J = 0; J < Inner->NumTokens; ++J) {
                 if (Inner->Tokens[J].is(tok::eof))
                   break;
@@ -17293,75 +17306,19 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
               NewTokens.push_back(Tok);
             }
           } else if (ExprTy->isRecordType()) {
-            // Record type: evaluate via the conversion operator to
-            // std::meta::info if one exists, otherwise as a record value.
-            // Either way the operand is evaluated only once.
-            APValue ConvResult;
-            if (!TryConvertToReflection(Info, SubExpr, ConvResult))
+            // Record type without a conversion to std::meta::info or
+            // std::meta::token_sequence (Sema would have inserted one
+            // otherwise). Interpolate the value literally.
+            if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
               return false;
+            OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+                SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                OK_Ordinary, SubExpr);
+            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
 
-            if (ConvResult.isReflection()) {
-              Val = ConvResult;
-              if (Val.isReflectedType()) {
-                QualType QT = Val.getReflectedType();
-                if (const auto *AT = dyn_cast<AutoType>(QT))
-                  if (AT->isDeduced())
-                    QT = AT->getDeducedType();
-                Token Tok = TSD->Tokens[I];
-                Tok.setKind(tok::annot_typename);
-                Tok.setAnnotationValue(QT.getAsOpaquePtr());
-                NewTokens.push_back(Tok);
-              } else if (Val.isReflectedIdentifier()) {
-                IdentifierInfo *II = Val.getReflectedIdentifier();
-                Token Tok = TSD->Tokens[I];
-                Tok.setKind(tok::identifier);
-                Tok.setIdentifierInfo(II);
-                Tok.setLength(II->getLength());
-                NewTokens.push_back(Tok);
-              } else if (Val.isReflectedTokenSequence()) {
-                const TokenSequenceData *Inner =
-                    Val.getReflectedTokenSequence();
-                for (unsigned J = 0; J < Inner->NumTokens; ++J) {
-                  if (Inner->Tokens[J].is(tok::eof)) break;
-                  NewTokens.push_back(Inner->Tokens[J]);
-                }
-              } else if (Val.isReflectedDecl() &&
-                         isa<ValueDecl>(Val.getReflectedDecl()) &&
-                         !isa<FieldDecl>(Val.getReflectedDecl())) {
-                ValueDecl *VD = cast<ValueDecl>(Val.getReflectedDecl());
-                QualType DeclTy = VD->getType().getNonReferenceType();
-                DeclRefExpr *DRE = DeclRefExpr::Create(
-                    Info.Ctx, NestedNameSpecifierLoc(), SourceLocation(),
-                    VD, /*RefersToEnclosingVariableOrCapture=*/false,
-                    SubExpr->getExprLoc(), DeclTy, VK_LValue);
-                Token Tok = TSD->Tokens[I];
-                Tok.setAnnotationValue(static_cast<void *>(DRE));
-                NewTokens.push_back(Tok);
-              } else {
-                OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
-                    SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                    OK_Ordinary, SubExpr);
-                ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
-                Token Tok = TSD->Tokens[I];
-                Tok.setAnnotationValue(static_cast<void *>(CE));
-                NewTokens.push_back(Tok);
-              }
-              continue;
-            }
-
-            // No conversion: TryConvertToReflection already evaluated the
-            // operand into ConvResult; interpolate it as a literal value.
-            Val = ConvResult;
-            {
-              OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
-                  SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                  OK_Ordinary, SubExpr);
-              ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
-
-              Token Tok = TSD->Tokens[I];
-              Tok.setAnnotationValue(static_cast<void *>(CE));
-              NewTokens.push_back(Tok);
-            }
+            Token Tok = TSD->Tokens[I];
+            Tok.setAnnotationValue(static_cast<void *>(CE));
+            NewTokens.push_back(Tok);
           } else {
             // Non-reflection, non-record interpolation: evaluate as
             // rvalue and wrap in a ConstantExpr.
@@ -17389,7 +17346,7 @@ bool ReflectionEvaluator::VisitCXXReflectExpr(const CXXReflectExpr *E) {
       auto *NewTSD = new (Info.Ctx) TokenSequenceData();
       NewTSD->Tokens = AllocTokens;
       NewTSD->NumTokens = NewTokens.size();
-      return Success(APValue(ReflectionKind::TokenSequence, NewTSD), E);
+      return Success(APValue(NewTSD), E);
     }
   }
 
@@ -17510,10 +17467,57 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
   IdentifierInfo &II = Info.Ctx.Idents.get(Name);
   return Success(APValue(ReflectionKind::Identifier, &II), E);
 }
+
+bool ReflectionEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
+  // Handle token_sequence + token_sequence concatenation.
+  if (E->getOpcode() != BO_Add)
+    return BaseType::VisitBinaryOperator(E);
+
+  QualType LHSTy = E->getLHS()->getType();
+  QualType RHSTy = E->getRHS()->getType();
+  if (!LHSTy->isTokenSequenceType() || !RHSTy->isTokenSequenceType())
+    return BaseType::VisitBinaryOperator(E);
+
+  APValue LHSVal, RHSVal;
+  if (!EvaluateAsRValue(Info, E->getLHS(), LHSVal))
+    return false;
+  if (!EvaluateAsRValue(Info, E->getRHS(), RHSVal))
+    return false;
+
+  if (!LHSVal.isTokenSequence() || !RHSVal.isTokenSequence()) {
+    Info.FFDiag(E->getExprLoc());
+    return false;
+  }
+
+  const TokenSequenceData *LHSTSD = LHSVal.getTokenSequence();
+  const TokenSequenceData *RHSTSD = RHSVal.getTokenSequence();
+
+  // Concatenate the tokens, excluding the trailing eof from the LHS.
+  SmallVector<Token, 32> NewTokens;
+  for (unsigned I = 0; I < LHSTSD->NumTokens; ++I) {
+    if (LHSTSD->Tokens[I].is(tok::eof))
+      break;
+    NewTokens.push_back(LHSTSD->Tokens[I]);
+  }
+  for (unsigned I = 0; I < RHSTSD->NumTokens; ++I) {
+    NewTokens.push_back(RHSTSD->Tokens[I]);
+  }
+
+  Token *StoredTokens = new (Info.Ctx) Token[NewTokens.size()];
+  std::copy(NewTokens.begin(), NewTokens.end(), StoredTokens);
+
+  auto *NewTSD = new (Info.Ctx) TokenSequenceData();
+  NewTSD->Tokens = StoredTokens;
+  NewTSD->NumTokens = NewTokens.size();
+
+  return Success(APValue(NewTSD), E);
+}
 }  // end anonymous namespace
 
 static bool EvaluateReflection(const Expr *E, APValue &Result, EvalInfo &Info) {
-  assert(E->isPRValue() && E->getType()->isReflectionType());
+  assert(E->isPRValue() &&
+         (E->getType()->isReflectionType() ||
+          E->getType()->isTokenSequenceType()));
   return ReflectionEvaluator(Info, Result).Visit(E);
 }
 
@@ -17537,7 +17541,7 @@ static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E) {
   } else if (T->isIntegralOrEnumerationType()) {
     if (!IntExprEvaluator(Info, Result).Visit(E))
       return false;
-  } else if (T->isReflectionType()) {
+  } else if (T->isReflectionType() || T->isTokenSequenceType()) {
     if (!EvaluateReflection(E, Result, Info))
       return false;
   } else if (T->hasPointerRepresentation()) {
@@ -18339,6 +18343,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::ExpressionTraitExprClass:
   case Expr::CXXNoexceptExprClass:
   case Expr::CXXReflectExprClass:
+  case Expr::CXXTokenSequenceExprClass:
   case Expr::CXXMetafunctionExprClass:
   case Expr::CXXBuiltinInjectExprClass:
   case Expr::CXXBuiltinReportTokensExprClass:

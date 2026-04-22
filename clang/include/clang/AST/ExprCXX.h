@@ -5461,6 +5461,9 @@ public:
   static CXXReflectExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
                                 SourceRange OperandRange, APValue RV);
   static CXXReflectExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
+                                SourceRange OperandRange, APValue RV,
+                                QualType Ty);
+  static CXXReflectExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
                                 Expr *DepSubExpr);
   static CXXReflectExpr *CreateEmpty(const ASTContext &C);
 
@@ -5517,6 +5520,64 @@ public:
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == CXXReflectExprClass;
+  }
+};
+
+/// Represents a C++2c token sequence literal expression of the form
+/// `^^{ tokens }`. This is a prvalue of type `std::meta::token_sequence`.
+///
+/// The captured tokens may include interpolation expressions (introduced via
+/// `\(...)`) which are evaluated when the token sequence is materialized.
+class CXXTokenSequenceExpr : public Expr {
+  // The captured token sequence data.
+  const TokenSequenceData *TokSeq;
+
+  // Source locations.
+  SourceLocation OperatorLoc;
+  SourceRange OperandRange;
+
+  CXXTokenSequenceExpr(const ASTContext &C, QualType ExprTy,
+                       const TokenSequenceData *TSD);
+  CXXTokenSequenceExpr(EmptyShell Empty);
+
+public:
+  static CXXTokenSequenceExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
+                                      SourceRange OperandRange,
+                                      const TokenSequenceData *TSD);
+  static CXXTokenSequenceExpr *CreateEmpty(const ASTContext &C);
+
+  /// Returns the captured token sequence data.
+  const TokenSequenceData *getTokenSequence() const { return TokSeq; }
+  void setTokenSequence(const TokenSequenceData *TSD) { TokSeq = TSD; }
+
+  /// Returns an APValue representing this token sequence.
+  APValue getValue() const { return APValue(TokSeq); }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return OperatorLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    return OperandRange.getEnd();
+  }
+  SourceRange getSourceRange() const {
+    return SourceRange(getBeginLoc(), getEndLoc());
+  }
+
+  /// Returns location of the '^^'-operator.
+  SourceLocation getOperatorLoc() const { return OperatorLoc; }
+  SourceRange getOperandRange() const { return OperandRange; }
+
+  void setOperatorLoc(SourceLocation L) { OperatorLoc = L; }
+  void setOperandRange(SourceRange R) { OperandRange = R; }
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXTokenSequenceExprClass;
   }
 };
 

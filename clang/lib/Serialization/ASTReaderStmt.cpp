@@ -506,6 +506,14 @@ void ASTStmtReader::VisitCXXReflectExpr(CXXReflectExpr *E) {
   }
 }
 
+void ASTStmtReader::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
+  VisitExpr(E);
+  E->setOperatorLoc(Record.readSourceLocation());
+  APValue V = Record.readAPValue();
+  E->setTokenSequence(V.getTokenSequence());
+  E->setOperandRange(Record.readSourceRange());
+}
+
 void ASTStmtReader::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *E) {
   VisitExpr(E);
   E->setKwLoc(Record.readSourceLocation());
@@ -4686,6 +4694,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
     case EXPR_REFLECT: {
       S = CXXReflectExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_TOKEN_SEQUENCE: {
+      S = CXXTokenSequenceExpr::CreateEmpty(Context);
       break;
     }
     case EXPR_METAFUNCTION: {

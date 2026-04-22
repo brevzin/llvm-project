@@ -11199,6 +11199,14 @@ QualType Sema::CheckAdditionOperands(ExprResult &LHS, ExprResult &RHS,
                                      QualType* CompLHSTy) {
   checkArithmeticNull(*this, LHS, RHS, Loc, /*IsCompare=*/false);
 
+  // Token sequence concatenation: token_sequence + token_sequence.
+  if (LHS.get()->getType()->isTokenSequenceType() &&
+      RHS.get()->getType()->isTokenSequenceType()) {
+    if (CompLHSTy)
+      *CompLHSTy = Context.TokenSequenceTy;
+    return Context.TokenSequenceTy;
+  }
+
   if (LHS.get()->getType()->isVectorType() ||
       RHS.get()->getType()->isVectorType()) {
     QualType compType =
@@ -12952,6 +12960,14 @@ QualType Sema::CheckCompareOperands(ExprResult &LHS, ExprResult &RHS,
   // Reflection equality.
   if (LHSType->isReflectionType() && RHSType->isReflectionType()) {
     // Only == and != are defined for meta::info values.
+    if (!BinaryOperator::isEqualityOp(Opc))
+      return InvalidOperands(Loc, LHS, RHS);
+    return computeResultTy();
+  }
+
+  // Token sequence equality.
+  if (LHSType->isTokenSequenceType() && RHSType->isTokenSequenceType()) {
+    // Only == and != are defined for token_sequence values.
     if (!BinaryOperator::isEqualityOp(Opc))
       return InvalidOperands(Loc, LHS, RHS);
     return computeResultTy();

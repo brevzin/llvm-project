@@ -19,6 +19,7 @@
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
 #include "clang/Basic/ExceptionSpecificationType.h"
+#include "clang/Lex/Token.h"
 #include "llvm/ADT/ArrayRef.h"
 
 using namespace clang;
@@ -1010,13 +1011,28 @@ ExprDependence clang::computeDependence(CXXReflectExpr *E,
   case ReflectionKind::Namespace:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
-  case ReflectionKind::TokenSequence:
   case ReflectionKind::Identifier:
     return ExprDependence::None;
   case ReflectionKind::EntityProxy:
     llvm_unreachable("should already have been unwrapped");
   }
   llvm_unreachable("unknown reflection kind while computing dependence");
+}
+
+ExprDependence clang::computeDependence(CXXTokenSequenceExpr *E) {
+  // Token sequences may contain dependent interpolation expressions.
+  ExprDependence D = ExprDependence::None;
+  const TokenSequenceData *TSD = E->getTokenSequence();
+  for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+    const Token &Tok = TSD->Tokens[I];
+    if (Tok.is(tok::annot_token_seq_expr)) {
+      const Expr *InterpExpr =
+          reinterpret_cast<const Expr *>(Tok.getAnnotationValue());
+      if (InterpExpr)
+        D |= InterpExpr->getDependence();
+    }
+  }
+  return D;
 }
 
 ExprDependence clang::computeDependence(CXXMetafunctionExpr *E) {

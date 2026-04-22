@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -std=c++26 -freflection -fexpansion-statements -verify -verify-ignore-unexpected=note %s
 
 using info = decltype(^^::);
+using token_sequence = decltype(^^{ });
 using size_t = decltype(sizeof(0));
 struct string_view {
 private:
@@ -14,7 +15,10 @@ public:
 };
 
 namespace N1 {
-    constexpr info tok = ^^{ constexpr int x = 42; };
+    token_sequence a;
+    token_sequence b = ^^{ }; // expected-error {{constant}}
+
+    constexpr token_sequence tok = ^^{ constexpr int x = 42; };
     static_assert(x == 42); // expected-error {{use of undeclared}}
     consteval {
         __builtin_inject(tok);
@@ -24,7 +28,7 @@ namespace N1 {
 
 namespace N2 {
     constexpr int value = 5;
-    constexpr info tok = ^^{ constexpr int y = \(value); };
+    constexpr token_sequence tok = ^^{ constexpr int y = \(value); };
     static_assert(y == value); // expected-error {{use of undeclared}}
     consteval {
         __builtin_inject(tok);
@@ -40,7 +44,7 @@ namespace N2 {
     }
     static_assert(px == 1);
 
-    consteval auto make_seq(int i) -> info {
+    consteval auto make_seq(int i) -> token_sequence {
         return ^^{
             constexpr int z = \(i);
         };
@@ -61,7 +65,7 @@ namespace N3 {
     static_assert(v == 12);
     static_assert(^^decltype(v) == ^^int const);
 
-    consteval auto make_variable(info ty) -> info {
+    consteval auto make_variable(info ty) -> token_sequence {
         return ^^{
             \(ty) var = {};
         };
@@ -143,7 +147,7 @@ namespace N5 {
 }
 
 namespace N6 {
-    consteval auto make_var(int X) -> info {
+    consteval auto make_var(int X) -> token_sequence {
         return ^^{
             constexpr int injected_value = \(X);
         };
@@ -156,7 +160,7 @@ namespace N6 {
     }
     static_assert(inner::injected_value == 42);
 
-    consteval auto make_type(int X) -> info {
+    consteval auto make_type(int X) -> token_sequence {
         auto L = [=] { return X;};
         return ^^{
             struct A {
@@ -176,11 +180,11 @@ namespace N6 {
 
 namespace N7 {
     template <class S>
-    consteval auto make_field(info type, S name, int val) -> info {
+    consteval auto make_field(info type, S name, int val) -> token_sequence {
         return ^^{ \(type) \(__builtin_id(name)) = \(val); };
     }
 
-    consteval auto make_field2(info type, string_view name, info init) {
+    consteval auto make_field2(info type, string_view name, token_sequence init) -> token_sequence {
         return ^^{ \(type) \(__builtin_id(name)) \(init); };
     }
 
@@ -259,18 +263,83 @@ namespace N10 {
 
 namespace N11 {
     static_assert(^^{ } == ^^{ });
+    static_assert(^^{ } == token_sequence());
+    static_assert(^^{ } == []{ token_sequence ts; return ts; }());
     static_assert(^^{ , } == ^^{ , });
     static_assert(^^{ \(__builtin_id("x", 1)) } == ^^{ x1 });
+
+    // Token sequence concatenation with +
+    static_assert(^^{ a } + ^^{ b } == ^^{ a b });
+    static_assert(^^{ } + ^^{ x } == ^^{ x });
+    static_assert(^^{ x } + ^^{ } == ^^{ x });
+    static_assert(^^{ } + ^^{ } == ^^{ });
+
+    // += for token_sequence (local variable)
+    consteval auto concat_test() -> token_sequence {
+        token_sequence ts = ^^{ a };
+        ts += ^^{ b };
+        ts += ^^{ c };
+        return ts;
+    }
+    static_assert(concat_test() == ^^{ a b c });
+
+    // += for token_sequence (member, direct access)
+    struct S1 {
+        token_sequence body = ^^{ x };
+    };
+    consteval auto member_direct_compound() -> token_sequence {
+        S1 s;
+        s.body += ^^{ y };
+        return s.body;
+    }
+    static_assert(member_direct_compound() == ^^{ x y });
+
+    // += for token_sequence (member, through method/this)
+    struct S2 {
+        token_sequence body = ^^{};
+        consteval void add(token_sequence tok) {
+            body += tok;
+        }
+    };
+    consteval auto member_method_compound() -> token_sequence {
+        S2 s;
+        s.add(^^{ a });
+        s.add(^^{ b });
+        return s.body;
+    }
+    static_assert(member_method_compound() == ^^{ a b });
+
+    // += for token_sequence (through reference)
+    consteval void add_via_ref(token_sequence& ts, token_sequence tok) {
+        ts += tok;
+    }
+    consteval auto ref_compound() -> token_sequence {
+        token_sequence ts = ^^{ p };
+        add_via_ref(ts, ^^{ q });
+        return ts;
+    }
+    static_assert(ref_compound() == ^^{ p q });
+
+    // += for token_sequence (member through reference)
+    consteval void add_member_via_ref(S1& s, token_sequence tok) {
+        s.body += tok;
+    }
+    consteval auto member_ref_compound() -> token_sequence {
+        S1 s;
+        add_member_via_ref(s, ^^{ z });
+        return s.body;
+    }
+    static_assert(member_ref_compound() == ^^{ x z });
 }
 
 namespace N12 {
-    // Test that __builtin_inject handles operator info() conversion.
+    // Test that __builtin_inject handles operator token_sequence() conversion.
     struct Builder {
-        info body = ^^{};
-        consteval auto operator+=(info tok) -> void {
+        token_sequence body = ^^{};
+        consteval auto operator+=(token_sequence tok) -> void {
             body = ^^{ \(body) \(tok) };
         }
-        consteval operator info() const { return body; }
+        consteval operator token_sequence() const { return body; }
     };
 
     template <class T>
@@ -307,7 +376,7 @@ namespace N13 {
 
 namespace N14 {
     struct Base {
-        consteval operator info() const {
+        consteval operator token_sequence() const {
             return ^^{ static constexpr int inherited_conv_ok = 1; };
         }
     };
@@ -320,7 +389,7 @@ namespace N14 {
     static_assert(inherited_conv_ok == 1);
 
     struct OnlyRvalue {
-        consteval operator info() && {
+        consteval operator token_sequence() && {
             return ^^{ static constexpr int refqual_conv_bug = 1; };
         }
     };
@@ -336,10 +405,10 @@ namespace N15 {
     // Conversion overload ranking should pick the non-const overload for a
     // non-const lvalue object.
     struct X {
-        consteval operator info() const {
+        consteval operator token_sequence() const {
             return ^^{ static constexpr int choose = 1; };
         }
-        consteval operator info() {
+        consteval operator token_sequence() {
             return ^^{ static constexpr int choose = 2; };
         }
     };
@@ -352,10 +421,10 @@ namespace N15 {
 }
 
 namespace N16 {
-    // Conversion function templates to info should participate.
+    // Conversion function templates to token_sequence should participate.
     struct X {
         template <class T>
-        requires __is_same(T, info)
+        requires __is_same(T, token_sequence)
         consteval operator T() const {
             return ^^{ static constexpr int conv_template_ok = 1; };
         }
@@ -369,15 +438,15 @@ namespace N16 {
 }
 
 namespace N17 {
-    // Using-declarations that introduce operator info() should be considered.
+    // Using-declarations that introduce operator token_sequence() should be considered.
     struct B {
-        consteval operator info() const {
+        consteval operator token_sequence() const {
             return ^^{ static constexpr int using_conv_ok = 1; };
         }
     };
 
     struct D : B {
-        using B::operator info;
+        using B::operator token_sequence;
     };
 
     consteval {
@@ -420,7 +489,7 @@ namespace N20 {
 namespace N21 {
     // __builtin_inject inside a non-consteval, non-constexpr context is
     // accepted at parse time but never evaluated, so it injects nothing.
-    info make_seq() {
+    token_sequence make_seq() {
         return ^^{ int q = 1; };
     }
     void caller() {
@@ -432,7 +501,7 @@ namespace N22 {
     // Interpolating various reflection kinds.
     constexpr int x = 7;
     constexpr float f = 1.5f;
-    consteval auto cstr() -> info { return ^^{ "hello" }; }
+    consteval auto cstr() -> token_sequence { return ^^{ "hello" }; }
     consteval {
         // int, float, type, identifier, function-name
         __builtin_inject(^^{ constexpr int kInt = \(x); });
@@ -449,7 +518,7 @@ namespace N23 {
     // Block-scope injection runs into the consteval lambda body, not the
     // enclosing function. Document that the injected name is NOT visible
     // in the outer scope. (When this changes, the FIXME below fires.)
-    consteval auto add_x() -> info { return ^^{ int x = 5; (void)x; }; }
+    consteval auto add_x() -> token_sequence { return ^^{ int x = 5; (void)x; }; }
     constexpr int caller() {
         consteval { __builtin_inject(add_x()); }
         // FIXME: x = 5 was injected into the consteval lambda's compound

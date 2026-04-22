@@ -388,6 +388,10 @@ APValue::APValue(const APValue &RHS)
     setReflection(((const ReflectionData *)(const char *)&RHS.Data)->Kind,
                   RHS.getOpaqueReflectionData());
     break;
+  case TokenSequence:
+    MakeTokenSequence();
+    setTokenSequence(RHS.getTokenSequence());
+    break;
   }
   ReflectionDepth = RHS.ReflectionDepth;
   UnderlyingTy = RHS.UnderlyingTy;
@@ -457,6 +461,7 @@ bool APValue::needsCleanup() const {
   case None:
   case Indeterminate:
   case AddrLabelDiff:
+  case TokenSequence:
     return false;
   case Struct:
   case Union:
@@ -567,29 +572,6 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
   case ReflectionKind::Identifier:
     ID.AddPointer(V.getOpaqueReflectionData());
     return;
-  case ReflectionKind::TokenSequence: {
-    const TokenSequenceData *TSD = V.getReflectedTokenSequence();
-    ID.AddInteger(TSD->NumTokens);
-    for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-      const Token &Tok = TSD->Tokens[I];
-      if (Tok.is(tok::eof))
-        break;
-      ID.AddInteger(Tok.getKind());
-      if (Tok.is(tok::annot_typename))
-        QualType::getFromOpaquePtr(Tok.getAnnotationValue()).Profile(ID);
-      else if (Tok.is(tok::annot_token_seq_expr))
-        // FIXME: structurally-equal interpolation expressions in distinct
-        // translation units (or distinct AST instances within one TU) will
-        // profile differently because we hash by pointer. Use StmtProfiler
-        // when this matters for ODR/template merging.
-        ID.AddPointer(Tok.getAnnotationValue());
-      else if (const auto *II = Tok.getIdentifierInfo())
-        ID.AddString(II->getName());
-      else if (Tok.isLiteral() && Tok.getLiteralData())
-        ID.AddString(StringRef(Tok.getLiteralData(), Tok.getLength()));
-    }
-    return;
-  }
   case ReflectionKind::DataMemberSpec: {
     TagDataMemberSpec *TDMS = V.getReflectedDataMemberSpec();
     TDMS->Ty.Profile(ID);
@@ -757,6 +739,36 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
   case Reflection:
     profileReflection(ID, *this);
     return;
+
+  case TokenSequence: {
+    const TokenSequenceData *TSD = getTokenSequence();
+    // Null TSD (default-initialized) is equivalent to empty sequence.
+    if (!TSD) {
+      ID.AddInteger(0);
+      return;
+    }
+    // Profile only the non-eof tokens (empty sequence: NumTokens=1 with eof).
+    unsigned EffectiveCount = 0;
+    for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+      if (TSD->Tokens[I].is(tok::eof))
+        break;
+      ++EffectiveCount;
+    }
+    ID.AddInteger(EffectiveCount);
+    for (unsigned I = 0; I < EffectiveCount; ++I) {
+      const Token &Tok = TSD->Tokens[I];
+      ID.AddInteger(Tok.getKind());
+      if (Tok.is(tok::annot_typename))
+        QualType::getFromOpaquePtr(Tok.getAnnotationValue()).Profile(ID);
+      else if (Tok.is(tok::annot_token_seq_expr))
+        ID.AddPointer(Tok.getAnnotationValue());
+      else if (const auto *II = Tok.getIdentifierInfo())
+        ID.AddString(II->getName());
+      else if (Tok.isLiteral() && Tok.getLiteralData())
+        ID.AddString(StringRef(Tok.getLiteralData(), Tok.getLength()));
+    }
+    return;
+  }
   }
 
   llvm_unreachable("Unknown APValue kind!");
@@ -994,13 +1006,6 @@ CXX26AnnotationAttr *APValue::getReflectedAnnotation() const {
          "not a reflection of an annotation");
   return reinterpret_cast<CXX26AnnotationAttr *>(
           const_cast<void *>(getOpaqueReflectionData()));
-}
-
-const TokenSequenceData *APValue::getReflectedTokenSequence() const {
-  assert(getReflectionKind() == ReflectionKind::TokenSequence &&
-         "not a reflection of a token sequence");
-  return reinterpret_cast<const TokenSequenceData *>(
-          getOpaqueReflectionData());
 }
 
 IdentifierInfo *APValue::getReflectedIdentifier() const {
@@ -1330,7 +1335,10 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     Out << " - ";
     Out << "&&" << getAddrLabelDiffRHS()->getLabel()->getName();
     return;
-  case APValue::Reflection:
+  case APValue::TokenSequence:
+    Out << "^^(token-sequence)";
+    return;
+  case APValue::Reflection: {
     std::string Repr("unknown-reflection");
     switch (getReflectionKind()) {
     case ReflectionKind::Null:
@@ -1369,15 +1377,13 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     case ReflectionKind::Annotation:
       Repr = "annotation";
       break;
-    case ReflectionKind::TokenSequence:
-      Repr = "token-sequence";
-      break;
     case ReflectionKind::Identifier:
       Repr = "identifier";
       break;
     }
     Out << "^^(" << Repr << ")";
     return;
+  }
   }
   llvm_unreachable("Unknown APValue kind!");
 }
@@ -1569,6 +1575,7 @@ LinkageInfo LinkageComputer::getLVForValue(const APValue &V,
   case APValue::ComplexFloat:
   case APValue::Vector:
   case APValue::Reflection:
+  case APValue::TokenSequence:
     break;
 
   case APValue::AddrLabelDiff:
@@ -1713,7 +1720,6 @@ void APValue::setReflection(ReflectionKind RK, const void *Ptr) {
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
-  case ReflectionKind::TokenSequence:
   case ReflectionKind::Identifier:
     SelfData.Kind = RK;
     SelfData.Data = Ptr;

@@ -9117,7 +9117,6 @@ TreeTransform<Derived>::TransformCXXReflectExpr(CXXReflectExpr *E) {
   }
   case ReflectionKind::Object:
   case ReflectionKind::Value:
-  case ReflectionKind::TokenSequence:
   case ReflectionKind::Identifier:
     return E;
   case ReflectionKind::Null:
@@ -9127,6 +9126,15 @@ TreeTransform<Derived>::TransformCXXReflectExpr(CXXReflectExpr *E) {
     llvm_unreachable("reflect expression should not have this reflection kind");
   }
   llvm_unreachable("invalid reflection");
+}
+
+template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
+  // The default transform is a no-op since the token sequence captures raw
+  // tokens. Derived transforms (e.g., template instantiation) override this
+  // to substitute references inside the token sequence.
+  return E;
 }
 
 template <typename Derived>

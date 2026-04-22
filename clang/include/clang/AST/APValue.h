@@ -151,6 +151,7 @@ public:
     MemberPointer,
     AddrLabelDiff,
     Reflection,
+    TokenSequence,
   };
 
   class LValueBase {
@@ -481,6 +482,13 @@ public:
         ReflectionDepth() {
     MakeReflection(); setReflection(RK, Data);
   }
+  /// Creates a token sequence APValue from raw token sequence data.
+  explicit APValue(const TokenSequenceData *TSD)
+      : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
+        ReflectionDepth() {
+    MakeTokenSequence();
+    setTokenSequence(TSD);
+  }
   static APValue IndeterminateValue() {
     APValue Result;
     Result.Kind = Indeterminate;
@@ -542,6 +550,7 @@ public:
   bool isReflection() const {
     return Kind == Reflection || getReflectionDepth() > 0;
   }
+  bool isTokenSequence() const { return Kind == TokenSequence; }
   bool isNullReflection() const {
     return isReflection() && getReflectionKind() == ReflectionKind::Null;
   }
@@ -579,10 +588,6 @@ public:
   }
   bool isReflectedAnnotation() const {
     return isReflection() && getReflectionKind() == ReflectionKind::Annotation;
-  }
-  bool isReflectedTokenSequence() const {
-    return isReflection() &&
-           getReflectionKind() == ReflectionKind::TokenSequence;
   }
   bool isReflectedIdentifier() const {
     return isReflection() &&
@@ -780,7 +785,10 @@ public:
   CXXBaseSpecifier *getReflectedBaseSpecifier() const;
   TagDataMemberSpec *getReflectedDataMemberSpec() const;
   CXX26AnnotationAttr *getReflectedAnnotation() const;
-  const TokenSequenceData *getReflectedTokenSequence() const;
+  const TokenSequenceData *getTokenSequence() const {
+    assert(isTokenSequence() && "Invalid accessor");
+    return *(const TokenSequenceData * const *)(const char *)&Data;
+  }
   IdentifierInfo *getReflectedIdentifier() const;
 
   void setInt(APSInt I) {
@@ -826,6 +834,10 @@ public:
     ((AddrLabelDiffData *)(char *)&Data)->RHSExpr = RHSExpr;
   }
   void setReflection(ReflectionKind RK, const void *Data);
+  void setTokenSequence(const TokenSequenceData *TSD) {
+    assert(isTokenSequence() && "Invalid accessor");
+    *(const TokenSequenceData **)(char *)&Data = TSD;
+  }
 
 private:
   void DestroyDataAndMakeUninit();
@@ -883,6 +895,11 @@ private:
     assert(isAbsent() && "Bad state change");
     new ((void*)(char *)&Data) ReflectionData();
     Kind = Reflection;
+  }
+  void MakeTokenSequence() {
+    assert(isAbsent() && "Bad state change");
+    *(const TokenSequenceData **)(char *)&Data = nullptr;
+    Kind = TokenSequence;
   }
 
 private:

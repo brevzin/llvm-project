@@ -2777,6 +2777,11 @@ void StmtPrinter::VisitCXXReflectExpr(CXXReflectExpr *S) {
   OS << "^^(...)";
 }
 
+void StmtPrinter::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *S) {
+  // FIXME: Make this better — print the actual tokens.
+  OS << "^^{...}";
+}
+
 void StmtPrinter::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *S) {
   OS << "__metafunction(";
   for (unsigned I = 0; I < S->getNumArgs(); ++I) {

@@ -417,6 +417,9 @@ _LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
 // An opaque handle to a reflected entity.
 using info = decltype(^^int);
 
+// An opaque handle to a token sequence.
+using token_sequence = decltype(^^{ });
+
 template <typename R>
 concept reflection_range =
   ranges::input_range<R> &&
@@ -3037,25 +3040,25 @@ consteval auto u8display_string_of(info R) -> u8string_view {
 
 // helper for building up delimited lists of token sequences
 class list_builder {
-  std::meta::info body = ^^{};
-  std::meta::info delim;
+  token_sequence body = ^^{};
+  token_sequence delim;
   bool first = true;
 
 public:
   // default to no delimiter
-  consteval explicit list_builder(std::meta::info delim = ^^{ }) : delim(delim) { }
+  consteval explicit list_builder(token_sequence delim = ^^{ }) : delim(delim) { }
 
-  consteval auto operator+=(std::meta::info tok) -> void {
+  consteval auto operator+=(token_sequence tok) -> void {
     if (tok != ^^{ }) {
       if (not first) {
-        body = ^^{ \(body) \(delim) };
+        body += delim;
       }
       first = false;
-      body = ^^{ \(body) \(tok) };
+      body += tok;
     }
   }
 
-  consteval operator std::meta::info() const {
+  consteval operator token_sequence() const {
     return body;
   }
 };

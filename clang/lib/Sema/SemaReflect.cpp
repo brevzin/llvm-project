@@ -997,26 +997,48 @@ ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
   TSD->Tokens = StoredTokens;
   TSD->NumTokens = Tokens.size();
 
-  APValue RV(ReflectionKind::TokenSequence, TSD);
-  return CXXReflectExpr::Create(Context, OpLoc, OperandRange, RV);
+  return CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD);
 }
 
-static Expr *TryConvertToMetaInfoIfPossible(Sema &S, Expr *E) {
+enum class TokenOpTarget { MetaInfo, TokenSequence };
+
+static Expr *TryConvertTo(Sema &S, Expr *E, TokenOpTarget Target) {
   QualType ExprTy = E->getType();
-  if (!ExprTy->isDependentType() && !ExprTy->isReflectionType()) {
-    InitializedEntity Entity =
-        InitializedEntity::InitializeTemporary(S.Context.MetaInfoTy);
-    InitializationKind Kind =
-        InitializationKind::CreateCopy(E->getBeginLoc(), E->getBeginLoc());
-    InitializationSequence Seq(S, Entity, Kind, E);
-    if (Seq) {
-      ExprResult Conv = Seq.Perform(S, Entity, Kind, E);
-      if (!Conv.isInvalid())
-        return Conv.get();
-    }
+  if (ExprTy->isDependentType())
+    return E;
+
+  // If the expression is already of the desired type, no conversion needed.
+  if (Target == TokenOpTarget::MetaInfo && ExprTy->isReflectionType())
+    return E;
+  if (Target == TokenOpTarget::TokenSequence && ExprTy->isTokenSequenceType())
+    return E;
+
+  QualType TargetTy = Target == TokenOpTarget::MetaInfo
+                          ? S.Context.MetaInfoTy
+                          : S.Context.TokenSequenceTy;
+  InitializedEntity Entity =
+      InitializedEntity::InitializeTemporary(TargetTy);
+  InitializationKind Kind =
+      InitializationKind::CreateCopy(E->getBeginLoc(), E->getBeginLoc());
+  InitializationSequence Seq(S, Entity, Kind, E);
+  if (Seq) {
+    ExprResult Conv = Seq.Perform(S, Entity, Kind, E);
+    if (!Conv.isInvalid())
+      return Conv.get();
   }
 
   return E;
+}
+
+// Try to convert to token_sequence first; if that fails, try meta::info.
+// Used for interpolation contexts where either is acceptable but a
+// token_sequence conversion is preferred (so it can be expanded inline
+// rather than splice-evaluated).
+static Expr *TryConvertToTokenSequenceOrMetaInfo(Sema &S, Expr *E) {
+  Expr *Converted = TryConvertTo(S, E, TokenOpTarget::TokenSequence);
+  if (Converted != E)
+    return Converted;
+  return TryConvertTo(S, E, TokenOpTarget::MetaInfo);
 }
 
 ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
@@ -1026,11 +1048,10 @@ ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
   // evaluation. Evaluation happens in the ReflectionEvaluator when the
   // ^^{ ... } expression is evaluated.
 
-  // If the expression is not already of reflection type but is implicitly
-  // convertible to std::meta::info, insert the conversion. This allows
-  // types with 'operator std::meta::info()' to be used directly in
-  // interpolation contexts (e.g., \(exprs) where exprs has a conversion).
-  return TryConvertToMetaInfoIfPossible(*this, E);
+  // If the expression is convertible to std::meta::token_sequence or
+  // std::meta::info, insert that conversion. token_sequence is preferred so
+  // a list_builder or similar wrapper can be expanded as raw tokens.
+  return TryConvertToTokenSequenceOrMetaInfo(*this, E);
 }
 
 ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
@@ -1038,7 +1059,7 @@ ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                        Expr *Operand,
                                        SourceLocation RParenLoc,
                                        Expr *TargetNS) {
-  Operand = TryConvertToMetaInfoIfPossible(*this, Operand);
+  Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
   return CXXBuiltinInjectExpr::Create(Context, Context.VoidTy, Operand,
                                        KwLoc, LParenLoc, RParenLoc, TargetNS);
 }
@@ -1047,7 +1068,7 @@ ExprResult Sema::ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
                                               SourceLocation LParenLoc,
                                               Expr *Msg, Expr *Operand,
                                               SourceLocation RParenLoc) {
-  Operand = TryConvertToMetaInfoIfPossible(*this, Operand);
+  Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
   // Verify the message is a string literal.
   if (!isa<StringLiteral>(Msg->IgnoreParenCasts())) {
     Diag(Msg->getBeginLoc(), diag::err_expected_string_literal)
@@ -1914,7 +1935,6 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
     case ReflectionKind::Parameter:
     case ReflectionKind::DataMemberSpec:
     case ReflectionKind::Annotation:
-    case ReflectionKind::TokenSequence:
     case ReflectionKind::Identifier:
       Diag(Splice->getBeginLoc(),
            diag::err_unexpected_reflection_kind_in_splice)
@@ -2144,7 +2164,6 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::Annotation:
-  case ReflectionKind::TokenSequence:
   case ReflectionKind::Identifier:
     Diag(Splice->getBeginLoc(), diag::err_expected_class_or_namespace)
         << "spliced entity" << getLangOpts().CPlusPlus;

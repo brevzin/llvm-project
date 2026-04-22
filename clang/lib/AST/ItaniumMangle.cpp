@@ -5067,7 +5067,6 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
     mangleExpression(R.getReflectedAnnotation()->getArg());
     break;
   }
-  case ReflectionKind::TokenSequence:
   case ReflectionKind::Identifier:
     llvm_unreachable("token sequences and identifiers cannot be mangled");
   }
@@ -5202,6 +5201,10 @@ recurse:
       mangleReflection(RE->getReflection());
     break;
   }
+
+  case Expr::CXXTokenSequenceExprClass:
+    // FIXME: Token sequences in mangled names are not yet supported.
+    break;
 
   case Expr::ConstantExprClass:
     if (const Expr *SubExpr = cast<ConstantExpr>(E)->getSubExpr()) {

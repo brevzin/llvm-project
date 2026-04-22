@@ -31,7 +31,7 @@ consteval auto interface_functions_of(std::meta::info ty) -> std::vector<std::me
 
 consteval auto param_tokens(std::vector<std::meta::info> params,
                             std::string_view  name_prefix = "")
-    -> std::meta::info
+    -> std::meta::token_sequence
 {
   auto result = std::meta::list_builder(^^{ , });
   for (int k = 0; std::meta::info p : params) {
@@ -77,7 +77,7 @@ consteval auto inject_vtable_for(std::meta::info interface) -> void {
     std::meta::list_builder params(^^{ , }), args(^^{ , });
     params += is_const(type_of(mem)) ? ^^{ void const* obj } : ^^{ void* obj };
     params += param_tokens(parameters_of(mem), "p");
-    std::meta::info cast_type = is_const(type_of(mem)) ? ^^{ T const* } : ^^{ T* };
+    std::meta::token_sequence cast_type = is_const(type_of(mem)) ? ^^{ T const* } : ^^{ T* };
     for (int k = 0; std::meta::info _ : parameters_of(mem)) {
       args += ^^{ \(id("p", k++)) };
     }

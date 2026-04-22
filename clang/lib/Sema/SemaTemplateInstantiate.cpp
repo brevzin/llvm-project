@@ -1669,6 +1669,7 @@ namespace {
     ExprResult TransformPredefinedExpr(PredefinedExpr *E);
     ExprResult TransformDeclRefExpr(DeclRefExpr *E);
     ExprResult TransformCXXReflectExpr(CXXReflectExpr *E);
+    ExprResult TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E);
     ExprResult TransformCXXDefaultArgExpr(CXXDefaultArgExpr *E);
 
     ExprResult TransformTemplateParmRefExpr(Expr *E,
@@ -2661,143 +2662,150 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
     }
   }
 
-  // Handle token sequence reflections: substitute template parameter names
-  // with their instantiated values.
-  if (E->getReflection().isReflectedTokenSequence()) {
-    const TokenSequenceData *TSD = E->getReflection().getReflectedTokenSequence();
+  return RecordConsteval.RecordAndReturn(inherited::TransformCXXReflectExpr(E));
+}
 
-    // Build a map from identifier name to (Depth, Index, NamedDecl*) for all
-    // template parameters across all substitution levels.
-    struct ParamInfo {
-      unsigned Depth;
-      unsigned Index;
-      NamedDecl *Param;
-    };
-    llvm::StringMap<ParamInfo> ParamMap;
+ExprResult
+TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
+  Sema::ConstevalOnlyRecorder RecordConsteval(getSema());
+  EnterExpressionEvaluationContext Context(
+      getSema(), Sema::ExpressionEvaluationContext::ReflectionContext);
 
-    for (unsigned Depth = TemplateArgs.getNumRetainedOuterLevels();
-         Depth < TemplateArgs.getNumLevels(); ++Depth) {
-      auto [AssocDecl, Final] = TemplateArgs.getAssociatedDecl(Depth);
-      if (!AssocDecl)
-        continue;
-      TemplateParameterList *TPL = nullptr;
-      // Partial specializations have their own parameter list with names
-      // distinct from the primary template; prefer those when available.
-      if (auto *Partial =
-              dyn_cast<ClassTemplatePartialSpecializationDecl>(AssocDecl))
-        TPL = Partial->getTemplateParameters();
-      else if (auto *Partial =
-                   dyn_cast<VarTemplatePartialSpecializationDecl>(AssocDecl))
-        TPL = Partial->getTemplateParameters();
-      else if (auto *TD = dyn_cast<TemplateDecl>(AssocDecl))
-        TPL = TD->getTemplateParameters();
-      else if (auto *CTSD =
-                   dyn_cast<ClassTemplateSpecializationDecl>(AssocDecl))
-        TPL = CTSD->getSpecializedTemplate()->getTemplateParameters();
-      else if (auto *VTSD =
-                   dyn_cast<VarTemplateSpecializationDecl>(AssocDecl))
-        TPL = VTSD->getSpecializedTemplate()->getTemplateParameters();
-      if (!TPL)
-        continue;
-      for (unsigned I = 0; I < TPL->size(); ++I) {
-        NamedDecl *P = TPL->getParam(I);
-        if (IdentifierInfo *II = P->getIdentifier())
-          ParamMap[II->getName()] = {Depth, I, P};
-      }
-    }
+  const TokenSequenceData *TSD = E->getTokenSequence();
 
-    // Scan tokens for identifiers matching template parameters, or
-    // annot_token_seq_expr tokens containing expressions that need transformation.
-    bool HasSubstitutions = false;
-    for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-      if (TSD->Tokens[I].is(tok::identifier)) {
-        IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
-        if (II && ParamMap.count(II->getName())) {
-          HasSubstitutions = true;
-          break;
-        }
-      } else if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
-        // All interpolation expressions need to be transformed during
-        // instantiation, since they may reference local declarations
-        // from the template that have been instantiated to new decls.
-        HasSubstitutions = true;
-        break;
-      }
-    }
+  // Build a map from identifier name to (Depth, Index, NamedDecl*) for all
+  // template parameters across all substitution levels.
+  struct ParamInfo {
+    unsigned Depth;
+    unsigned Index;
+    NamedDecl *Param;
+  };
+  llvm::StringMap<ParamInfo> ParamMap;
 
-    if (HasSubstitutions) {
-      ASTContext &Ctx = getSema().Context;
-      Token *NewTokens = new (Ctx) Token[TSD->NumTokens];
-      for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-        NewTokens[I] = TSD->Tokens[I];
-
-        if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
-          // Transform all expressions inside interpolation tokens.
-          // This handles both dependent expressions (e.g., ^^T) and
-          // references to local declarations (e.g., loop variables)
-          // that have been instantiated to new decls.
-          Expr *SubExpr = static_cast<Expr *>(
-              TSD->Tokens[I].getAnnotationValue());
-          if (SubExpr) {
-            ExprResult Transformed = TransformExpr(SubExpr);
-            if (!Transformed.isInvalid())
-              NewTokens[I].setAnnotationValue(
-                  static_cast<void *>(Transformed.get()));
-          }
-          continue;
-        }
-
-        if (!TSD->Tokens[I].is(tok::identifier)) continue;
-        IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
-        if (!II) continue;
-        auto It = ParamMap.find(II->getName());
-        if (It == ParamMap.end()) continue;
-
-        ParamInfo &PI = It->second;
-        if (!TemplateArgs.hasTemplateArgument(PI.Depth, PI.Index))
-          continue;
-        const TemplateArgument &Arg = TemplateArgs(PI.Depth, PI.Index);
-
-        if (isa<TemplateTypeParmDecl>(PI.Param)) {
-          // Type template parameter: substitute with annot_typename.
-          assert(Arg.getKind() == TemplateArgument::Type);
-          QualType QT = Arg.getAsType();
-          NewTokens[I].setKind(tok::annot_typename);
-          NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
-          NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
-        } else if (isa<NonTypeTemplateParmDecl>(PI.Param)) {
-          // Non-type template parameter: substitute with annot_token_seq_expr.
-          Expr *Val = nullptr;
-          if (Arg.getKind() == TemplateArgument::Expression) {
-            Val = Arg.getAsExpr();
-          } else if (Arg.getKind() == TemplateArgument::Integral) {
-            // Use the integral argument's own type rather than the NTTP's
-            // declared type, which during instantiation may still be a
-            // dependent type (e.g. a TemplateTypeParmType for T in `T V`).
-            Val = IntegerLiteral::Create(
-                Ctx, Arg.getAsIntegral(), Arg.getIntegralType(),
-                TSD->Tokens[I].getLocation());
-          }
-          if (Val) {
-            NewTokens[I].setKind(tok::annot_token_seq_expr);
-            NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
-            NewTokens[I].setAnnotationValue(static_cast<void *>(Val));
-          }
-        }
-      }
-
-      auto *NewTSD = new (Ctx) TokenSequenceData();
-      NewTSD->Tokens = NewTokens;
-      NewTSD->NumTokens = TSD->NumTokens;
-
-      APValue NewRefl(ReflectionKind::TokenSequence, NewTSD);
-      return RecordConsteval.RecordAndReturn(
-          CXXReflectExpr::Create(Ctx, E->getOperatorLoc(),
-                                 E->getOperandRange(), NewRefl));
+  for (unsigned Depth = TemplateArgs.getNumRetainedOuterLevels();
+       Depth < TemplateArgs.getNumLevels(); ++Depth) {
+    auto [AssocDecl, Final] = TemplateArgs.getAssociatedDecl(Depth);
+    if (!AssocDecl)
+      continue;
+    TemplateParameterList *TPL = nullptr;
+    // Partial specializations have their own parameter list with names
+    // distinct from the primary template; prefer those when available.
+    if (auto *Partial =
+            dyn_cast<ClassTemplatePartialSpecializationDecl>(AssocDecl))
+      TPL = Partial->getTemplateParameters();
+    else if (auto *Partial =
+                 dyn_cast<VarTemplatePartialSpecializationDecl>(AssocDecl))
+      TPL = Partial->getTemplateParameters();
+    else if (auto *TD = dyn_cast<TemplateDecl>(AssocDecl))
+      TPL = TD->getTemplateParameters();
+    else if (auto *CTSD =
+                 dyn_cast<ClassTemplateSpecializationDecl>(AssocDecl))
+      TPL = CTSD->getSpecializedTemplate()->getTemplateParameters();
+    else if (auto *VTSD =
+                 dyn_cast<VarTemplateSpecializationDecl>(AssocDecl))
+      TPL = VTSD->getSpecializedTemplate()->getTemplateParameters();
+    if (!TPL)
+      continue;
+    for (unsigned I = 0; I < TPL->size(); ++I) {
+      NamedDecl *P = TPL->getParam(I);
+      if (IdentifierInfo *II = P->getIdentifier())
+        ParamMap[II->getName()] = {Depth, I, P};
     }
   }
 
-  return RecordConsteval.RecordAndReturn(inherited::TransformCXXReflectExpr(E));
+  // Scan tokens for identifiers matching template parameters, or
+  // annot_token_seq_expr tokens containing expressions that need transformation.
+  bool HasSubstitutions = false;
+  for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+    if (TSD->Tokens[I].is(tok::identifier)) {
+      IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
+      if (II && ParamMap.count(II->getName())) {
+        HasSubstitutions = true;
+        break;
+      }
+    } else if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
+      // All interpolation expressions need to be transformed during
+      // instantiation, since they may reference local declarations
+      // from the template that have been instantiated to new decls.
+      HasSubstitutions = true;
+      break;
+    }
+  }
+
+  if (!HasSubstitutions)
+    return RecordConsteval.RecordAndReturn(
+        inherited::TransformCXXTokenSequenceExpr(E));
+
+  ASTContext &Ctx = getSema().Context;
+  Token *NewTokens = new (Ctx) Token[TSD->NumTokens];
+  for (unsigned I = 0; I < TSD->NumTokens; ++I) {
+    NewTokens[I] = TSD->Tokens[I];
+
+    if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
+      // Transform all expressions inside interpolation tokens.
+      Expr *SubExpr = static_cast<Expr *>(
+          TSD->Tokens[I].getAnnotationValue());
+      if (SubExpr) {
+        ExprResult Transformed = TransformExpr(SubExpr);
+        if (!Transformed.isInvalid()) {
+          // TransformExpr may strip implicit conversions inserted by the
+          // original ActOnTokenSequenceInterpolation (e.g., when the
+          // operand had a user-defined conversion to token_sequence/info).
+          // Re-apply the same conversion logic so the substituted operand
+          // carries the conversion in the new instantiation.
+          Transformed = getSema().ActOnTokenSequenceInterpolation(
+              Transformed.get());
+          if (!Transformed.isInvalid())
+            NewTokens[I].setAnnotationValue(
+                static_cast<void *>(Transformed.get()));
+        }
+      }
+      continue;
+    }
+
+    if (!TSD->Tokens[I].is(tok::identifier)) continue;
+    IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
+    if (!II) continue;
+    auto It = ParamMap.find(II->getName());
+    if (It == ParamMap.end()) continue;
+
+    ParamInfo &PI = It->second;
+    if (!TemplateArgs.hasTemplateArgument(PI.Depth, PI.Index))
+      continue;
+    const TemplateArgument &Arg = TemplateArgs(PI.Depth, PI.Index);
+
+    if (isa<TemplateTypeParmDecl>(PI.Param)) {
+      // Type template parameter: substitute with annot_typename.
+      assert(Arg.getKind() == TemplateArgument::Type);
+      QualType QT = Arg.getAsType();
+      NewTokens[I].setKind(tok::annot_typename);
+      NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
+      NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
+    } else if (isa<NonTypeTemplateParmDecl>(PI.Param)) {
+      // Non-type template parameter: substitute with annot_token_seq_expr.
+      Expr *Val = nullptr;
+      if (Arg.getKind() == TemplateArgument::Expression) {
+        Val = Arg.getAsExpr();
+      } else if (Arg.getKind() == TemplateArgument::Integral) {
+        Val = IntegerLiteral::Create(
+            Ctx, Arg.getAsIntegral(), Arg.getIntegralType(),
+            TSD->Tokens[I].getLocation());
+      }
+      if (Val) {
+        NewTokens[I].setKind(tok::annot_token_seq_expr);
+        NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
+        NewTokens[I].setAnnotationValue(static_cast<void *>(Val));
+      }
+    }
+  }
+
+  auto *NewTSD = new (Ctx) TokenSequenceData();
+  NewTSD->Tokens = NewTokens;
+  NewTSD->NumTokens = TSD->NumTokens;
+
+  return RecordConsteval.RecordAndReturn(
+      CXXTokenSequenceExpr::Create(Ctx, E->getOperatorLoc(),
+                                   E->getOperandRange(), NewTSD));
 }
 
 ExprResult TemplateInstantiator::TransformCXXDefaultArgExpr(

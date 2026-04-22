@@ -184,6 +184,7 @@ def RequiresExpr : StmtNode<Expr>;
 
 // C++2c Reflection expressions
 def CXXReflectExpr : StmtNode<Expr>;
+def CXXTokenSequenceExpr : StmtNode<Expr>;
 def CXXMetafunctionExpr : StmtNode<Expr>;
 def CXXSpliceExpr : StmtNode<Expr>;
 def CXXBuiltinInjectExpr : StmtNode<Expr>;

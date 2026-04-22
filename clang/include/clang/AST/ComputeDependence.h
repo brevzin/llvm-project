@@ -97,6 +97,7 @@ class ParenListExpr;
 class PseudoObjectExpr;
 class AtomicExpr;
 class CXXReflectExpr;
+class CXXTokenSequenceExpr;
 class CXXMetafunctionExpr;
 class CXXSpliceExpr;
 class CXXDependentMemberSpliceExpr;
@@ -206,6 +207,7 @@ ExprDependence computeDependence(PseudoObjectExpr *E);
 ExprDependence computeDependence(AtomicExpr *E);
 
 ExprDependence computeDependence(CXXReflectExpr *E, const ASTContext &C);
+ExprDependence computeDependence(CXXTokenSequenceExpr *E);
 ExprDependence computeDependence(CXXMetafunctionExpr *E);
 ExprDependence computeDependence(CXXSpliceExpr *E);
 ExprDependence computeDependence(CXXDependentMemberSpliceExpr *E);

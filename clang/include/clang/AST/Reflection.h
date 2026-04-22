@@ -114,11 +114,6 @@ enum class ReflectionKind {
   /// \brief A reflection of an annotation (P2996 ext).
   Annotation,
 
-  /// \brief A reflection of a token sequence (^^{ ... }).
-  ///
-  /// Corresponds to a TokenSequenceData.
-  TokenSequence,
-
   /// \brief A reflection of an identifier constructed via __builtin_id.
   ///
   /// Corresponds to an IdentifierInfo*.
