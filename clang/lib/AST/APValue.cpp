@@ -760,9 +760,19 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
       ID.AddInteger(Tok.getKind());
       if (Tok.is(tok::annot_typename))
         QualType::getFromOpaquePtr(Tok.getAnnotationValue()).Profile(ID);
-      else if (Tok.is(tok::annot_token_seq_expr))
-        ID.AddPointer(Tok.getAnnotationValue());
-      else if (const auto *II = Tok.getIdentifierInfo())
+      else if (Tok.is(tok::annot_token_seq_expr)) {
+        // The annotation value is a ConstantExpr containing the evaluated
+        // APValue. Profile the value itself for structural comparison.
+        if (auto *CE = dyn_cast_or_null<ConstantExpr>(
+                static_cast<Expr *>(Tok.getAnnotationValue()))) {
+          if (CE->hasAPValueResult())
+            CE->getAPValueResult().Profile(ID);
+          else
+            ID.AddPointer(CE);
+        } else {
+          ID.AddPointer(Tok.getAnnotationValue());
+        }
+      } else if (const auto *II = Tok.getIdentifierInfo())
         ID.AddString(II->getName());
       else if (Tok.isLiteral() && Tok.getLiteralData())
         ID.AddString(StringRef(Tok.getLiteralData(), Tok.getLength()));
