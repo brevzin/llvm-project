@@ -590,27 +590,34 @@ namespace N27 {
     static_assert(Wrapped{}.member == 42);
 }
 
+// Declare std::meta::str_lit stub for testing.
+namespace std::meta {
+    consteval auto str_lit(auto const&...) -> token_sequence;
+}
+
 namespace N28 {
-    // __builtin_str_literal produces a token_sequence with a string literal.
-    static_assert(__builtin_str_literal("hello") == ^^{ "hello" });
+    using std::meta::str_lit;
+
+    // str_lit produces a token_sequence with a string literal.
+    static_assert(str_lit("hello") == ^^{ "hello" });
 
     // Concatenation of multiple string arguments.
-    static_assert(__builtin_str_literal("he", "llo") == ^^{ "hello" });
+    static_assert(str_lit("he", "llo") == ^^{ "hello" });
 
     // Integer arguments (unlike __builtin_id, can start with int).
-    static_assert(__builtin_str_literal(123) == ^^{ "123" });
-    static_assert(__builtin_str_literal(0) == ^^{ "0" });
+    static_assert(str_lit(123) == ^^{ "123" });
+    static_assert(str_lit(0) == ^^{ "0" });
 
     // Mixed string and integer arguments.
-    static_assert(__builtin_str_literal("x", 42, "y") == ^^{ "x42y" });
-    static_assert(__builtin_str_literal("item_", 1) == ^^{ "item_1" });
+    static_assert(str_lit("x", 42, "y") == ^^{ "x42y" });
+    static_assert(str_lit("item_", 1) == ^^{ "item_1" });
 
     // Empty string.
-    static_assert(__builtin_str_literal("") == ^^{ "" });
+    static_assert(str_lit("") == ^^{ "" });
 
     // Two tokens != one token (exact token form comparison).
     static_assert(^^{ "hel" "lo" } != ^^{ "hello" });
 
-    // User-defined string-like type works with __builtin_str_literal.
-    static_assert(__builtin_str_literal(string_view("world")) == ^^{ "world" });
+    // User-defined string-like type works with str_lit.
+    static_assert(str_lit(string_view("world")) == ^^{ "world" });
 }

@@ -6907,6 +6907,19 @@ ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
   FunctionDecl *FDecl = dyn_cast_or_null<FunctionDecl>(NDecl);
   unsigned BuiltinID = (FDecl ? FDecl->getBuiltinID() : 0);
 
+  // Intercept calls to std::meta::str_lit and transform them into
+  // CXXBuiltinStrLiteralExpr nodes.
+  if (FDecl && FDecl->getDeclName().isIdentifier() &&
+      FDecl->getName() == "str_lit") {
+    // Check qualified name directly - handles inline namespaces like
+    // std::meta::reflection_v2 that are exposed as std::meta.
+    if (FDecl->getQualifiedNameAsString() == "std::meta::str_lit") {
+      SmallVector<Expr *, 4> ArgVec(Args);
+      return ActOnCXXBuiltinStrLiteral(Fn->getBeginLoc(), LParenLoc,
+                                       ArgVec, RParenLoc);
+    }
+  }
+
   // Functions with 'interrupt' attribute cannot be called directly.
   if (FDecl) {
     if (FDecl->hasAttr<AnyX86InterruptAttr>()) {
@@ -18748,7 +18761,11 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func,
   // If this is the first "real" use, act on that.
   if (OdrUse == OdrUseContext::Used && !Func->isUsed(/*CheckUsedAttr=*/false)) {
     // Keep track of used but undefined functions.
-    if (!Func->isDefined() && !Func->isInAnotherModuleUnit()) {
+    // Skip std::meta::str_lit which is intercepted at call sites.
+    bool IsStrLit = Func->getDeclName().isIdentifier() &&
+                    Func->getName() == "str_lit" &&
+                    Func->getQualifiedNameAsString() == "std::meta::str_lit";
+    if (!Func->isDefined() && !Func->isInAnotherModuleUnit() && !IsStrLit) {
       if (mightHaveNonExternalLinkage(Func))
         UndefinedButUsed.insert(std::make_pair(Func->getCanonicalDecl(), Loc));
       else if (Func->getMostRecentDecl()->isInlined() &&

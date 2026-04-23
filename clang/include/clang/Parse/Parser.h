@@ -8374,7 +8374,6 @@ private:
   ExprResult ParseCXXBuiltinInjectExpression();
   ExprResult ParseCXXBuiltinReportTokensExpression();
   ExprResult ParseCXXBuiltinIdExpression();
-  ExprResult ParseCXXBuiltinStrLiteralExpression();
 
   bool ParseSpliceSpecifier(bool TryParseSpecialization = false);
 

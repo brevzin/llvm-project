@@ -72,7 +72,7 @@ namespace N {
                 delim();
                 fmt_body += ^^{
                     out = std::format_to(out,
-                        \(__builtin_str_literal(".", identifier_of(nsdm), "={}")),
+                        \(std::meta::str_lit(".", identifier_of(nsdm), "={}")),
                         object.\(nsdm)
                     );
                 };

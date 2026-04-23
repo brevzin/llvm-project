@@ -5884,7 +5884,7 @@ public:
   }
 };
 
-/// Represents a call to __builtin_str_literal(...), which produces a
+/// Represents a call to std::meta::str_lit(...), which produces a
 /// token_sequence containing a single string literal token formed by
 /// concatenating the arguments.
 class CXXBuiltinStrLiteralExpr : public Expr {

@@ -326,43 +326,6 @@ ExprResult Parser::ParseCXXBuiltinIdExpression() {
                                    Args, Parens.getCloseLocation());
 }
 
-ExprResult Parser::ParseCXXBuiltinStrLiteralExpression() {
-  assert(Tok.is(tok::kw___builtin_str_literal) &&
-         "expected '__builtin_str_literal'");
-  SourceLocation KwLoc = ConsumeToken();
-
-  BalancedDelimiterTracker Parens(*this, tok::l_paren);
-  if (Parens.expectAndConsume())
-    return ExprError();
-
-  SmallVector<Expr *, 4> Args;
-  while (true) {
-    ExprResult Arg = ParseAssignmentExpression();
-    if (Arg.isInvalid()) {
-      Parens.skipToEnd();
-      return ExprError();
-    }
-
-    // Allow pack expansion: __builtin_str_literal(args...).
-    if (Tok.is(tok::ellipsis))
-      Arg = Actions.ActOnPackExpansion(Arg.get(), ConsumeToken());
-    if (Arg.isInvalid()) {
-      Parens.skipToEnd();
-      return ExprError();
-    }
-    Args.push_back(Arg.get());
-
-    if (!TryConsumeToken(tok::comma))
-      break;
-  }
-
-  if (Parens.consumeClose())
-    return ExprError();
-
-  return Actions.ActOnCXXBuiltinStrLiteral(KwLoc, Parens.getOpenLocation(),
-                                           Args, Parens.getCloseLocation());
-}
-
 ExprResult Parser::ParseCXXMetafunctionExpression() {
   assert(Tok.is(tok::kw___metafunction) && "expected '___metafunction'");
   SourceLocation KwLoc = ConsumeToken();

@@ -3068,6 +3068,9 @@ consteval auto id(Ts const&... args) -> info {
   return __builtin_id(args...);
 }
 
+template <class... Ts>
+consteval auto str_lit(Ts const&... ) -> token_sequence;
+
 _LIBCPP_END_NAMESPACE_REFLECTION_V2
 
 #endif  // __has_feature(reflection)

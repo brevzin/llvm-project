@@ -2821,7 +2821,7 @@ void StmtPrinter::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *S) {
 }
 
 void StmtPrinter::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *S) {
-  OS << "__builtin_str_literal(";
+  OS << "std::meta::str_lit(";
   for (unsigned I = 0; I < S->getNumArgs(); ++I) {
     if (I > 0) OS << ", ";
     PrintExpr(S->getArg(I));
