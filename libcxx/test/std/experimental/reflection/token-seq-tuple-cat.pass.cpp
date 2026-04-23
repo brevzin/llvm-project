@@ -39,7 +39,7 @@ constexpr auto tuple_cat2(Ts&&... ts) {
         }
 
         std::meta::info ret = substitute(^^std::tuple, ctypes);
-        __builtin_inject(^^{
+        std::meta::queue_injection(^^{
             return \(ret)(\(exprs));
         });
     }

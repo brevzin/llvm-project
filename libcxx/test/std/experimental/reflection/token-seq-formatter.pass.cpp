@@ -83,7 +83,7 @@ namespace N {
                 return out;
             };
 
-            __builtin_inject(^^std, ^^{
+            std::meta::queue_injection(^^std, ^^{
                 template <>
                 struct formatter<\(ty)> {
                     constexpr auto parse(auto& ctx) { return ctx.begin(); }
@@ -94,7 +94,7 @@ namespace N {
                 };
             });
             #else
-            __builtin_inject(^^std, ^^{
+            std::meta::queue_injection(^^std, ^^{
                 template <>
                 struct formatter<\(ty)> : ::N::DebugFormatter { };
             });

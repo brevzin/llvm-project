@@ -1072,7 +1072,7 @@ ExprResult Sema::ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
   // Verify the message is a string literal.
   if (!isa<StringLiteral>(Msg->IgnoreParenCasts())) {
     Diag(Msg->getBeginLoc(), diag::err_expected_string_literal)
-        << /*in*/ 0 << "'__builtin_report_tokens'";
+        << /*in*/ 0 << "'report_tokens'";
     return ExprError();
   }
   return CXXBuiltinReportTokensExpr::Create(Context, Context.VoidTy, Msg,
@@ -2094,7 +2094,7 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
         Diag(PD.first, PD.second);
     }
 
-    // Collect any pending token injections from __builtin_inject calls.
+    // Collect any pending token injections from queue_injection calls.
     PendingInjections.append(ER.PendingInjections.begin(),
                              ER.PendingInjections.end());
   }
@@ -2141,7 +2141,7 @@ void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
 
     // Build: annotation_value.on_complete(^^RD)
     // Use ImmediateFunctionContext so that consteval calls and
-    // __builtin_inject inside on_complete are treated as plainly
+    // queue_injection inside on_complete are treated as plainly
     // constant-evaluated.
     EnterExpressionEvaluationContext ConstantEvaluated(
         *this, ExpressionEvaluationContext::ImmediateFunctionContext);

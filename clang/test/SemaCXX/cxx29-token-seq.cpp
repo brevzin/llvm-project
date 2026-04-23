@@ -1,20 +1,31 @@
 // RUN: %clang_cc1 -std=c++26 -freflection -fexpansion-statements -verify -verify-ignore-unexpected=note %s
 
-using info = decltype(^^::);
-using token_sequence = decltype(^^{ });
 using size_t = decltype(sizeof(0));
 
-// Forward declaration of std::meta::{id, str_lit} for use (will be intercepted anyway)
+// Forward declaration of std::meta functions (will be intercepted by compiler).
 namespace std::meta {
+    using info = decltype(^^::);
+    using token_sequence = decltype(^^{ });
+
+
     template <class... Ts>
     consteval auto id(Ts const&...) -> info;
 
     template <class... Ts>
     consteval auto str_lit(Ts const&...) -> token_sequence;
+
+    consteval auto queue_injection(token_sequence) -> void;
+    consteval auto queue_injection(info target_ns, token_sequence) -> void;
+
+    consteval auto report_tokens(char const* msg, token_sequence tokens) -> void;
 }
 
+using std::meta::info;
+using std::meta::token_sequence;
 using std::meta::id;
 using std::meta::str_lit;
+using std::meta::queue_injection;
+using std::meta::report_tokens;
 
 struct string_view {
 private:
@@ -34,7 +45,7 @@ namespace N1 {
     constexpr token_sequence tok = ^^{ constexpr int x = 42; };
     static_assert(x == 42); // expected-error {{use of undeclared}}
     consteval {
-        __builtin_inject(tok);
+        queue_injection(tok);
     }
     static_assert(x == 42);
 }
@@ -44,14 +55,14 @@ namespace N2 {
     constexpr token_sequence tok = ^^{ constexpr int y = \(value); };
     static_assert(y == value); // expected-error {{use of undeclared}}
     consteval {
-        __builtin_inject(tok);
+        queue_injection(tok);
     }
     static_assert(y == 5);
 
     struct Point { int x, y; };
     constexpr Point p = {.x=1, .y=2};
     consteval {
-        __builtin_inject(^^{
+        queue_injection(^^{
             constexpr int px = \(p).x;
         });
     }
@@ -63,7 +74,7 @@ namespace N2 {
         };
     }
     consteval {
-        __builtin_inject(make_seq(10));
+        queue_injection(make_seq(10));
     }
     static_assert(z == 10);
 }
@@ -71,7 +82,7 @@ namespace N2 {
 namespace N3 {
     constexpr info r = ^^int;
     consteval {
-        __builtin_inject(^^{
+        queue_injection(^^{
             constexpr \(r) v = 12;
         });
     }
@@ -84,7 +95,7 @@ namespace N3 {
         };
     }
     consteval {
-        __builtin_inject(make_variable(^^char));
+        queue_injection(make_variable(^^char));
     }
     static_assert(^^decltype(var) == ^^char);
 }
@@ -94,8 +105,8 @@ namespace N4 {
     struct enable_if {
         consteval {
             if (B) {
-                __builtin_inject(^^{ using type1 = T; });
-                __builtin_inject(^^{ using type2 = \(^^T); });
+                queue_injection(^^{ using type1 = T; });
+                queue_injection(^^{ using type2 = \(^^T); });
             }
         }
     };
@@ -108,7 +119,7 @@ namespace N4 {
     template <auto V>
     struct constant {
         consteval {
-            __builtin_inject(^^{
+            queue_injection(^^{
                 static constexpr \(^^decltype(V)) value = \(V);
             });
         }
@@ -123,7 +134,7 @@ namespace N5 {
         consteval {
             info types[] = {^^Ts...};
             for (size_t k = 0; k != sizeof...(Ts); ++k) {
-                __builtin_inject(^^{
+                queue_injection(^^{
                     \(types[k]) \(id("_", k)) = \(types[k])();
                 });
             }
@@ -132,7 +143,7 @@ namespace N5 {
         template <size_t I>
         constexpr auto get() const -> auto const& {
             consteval {
-                __builtin_inject(^^{
+                queue_injection(^^{
                     return \(id("_", I));
                 });
             }
@@ -152,7 +163,7 @@ namespace N5 {
     };
 
     consteval {
-        __builtin_inject(^^{
+        queue_injection(^^{
             constexpr int \(id(Stringish{})) = 2;
         });
     }
@@ -169,7 +180,7 @@ namespace N6 {
     namespace inner { }
 
     consteval {
-        __builtin_inject(^^inner, make_var(42));
+        queue_injection(^^inner, make_var(42));
     }
     static_assert(inner::injected_value == 42);
 
@@ -184,7 +195,7 @@ namespace N6 {
 
     auto check() -> void {
         consteval {
-            __builtin_inject(^^inner, make_type(10));
+            queue_injection(^^inner, make_type(10));
         }
         inner::A a;
         a.l();
@@ -203,9 +214,9 @@ namespace N7 {
 
     struct S {
         consteval {
-            __builtin_inject(make_field(^^int, "x", 1));
-            __builtin_inject(make_field(^^int, string_view("y"), 2));
-            __builtin_inject(make_field2(^^int, "z", ^^{ = 3 }));
+            queue_injection(make_field(^^int, "x", 1));
+            queue_injection(make_field(^^int, string_view("y"), 2));
+            queue_injection(make_field2(^^int, "z", ^^{ = 3 }));
         }
     };
 
@@ -221,7 +232,7 @@ namespace N8 {
     template <int I, class... Ts>
     constexpr auto nth(Ts... ts) {
         consteval {
-            __builtin_inject(^^{
+            queue_injection(^^{
                 return ts...[\(I)];
             });
         }
@@ -231,7 +242,7 @@ namespace N8 {
     constexpr auto nth_local(Ts... ts) {
         consteval {
             info vars[] = {^^ts...};
-            __builtin_inject(^^{
+            queue_injection(^^{
                 return \(vars[I]);
             });
         }
@@ -257,7 +268,7 @@ namespace N9 {
     consteval auto get_m(T x) -> int {
         consteval {
             auto r = ^^A::m;
-            __builtin_inject(^^{
+            queue_injection(^^{
                 return x.\(r); // expected-error {{class 'B' not derived from}}
             });
         }
@@ -270,7 +281,7 @@ namespace N9 {
 namespace N10 {
     consteval void bad_report() {
         string_view sv("hello");
-        __builtin_report_tokens(sv, ^^{ int x; }); // expected-error {{expected string literal in '__builtin_report_tokens'}}
+        report_tokens(sv, ^^{ int x; }); // expected-error {{no matching function for call to 'report_tokens'}}
     }
 }
 
@@ -346,7 +357,7 @@ namespace N11 {
 }
 
 namespace N12 {
-    // Test that __builtin_inject handles operator token_sequence() conversion.
+    // Test that queue_injection handles operator token_sequence() conversion.
     struct Builder {
         token_sequence body = ^^{};
         consteval auto operator+=(token_sequence tok) -> void {
@@ -360,7 +371,7 @@ namespace N12 {
         consteval {
             Builder b;
             b += ^^{ static constexpr int x = 1; };
-            __builtin_inject(b);
+            queue_injection(b);
         }
     };
 
@@ -374,7 +385,7 @@ namespace N13 {
         template <class T> static constexpr int val = sizeof(T);
 
         consteval {
-            __builtin_inject(^^{
+            queue_injection(^^{
                 template <class T> constexpr auto get(T ) -> int {
                     return val<T>;
                 }
@@ -397,7 +408,7 @@ namespace N14 {
 
     consteval {
         Derived d;
-        __builtin_inject(d);
+        queue_injection(d);
     }
     static_assert(inherited_conv_ok == 1);
 
@@ -409,7 +420,7 @@ namespace N14 {
 
     consteval { // expected-error {{evaluating expression of a consteval block must be a constant expression}}
         OnlyRvalue x;
-        __builtin_inject(x);
+        queue_injection(x); // expected-error {{no matching function for call}}
     }
     static_assert(refqual_conv_bug == 1); // expected-error {{use of undeclared identifier 'refqual_conv_bug'}}
 }
@@ -428,7 +439,7 @@ namespace N15 {
 
     consteval {
         X x;
-        __builtin_inject(x);
+        queue_injection(x);
     }
     static_assert(choose == 2);
 }
@@ -445,7 +456,7 @@ namespace N16 {
 
     consteval {
         X x;
-        __builtin_inject(x);
+        queue_injection(x);
     }
     static_assert(conv_template_ok == 1);
 }
@@ -464,15 +475,15 @@ namespace N17 {
 
     consteval {
         D d;
-        __builtin_inject(d);
+        queue_injection(d);
     }
     static_assert(using_conv_ok == 1);
 }
 
 namespace N18 {
     // Empty token sequences are a no-op when injected.
-    consteval { __builtin_inject(^^{}); }
-    consteval { __builtin_inject(^^{ }); }
+    consteval { queue_injection(^^{}); }
+    consteval { queue_injection(^^{ }); }
     static_assert(true);
 }
 
@@ -480,7 +491,7 @@ namespace N19 {
     // Nested braces inside ^^{ ... } are captured as part of the token stream.
     consteval int n_made = 0;
     consteval {
-        __builtin_inject(^^{
+        queue_injection(^^{
             constexpr int nested_block_value = []{
                 int x = 1;
                 { int y = 2; x += y; { x += 7; } }
@@ -495,18 +506,18 @@ namespace N20 {
     // Negative: injecting a non-token-sequence reflection.
     constexpr info type_refl = ^^int;
     consteval { // expected-error {{evaluating expression of a consteval block must be a constant expression}}
-        __builtin_inject(type_refl);
+        queue_injection(type_refl); // expected-error {{no matching function for call}}
     }
 }
 
 namespace N21 {
-    // __builtin_inject inside a non-consteval, non-constexpr context is
-    // accepted at parse time but never evaluated, so it injects nothing.
+    // queue_injection is consteval, so calling it outside a consteval context
+    // is an error (unlike the old __builtin_inject keyword).
     token_sequence make_seq() {
         return ^^{ int q = 1; };
     }
     void caller() {
-        __builtin_inject(make_seq());
+        queue_injection(make_seq()); // expected-error {{cannot take address of consteval function}}
     }
 }
 
@@ -517,10 +528,10 @@ namespace N22 {
     consteval auto cstr() -> token_sequence { return ^^{ "hello" }; }
     consteval {
         // int, float, type, identifier, function-name
-        __builtin_inject(^^{ constexpr int kInt = \(x); });
-        __builtin_inject(^^{ constexpr float kFloat = \(f); });
-        __builtin_inject(^^{ using KType = \(^^int); });
-        __builtin_inject(^^{ constexpr auto kStr = \(cstr()); });
+        queue_injection(^^{ constexpr int kInt = \(x); });
+        queue_injection(^^{ constexpr float kFloat = \(f); });
+        queue_injection(^^{ using KType = \(^^int); });
+        queue_injection(^^{ constexpr auto kStr = \(cstr()); });
     }
     static_assert(kInt == 7);
     static_assert(kFloat == 1.5f);
@@ -533,7 +544,7 @@ namespace N23 {
     // in the outer scope. (When this changes, the FIXME below fires.)
     consteval auto add_x() -> token_sequence { return ^^{ int x = 5; (void)x; }; }
     constexpr int caller() {
-        consteval { __builtin_inject(add_x()); }
+        consteval { queue_injection(add_x()); }
         // FIXME: x = 5 was injected into the consteval lambda's compound
         // and isn't visible here. Update this test if/when block-scope
         // injection targets the enclosing function body.
@@ -548,8 +559,8 @@ namespace N24 {
     template <typename T, T V>
     struct holder {
         consteval {
-            __builtin_inject(^^{ using element = T; });
-            __builtin_inject(^^{ static constexpr T value = V; });
+            queue_injection(^^{ using element = T; });
+            queue_injection(^^{ static constexpr T value = V; });
         }
     };
     using H = holder<int, 42>;
@@ -560,15 +571,15 @@ namespace N24 {
 namespace N25 {
     // Negative: malformed injected tokens diagnose at re-parse time.
     consteval {
-        __builtin_inject(^^{ int int q; }); // expected-error {{cannot combine with previous 'int' declaration specifier}}
+        queue_injection(^^{ int int q; }); // expected-error {{cannot combine with previous 'int' declaration specifier}}
     }
 }
 
 namespace N26 {
-    // Two-arg __builtin_inject with a non-namespace target diagnoses.
+    // Two-arg queue_injection with a non-namespace target diagnoses.
     struct S {};
     consteval { // expected-error {{evaluating expression of a consteval block must be a constant expression}}
-        __builtin_inject(^^S, ^^{ int z = 0; });
+        queue_injection(^^S, ^^{ int z = 0; });
     }
 }
 
@@ -577,7 +588,7 @@ namespace N27 {
     constexpr token_sequence inner = ^^{ constexpr int ts_x = 1; };
     constexpr token_sequence outer = ^^{ \(inner) constexpr int ts_y = 2; };
     consteval {
-        __builtin_inject(outer);
+        queue_injection(outer);
     }
     static_assert(ts_x == 1);
     static_assert(ts_y == 2);
@@ -587,7 +598,7 @@ namespace N27 {
     constexpr token_sequence b = ^^{ \(a) constexpr int b_var = 20; };
     constexpr token_sequence c = ^^{ \(b) constexpr int c_var = 30; };
     consteval {
-        __builtin_inject(c);
+        queue_injection(c);
     }
     static_assert(a_var == 10);
     static_assert(b_var == 20);
@@ -598,7 +609,7 @@ namespace N27 {
         return ^^{ struct Wrapped { \(ts) }; };
     }
     consteval {
-        __builtin_inject(wrap(^^{ int member = 42; }));
+        queue_injection(wrap(^^{ int member = 42; }));
     }
     static_assert(Wrapped{}.member == 42);
 }

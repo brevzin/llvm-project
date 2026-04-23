@@ -1148,7 +1148,7 @@ Decl *Parser::ParseConstevalBlockDeclaration(SourceLocation &DeclEnd) {
   Decl *Result = Actions.ActOnConstevalBlockDeclaration(ConstevalLoc,
                                                         Invocation.get());
 
-  // Process any pending token injections from __builtin_inject calls.
+  // Process any pending token injections from queue_injection calls.
   // (During template instantiation, BuildConstevalBlockDeclaration calls
   // ProcessPendingTokenInjections via the callback instead.)
   DrainPendingTokenInjections();
@@ -4097,7 +4097,7 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
 
   // Handle annotation on_complete callbacks. At this point, the class is
   // fully complete and CurContext is the enclosing namespace, so any
-  // unary __builtin_inject will inject into that namespace.
+  // unary queue_injection will inject into that namespace.
   if (TagDecl) {
     Actions.HandleAnnotationOnComplete(TagDecl);
     while (!Actions.PendingInjections.empty()) {

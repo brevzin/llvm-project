@@ -6899,28 +6899,35 @@ ExprResult Sema::ActOnConvertVectorExpr(Expr *E, ParsedType ParsedDestTy,
   return ConvertVectorExpr(E, TInfo, BuiltinLoc, RParenLoc);
 }
 
-// Returns a member function pointer to intercept calls to certain std::meta
-// functions (like std::meta::id and std::meta::str_lit) that are implemented
-// as compiler magic rather than actual function definitions.
-using InterceptedMetaCallFn = ExprResult (Sema::*)(SourceLocation,
-                                                   SourceLocation,
-                                                   ArrayRef<Expr *>,
-                                                   SourceLocation);
+// Identifies std::meta functions that are intercepted by the compiler.
+// These are declared as consteval functions but implemented as compiler magic.
+enum class InterceptedMetaFn {
+  None,
+  Id,              // std::meta::id(...) -> info
+  StrLit,          // std::meta::str_lit(...) -> token_sequence
+  QueueInjection,  // std::meta::queue_injection(tokens) or (ns, tokens) -> void
+  ReportTokens,    // std::meta::report_tokens(msg, tokens) -> void
+};
 
-static InterceptedMetaCallFn TryInterceptMetaCall(const FunctionDecl *FDecl) {
+static InterceptedMetaFn getInterceptedMetaFn(const FunctionDecl *FDecl) {
   if (!FDecl || !FDecl->getDeclName().isIdentifier())
-    return nullptr;
+    return InterceptedMetaFn::None;
 
   // Check qualified name directly - handles inline namespaces like
   // std::meta::reflection_v2 that are exposed as std::meta.
   StringRef Name = FDecl->getName();
-  if (Name == "id" && FDecl->getQualifiedNameAsString() == "std::meta::id")
-    return &Sema::ActOnCXXBuiltinId;
-  if (Name == "str_lit" &&
-      FDecl->getQualifiedNameAsString() == "std::meta::str_lit")
-    return &Sema::ActOnCXXBuiltinStrLiteral;
+  std::string QualName = FDecl->getQualifiedNameAsString();
 
-  return nullptr;
+  if (Name == "id" && QualName == "std::meta::id")
+    return InterceptedMetaFn::Id;
+  if (Name == "str_lit" && QualName == "std::meta::str_lit")
+    return InterceptedMetaFn::StrLit;
+  if (Name == "queue_injection" && QualName == "std::meta::queue_injection")
+    return InterceptedMetaFn::QueueInjection;
+  if (Name == "report_tokens" && QualName == "std::meta::report_tokens")
+    return InterceptedMetaFn::ReportTokens;
+
+  return InterceptedMetaFn::None;
 }
 
 ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
@@ -6931,12 +6938,42 @@ ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
   FunctionDecl *FDecl = dyn_cast_or_null<FunctionDecl>(NDecl);
   unsigned BuiltinID = (FDecl ? FDecl->getBuiltinID() : 0);
 
-  // Intercept calls to std::meta::id and std::meta::str_lit, which are
-  // declared as consteval functions but implemented as compiler builtins.
-  if (auto InterceptFn = TryInterceptMetaCall(FDecl)) {
+  // Intercept calls to certain std::meta functions that are declared as
+  // consteval functions but implemented as compiler builtins.
+  if (auto Intercepted = getInterceptedMetaFn(FDecl);
+      Intercepted != InterceptedMetaFn::None) {
     // Because we intercept this call, remove it from undefined tracking.
     UndefinedButUsed.erase(FDecl->getCanonicalDecl());
-    return (this->*InterceptFn)(Fn->getBeginLoc(), LParenLoc, Args, RParenLoc);
+    SourceLocation KwLoc = Fn->getBeginLoc();
+
+    switch (Intercepted) {
+    case InterceptedMetaFn::Id:
+      return ActOnCXXBuiltinId(KwLoc, LParenLoc, Args, RParenLoc);
+    case InterceptedMetaFn::StrLit:
+      return ActOnCXXBuiltinStrLiteral(KwLoc, LParenLoc, Args, RParenLoc);
+    case InterceptedMetaFn::QueueInjection:
+      // queue_injection(tokens) or queue_injection(ns, tokens)
+      if (Args.size() == 1)
+        return ActOnCXXBuiltinInject(KwLoc, LParenLoc, Args[0], RParenLoc);
+      if (Args.size() == 2)
+        return ActOnCXXBuiltinInject(KwLoc, LParenLoc, Args[1], RParenLoc,
+                                     Args[0]);
+      Diag(LParenLoc, diag::err_typecheck_call_too_many_args)
+          << 0 << 2 << static_cast<unsigned>(Args.size()) << 0
+          << Fn->getSourceRange();
+      return ExprError();
+    case InterceptedMetaFn::ReportTokens:
+      // report_tokens(msg, tokens)
+      if (Args.size() == 2)
+        return ActOnCXXBuiltinReportTokens(KwLoc, LParenLoc, Args[0], Args[1],
+                                           RParenLoc);
+      Diag(LParenLoc, diag::err_typecheck_call_too_few_args)
+          << 0 << 2 << static_cast<unsigned>(Args.size()) << 0
+          << Fn->getSourceRange();
+      return ExprError();
+    case InterceptedMetaFn::None:
+      llvm_unreachable("handled above");
+    }
   }
 
   // Functions with 'interrupt' attribute cannot be called directly.

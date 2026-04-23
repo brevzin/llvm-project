@@ -5692,8 +5692,8 @@ public:
   }
 };
 
-/// Represents a call to __builtin_inject(token_sequence_reflection).
-/// This expression injects the tokens from a token sequence reflection into
+/// Represents a call to std::meta::queue_injection(token_sequence).
+/// This expression injects the tokens from a token sequence into
 /// the enclosing scope during consteval evaluation.
 class CXXBuiltinInjectExpr : public Expr {
   // Args[0] = Operand (token sequence), Args[1] = TargetNS (optional)

@@ -2793,7 +2793,7 @@ void StmtPrinter::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *S) {
 }
 
 void StmtPrinter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *S) {
-  OS << "__builtin_inject(";
+  OS << "std::meta::queue_injection(";
   if (S->hasTargetNS()) {
     PrintExpr(S->getTargetNS());
     OS << ", ";
@@ -2804,7 +2804,7 @@ void StmtPrinter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *S) {
 
 void StmtPrinter::VisitCXXBuiltinReportTokensExpr(
     CXXBuiltinReportTokensExpr *S) {
-  OS << "__builtin_report_tokens(";
+  OS << "std::meta::report_tokens(";
   PrintExpr(S->getMessage());
   OS << ", ";
   PrintExpr(S->getOperand());

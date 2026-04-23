@@ -3069,6 +3069,18 @@ consteval auto id(Ts const&...) -> info;
 template <class... Ts>
 consteval auto str_lit(Ts const&...) -> token_sequence;
 
+// Queue token injection into the current or specified namespace.
+// Accepts any type convertible to token_sequence.
+template <class T>
+consteval auto queue_injection(T const& tokens) -> void;
+
+template <class T>
+consteval auto queue_injection(info target_ns, T const& tokens) -> void;
+
+// Report tokens for debugging (emits a warning with the token content).
+template <class T>
+consteval auto report_tokens(char const* msg, T const& tokens) -> void;
+
 _LIBCPP_END_NAMESPACE_REFLECTION_V2
 
 #endif  // __has_feature(reflection)

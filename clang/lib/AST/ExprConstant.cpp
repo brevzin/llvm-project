@@ -16993,7 +16993,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
   PresumedLoc PLoc = Info.Ctx.getSourceManager().getPresumedLoc(Loc);
 
   llvm::raw_fd_ostream &OS = llvm::errs();
-  OS << "__builtin_report_tokens";
+  OS << "std::meta::report_tokens";
   if (PLoc.isValid())
     OS << " at " << PLoc.getFilename() << ":" << PLoc.getLine();
   OS << " \"" << Msg << "\":\n  ";

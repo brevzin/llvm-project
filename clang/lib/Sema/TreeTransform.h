@@ -8205,7 +8205,7 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
     Statements.push_back(Result.getAs<Stmt>());
 
     // Pick up any statements injected by consteval blocks
-    // (e.g., return statements from __builtin_inject).
+    // (e.g., return statements from queue_injection).
     if (!getSema().PendingInjectedStmts.empty()) {
       Statements.append(getSema().PendingInjectedStmts.begin(),
                         getSema().PendingInjectedStmts.end());

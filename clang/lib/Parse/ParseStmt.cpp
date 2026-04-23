@@ -1235,7 +1235,7 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
     LastIsError = R.isInvalid();
 
     // Pick up any statements injected by consteval blocks
-    // (e.g., return statements from __builtin_inject).
+    // (e.g., return statements from queue_injection).
     if (!Actions.PendingInjectedStmts.empty()) {
       Stmts.append(Actions.PendingInjectedStmts.begin(),
                    Actions.PendingInjectedStmts.end());

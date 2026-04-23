@@ -43,7 +43,7 @@ consteval auto param_tokens(std::vector<std::meta::info> params,
     }
   }
 
-  __builtin_report_tokens("param_tokens", result);
+  std::meta::report_tokens("param_tokens", result);
   return result;
 }
 
@@ -60,9 +60,9 @@ consteval auto inject_Vtable(std::meta::info interface) -> void {
     };
   }
 
-  __builtin_report_tokens("vtable", vtable_members);
+  std::meta::report_tokens("vtable", vtable_members);
 
-  __builtin_inject(^^{
+  std::meta::queue_injection(^^{
     struct VTable {
       \(vtable_members)
     } const *vtable;
@@ -89,7 +89,7 @@ consteval auto inject_vtable_for(std::meta::info interface) -> void {
     };
   }
 
-  __builtin_inject(^^{
+  std::meta::queue_injection(^^{
     template <class T> static inline constexpr VTable vtable_for = {
       \(inits)
     };
@@ -118,12 +118,12 @@ consteval auto inject_interface(std::meta::info interface) -> void {
     };
   }
 
-  __builtin_report_tokens("forwarders", forwarders);
-  __builtin_inject(forwarders);
+  std::meta::report_tokens("forwarders", forwarders);
+  std::meta::queue_injection(forwarders);
 }
 
 consteval auto inject_erasing_ctor() -> void {
-  __builtin_inject(^^{
+  std::meta::queue_injection(^^{
     template <class T> Dyn(T&& t)
       : data(&t)
       , vtable(&vtable_for<std::remove_cvref_t<T>>)
