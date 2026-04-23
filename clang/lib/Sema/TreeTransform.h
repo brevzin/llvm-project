@@ -9162,17 +9162,17 @@ TreeTransform<Derived>::TransformCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
   if (Operand.isInvalid())
     return ExprError();
 
-  Expr *TargetNS = nullptr;
+  SmallVector<Expr *, 2> Args;
   if (E->hasTargetNS()) {
     ExprResult TransformedTarget = getDerived().TransformExpr(E->getTargetNS());
     if (TransformedTarget.isInvalid())
       return ExprError();
-    TargetNS = TransformedTarget.get();
+    Args.push_back(TransformedTarget.get());
   }
+  Args.push_back(Operand.get());
 
   return getSema().ActOnCXXBuiltinInject(E->getKwLoc(), E->getLParenLoc(),
-                                         Operand.get(), E->getRParenLoc(),
-                                         TargetNS);
+                                         Args, E->getRParenLoc());
 }
 
 template <typename Derived>
@@ -9187,10 +9187,10 @@ TreeTransform<Derived>::TransformCXXBuiltinReportTokensExpr(
   if (Operand.isInvalid())
     return ExprError();
 
+  Expr *Args[] = {Msg.get(), Operand.get()};
   return getSema().ActOnCXXBuiltinReportTokens(E->getKwLoc(),
-                                                E->getLParenLoc(),
-                                                Msg.get(), Operand.get(),
-                                                E->getRParenLoc());
+                                               E->getLParenLoc(),
+                                               Args, E->getRParenLoc());
 }
 
 template <typename Derived>

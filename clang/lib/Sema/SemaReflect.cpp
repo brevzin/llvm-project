@@ -1056,18 +1056,32 @@ ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
 
 ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                        SourceLocation LParenLoc,
-                                       Expr *Operand,
-                                       SourceLocation RParenLoc,
-                                       Expr *TargetNS) {
+                                       ArrayRef<Expr *> Args,
+                                       SourceLocation RParenLoc) {
+  // queue_injection(tokens) or queue_injection(target_ns, tokens)
+  Expr *TargetNS = nullptr;
+  Expr *Operand = nullptr;
+  if (Args.size() == 1) {
+    Operand = Args[0];
+  } else if (Args.size() == 2) {
+    TargetNS = Args[0];
+    Operand = Args[1];
+  } else {
+    llvm_unreachable("invalid number of arguments");
+  }
   Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
   return CXXBuiltinInjectExpr::Create(Context, Context.VoidTy, Operand,
                                        KwLoc, LParenLoc, RParenLoc, TargetNS);
 }
 
 ExprResult Sema::ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
-                                              SourceLocation LParenLoc,
-                                              Expr *Msg, Expr *Operand,
-                                              SourceLocation RParenLoc) {
+                                             SourceLocation LParenLoc,
+                                             ArrayRef<Expr *> Args,
+                                             SourceLocation RParenLoc) {
+  // report_tokens(msg, tokens)
+  assert(Args.size() == 2 && "expected 2 arguments");
+  Expr *Msg = Args[0];
+  Expr *Operand = Args[1];
   Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
   // Verify the message is a string literal.
   if (!isa<StringLiteral>(Msg->IgnoreParenCasts())) {

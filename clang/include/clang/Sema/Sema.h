@@ -15608,14 +15608,13 @@ public:
 
   ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,
-                                   Expr *Operand,
-                                   SourceLocation RParenLoc,
-                                   Expr *TargetNS = nullptr);
+                                   ArrayRef<Expr *> Args,
+                                   SourceLocation RParenLoc);
 
   ExprResult ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
-                                          SourceLocation LParenLoc,
-                                          Expr *Msg, Expr *Operand,
-                                          SourceLocation RParenLoc);
+                                         SourceLocation LParenLoc,
+                                         ArrayRef<Expr *> Args,
+                                         SourceLocation RParenLoc);
 
   ExprResult ActOnCXXBuiltinId(SourceLocation KwLoc,
                                SourceLocation LParenLoc,
