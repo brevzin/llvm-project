@@ -1082,7 +1082,7 @@ ExprResult Sema::ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
 
 ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,
-                                   SmallVectorImpl<Expr *> &Args,
+                                   ArrayRef<Expr *> Args,
                                    SourceLocation RParenLoc) {
   // For each argument, classify and (for user-defined string-like types)
   // build the size() and data() member calls so the constant evaluator
@@ -1176,9 +1176,9 @@ ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,
 
 ExprResult Sema::ActOnCXXBuiltinStrLiteral(SourceLocation KwLoc,
                                            SourceLocation LParenLoc,
-                                           SmallVectorImpl<Expr *> &Args,
+                                           ArrayRef<Expr *> Args,
                                            SourceLocation RParenLoc) {
-  // Same argument validation as __builtin_id, but with no first-argument
+  // Same argument validation as std::meta::id, but with no first-argument
   // restriction (integers can come first since "123" is a valid literal).
   SmallVector<Expr *, 4> SizeCalls(Args.size(), nullptr);
   SmallVector<Expr *, 4> DataCalls(Args.size(), nullptr);

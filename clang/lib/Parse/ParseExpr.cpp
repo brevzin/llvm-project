@@ -1601,9 +1601,6 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw___builtin_report_tokens:
     return ParseCXXBuiltinReportTokensExpression();
 
-  case tok::kw___builtin_id:
-    return ParseCXXBuiltinIdExpression();
-
   case tok::at: {
     if (NotPrimaryExpression)
       *NotPrimaryExpression = true;

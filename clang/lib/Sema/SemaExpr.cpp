@@ -6899,6 +6899,30 @@ ExprResult Sema::ActOnConvertVectorExpr(Expr *E, ParsedType ParsedDestTy,
   return ConvertVectorExpr(E, TInfo, BuiltinLoc, RParenLoc);
 }
 
+// Returns a member function pointer to intercept calls to certain std::meta
+// functions (like std::meta::id and std::meta::str_lit) that are implemented
+// as compiler magic rather than actual function definitions.
+using InterceptedMetaCallFn = ExprResult (Sema::*)(SourceLocation,
+                                                   SourceLocation,
+                                                   ArrayRef<Expr *>,
+                                                   SourceLocation);
+
+static InterceptedMetaCallFn TryInterceptMetaCall(const FunctionDecl *FDecl) {
+  if (!FDecl || !FDecl->getDeclName().isIdentifier())
+    return nullptr;
+
+  // Check qualified name directly - handles inline namespaces like
+  // std::meta::reflection_v2 that are exposed as std::meta.
+  StringRef Name = FDecl->getName();
+  if (Name == "id" && FDecl->getQualifiedNameAsString() == "std::meta::id")
+    return &Sema::ActOnCXXBuiltinId;
+  if (Name == "str_lit" &&
+      FDecl->getQualifiedNameAsString() == "std::meta::str_lit")
+    return &Sema::ActOnCXXBuiltinStrLiteral;
+
+  return nullptr;
+}
+
 ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
                                        SourceLocation LParenLoc,
                                        ArrayRef<Expr *> Args,
@@ -6907,22 +6931,12 @@ ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
   FunctionDecl *FDecl = dyn_cast_or_null<FunctionDecl>(NDecl);
   unsigned BuiltinID = (FDecl ? FDecl->getBuiltinID() : 0);
 
-  // Intercept calls to std::meta::str_lit and transform them into
-  // CXXBuiltinStrLiteralExpr nodes.
-  if (FDecl && FDecl->getDeclName().isIdentifier() &&
-      FDecl->getName() == "str_lit") {
-    // Check qualified name directly - handles inline namespaces like
-    // std::meta::reflection_v2 that are exposed as std::meta.
-    if (FDecl->getQualifiedNameAsString() == "std::meta::str_lit") {
-      // Because we intercepted this call, mark it as defined, so we don't
-      // get a warning about it being undefined (it won't be).
-      UndefinedButUsed.erase(FDecl->getCanonicalDecl());
-
-      // Now go ahead and intercept
-      SmallVector<Expr *, 4> ArgVec(Args);
-      return ActOnCXXBuiltinStrLiteral(Fn->getBeginLoc(), LParenLoc,
-                                       ArgVec, RParenLoc);
-    }
+  // Intercept calls to std::meta::id and std::meta::str_lit, which are
+  // declared as consteval functions but implemented as compiler builtins.
+  if (auto InterceptFn = TryInterceptMetaCall(FDecl)) {
+    // Because we intercept this call, remove it from undefined tracking.
+    UndefinedButUsed.erase(FDecl->getCanonicalDecl());
+    return (this->*InterceptFn)(Fn->getBeginLoc(), LParenLoc, Args, RParenLoc);
   }
 
   // Functions with 'interrupt' attribute cannot be called directly.

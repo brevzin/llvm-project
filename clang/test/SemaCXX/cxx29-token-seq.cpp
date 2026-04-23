@@ -3,6 +3,19 @@
 using info = decltype(^^::);
 using token_sequence = decltype(^^{ });
 using size_t = decltype(sizeof(0));
+
+// Forward declaration of std::meta::{id, str_lit} for use (will be intercepted anyway)
+namespace std::meta {
+    template <class... Ts>
+    consteval auto id(Ts const&...) -> info;
+
+    template <class... Ts>
+    consteval auto str_lit(Ts const&...) -> token_sequence;
+}
+
+using std::meta::id;
+using std::meta::str_lit;
+
 struct string_view {
 private:
     char const* p_;
@@ -111,7 +124,7 @@ namespace N5 {
             info types[] = {^^Ts...};
             for (size_t k = 0; k != sizeof...(Ts); ++k) {
                 __builtin_inject(^^{
-                    \(types[k]) \(__builtin_id("_", k)) = \(types[k])();
+                    \(types[k]) \(id("_", k)) = \(types[k])();
                 });
             }
         }
@@ -120,7 +133,7 @@ namespace N5 {
         constexpr auto get() const -> auto const& {
             consteval {
                 __builtin_inject(^^{
-                    return \(__builtin_id("_", I));
+                    return \(id("_", I));
                 });
             }
         }
@@ -140,7 +153,7 @@ namespace N5 {
 
     consteval {
         __builtin_inject(^^{
-            constexpr int \(__builtin_id(Stringish{})) = 2;
+            constexpr int \(id(Stringish{})) = 2;
         });
     }
     static_assert(he == 2);
@@ -181,11 +194,11 @@ namespace N6 {
 namespace N7 {
     template <class S>
     consteval auto make_field(info type, S name, int val) -> token_sequence {
-        return ^^{ \(type) \(__builtin_id(name)) = \(val); };
+        return ^^{ \(type) \(id(name)) = \(val); };
     }
 
     consteval auto make_field2(info type, string_view name, token_sequence init) -> token_sequence {
-        return ^^{ \(type) \(__builtin_id(name)) \(init); };
+        return ^^{ \(type) \(id(name)) \(init); };
     }
 
     struct S {
@@ -266,7 +279,7 @@ namespace N11 {
     static_assert(^^{ } == token_sequence());
     static_assert(^^{ } == []{ token_sequence ts; return ts; }());
     static_assert(^^{ , } == ^^{ , });
-    static_assert(^^{ \(__builtin_id("x", 1)) } == ^^{ x1 });
+    static_assert(^^{ \(id("x", 1)) } == ^^{ x1 });
 
     // Token sequence concatenation with +
     static_assert(^^{ a } + ^^{ b } == ^^{ a b });
@@ -590,21 +603,14 @@ namespace N27 {
     static_assert(Wrapped{}.member == 42);
 }
 
-// Declare std::meta::str_lit stub for testing.
-namespace std::meta {
-    consteval auto str_lit(auto const&...) -> token_sequence;
-}
-
 namespace N28 {
-    using std::meta::str_lit;
-
     // str_lit produces a token_sequence with a string literal.
     static_assert(str_lit("hello") == ^^{ "hello" });
 
     // Concatenation of multiple string arguments.
     static_assert(str_lit("he", "llo") == ^^{ "hello" });
 
-    // Integer arguments (unlike __builtin_id, can start with int).
+    // Integer arguments (unlike id, can start with int).
     static_assert(str_lit(123) == ^^{ "123" });
     static_assert(str_lit(0) == ^^{ "0" });
 

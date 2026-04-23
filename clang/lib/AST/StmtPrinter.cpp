@@ -2812,7 +2812,7 @@ void StmtPrinter::VisitCXXBuiltinReportTokensExpr(
 }
 
 void StmtPrinter::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *S) {
-  OS << "__builtin_id(";
+  OS << "std::meta::id(";
   for (unsigned I = 0; I < S->getNumArgs(); ++I) {
     if (I > 0) OS << ", ";
     PrintExpr(S->getArg(I));

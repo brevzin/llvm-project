@@ -9200,7 +9200,7 @@ TreeTransform<Derived>::TransformCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
   // for user-defined string-like args were synthesized by Sema based on the
   // arg's type and will be re-synthesized by ActOnCXXBuiltinId once the
   // transformed args are no longer dependent. Use TransformExprs so any
-  // PackExpansionExpr (from __builtin_id(args...) in a variadic template)
+  // PackExpansionExpr (from std::meta::id(args...) in a variadic template)
   // is expanded.
   SmallVector<Expr *, 4> Inputs;
   for (unsigned I = 0; I < E->getNumArgs(); ++I)

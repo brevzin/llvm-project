@@ -15619,12 +15619,12 @@ public:
 
   ExprResult ActOnCXXBuiltinId(SourceLocation KwLoc,
                                SourceLocation LParenLoc,
-                               SmallVectorImpl<Expr *> &Args,
+                               ArrayRef<Expr *> Args,
                                SourceLocation RParenLoc);
 
   ExprResult ActOnCXXBuiltinStrLiteral(SourceLocation KwLoc,
                                        SourceLocation LParenLoc,
-                                       SmallVectorImpl<Expr *> &Args,
+                                       ArrayRef<Expr *> Args,
                                        SourceLocation RParenLoc);
 
   ExprResult ActOnCXXMetafunction(SourceLocation KwLoc,

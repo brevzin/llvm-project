@@ -114,7 +114,7 @@ enum class ReflectionKind {
   /// \brief A reflection of an annotation (P2996 ext).
   Annotation,
 
-  /// \brief A reflection of an identifier constructed via __builtin_id.
+  /// \brief A reflection of an identifier constructed via std::meta::id.
   ///
   /// Corresponds to an IdentifierInfo*.
   Identifier,
