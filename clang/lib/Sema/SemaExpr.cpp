@@ -6914,6 +6914,11 @@ ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
     // Check qualified name directly - handles inline namespaces like
     // std::meta::reflection_v2 that are exposed as std::meta.
     if (FDecl->getQualifiedNameAsString() == "std::meta::str_lit") {
+      // Because we intercepted this call, mark it as defined, so we don't
+      // get a warning about it being undefined (it won't be).
+      UndefinedButUsed.erase(FDecl->getCanonicalDecl());
+
+      // Now go ahead and intercept
       SmallVector<Expr *, 4> ArgVec(Args);
       return ActOnCXXBuiltinStrLiteral(Fn->getBeginLoc(), LParenLoc,
                                        ArgVec, RParenLoc);
@@ -18761,11 +18766,7 @@ void Sema::MarkFunctionReferenced(SourceLocation Loc, FunctionDecl *Func,
   // If this is the first "real" use, act on that.
   if (OdrUse == OdrUseContext::Used && !Func->isUsed(/*CheckUsedAttr=*/false)) {
     // Keep track of used but undefined functions.
-    // Skip std::meta::str_lit which is intercepted at call sites.
-    bool IsStrLit = Func->getDeclName().isIdentifier() &&
-                    Func->getName() == "str_lit" &&
-                    Func->getQualifiedNameAsString() == "std::meta::str_lit";
-    if (!Func->isDefined() && !Func->isInAnotherModuleUnit() && !IsStrLit) {
+    if (!Func->isDefined() && !Func->isInAnotherModuleUnit()) {
       if (mightHaveNonExternalLinkage(Func))
         UndefinedButUsed.insert(std::make_pair(Func->getCanonicalDecl(), Loc));
       else if (Func->getMostRecentDecl()->isInlined() &&
