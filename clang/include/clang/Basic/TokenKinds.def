@@ -443,6 +443,7 @@ KEYWORD(__metafunction              , KEYREFLECT)
 KEYWORD(__builtin_inject            , KEYREFLECT)
 KEYWORD(__builtin_id                , KEYREFLECT)
 KEYWORD(__builtin_report_tokens     , KEYREFLECT)
+KEYWORD(__builtin_str_literal       , KEYREFLECT)
 
 // Not a CXX20_KEYWORD because it is disabled by -fno-char8_t.
 KEYWORD(char8_t                     , CHAR8SUPPORT)

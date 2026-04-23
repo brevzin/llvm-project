@@ -15622,6 +15622,11 @@ public:
                                SmallVectorImpl<Expr *> &Args,
                                SourceLocation RParenLoc);
 
+  ExprResult ActOnCXXBuiltinStrLiteral(SourceLocation KwLoc,
+                                       SourceLocation LParenLoc,
+                                       SmallVectorImpl<Expr *> &Args,
+                                       SourceLocation RParenLoc);
+
   ExprResult ActOnCXXMetafunction(SourceLocation KwLoc,
                                   SourceLocation LParenLoc,
                                   SmallVectorImpl<Expr *> &Args,

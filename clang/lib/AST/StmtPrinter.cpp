@@ -2820,6 +2820,15 @@ void StmtPrinter::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *S) {
   OS << ")";
 }
 
+void StmtPrinter::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *S) {
+  OS << "__builtin_str_literal(";
+  for (unsigned I = 0; I < S->getNumArgs(); ++I) {
+    if (I > 0) OS << ", ";
+    PrintExpr(S->getArg(I));
+  }
+  OS << ")";
+}
+
 void StmtPrinter::VisitCXXSpliceExpr(CXXSpliceExpr *S) {
   OS << "[: ... :]";
 }

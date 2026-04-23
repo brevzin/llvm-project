@@ -17188,6 +17188,7 @@ public:
   bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
   bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
   bool VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E);
+  bool VisitCXXBuiltinStrLiteralExpr(const CXXBuiltinStrLiteralExpr *E);
   bool VisitBinaryOperator(const BinaryOperator *E);
 };
 
@@ -17457,6 +17458,129 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
 
   IdentifierInfo &II = Info.Ctx.Idents.get(Name);
   return Success(APValue(ReflectionKind::Identifier, &II), E);
+}
+
+bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
+    const CXXBuiltinStrLiteralExpr *E) {
+  // Evaluate each argument and concatenate into a string.
+  SmallString<64> Content;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    Expr *Arg = E->getArg(I);
+
+    // User-defined string-like argument: Sema pre-built the size() and data()
+    // calls.
+    if (Expr *SizeCall = E->getSizeCall(I)) {
+      Expr *DataCall = E->getDataCall(I);
+      assert(DataCall && "size without data");
+      APSInt SizeValue;
+      if (!::EvaluateInteger(SizeCall, SizeValue, Info))
+        return false;
+      uint64_t Size = SizeValue.getZExtValue();
+      LValue Pointer;
+      if (!::EvaluatePointer(DataCall, Pointer, Info))
+        return false;
+      QualType CharTy = DataCall->getType()->getPointeeType();
+      for (uint64_t J = 0; J < Size; ++J) {
+        APValue Char;
+        if (!handleLValueToRValueConversion(Info, DataCall, CharTy, Pointer,
+                                             Char))
+          return false;
+        Content.push_back(static_cast<char>(Char.getInt().getExtValue()));
+        if (!HandleLValueArrayAdjustment(Info, DataCall, Pointer, CharTy, 1))
+          return false;
+      }
+      continue;
+    }
+
+    if (Arg->getType()->isIntegralOrEnumerationType()) {
+      // Integer argument: convert to decimal string.
+      APValue Val;
+      if (!EvaluateAsRValue(Info, Arg, Val))
+        return false;
+      Val.getInt().toString(Content, 10);
+    } else if (Arg->getType()->isPointerType() ||
+               Arg->getType()->isArrayType()) {
+      // String argument: extract the string content.
+      const Expr *Stripped = Arg->IgnoreParenImpCasts();
+      if (const auto *SL = dyn_cast<StringLiteral>(Stripped)) {
+        StringRef Str = SL->getString();
+        if (!Str.empty() && Str.back() == '\0')
+          Str = Str.drop_back();
+        Content.append(Str);
+      } else {
+        APValue Val;
+        if (Arg->getType()->isArrayType()) {
+          LValue LV;
+          if (!EvaluateLValue(Arg, LV, Info))
+            return false;
+          LV.moveInto(Val);
+        } else if (!EvaluateAsRValue(Info, Arg, Val)) {
+          return false;
+        }
+
+        if (!Val.isLValue()) {
+          Info.FFDiag(Arg->getExprLoc());
+          return false;
+        }
+
+        APValue::LValueBase Base = Val.getLValueBase();
+        if (!Base) {
+          Info.FFDiag(Arg->getExprLoc());
+          return false;
+        }
+
+        if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
+                Base.dyn_cast<const Expr *>())) {
+          StringRef Str = SLit->getString();
+          int64_t Off = Val.getLValueOffset().getQuantity();
+          if (Off >= 0 && (uint64_t)Off <= (uint64_t)Str.size()) {
+            Str = Str.substr(Off);
+            StringRef::size_type Pos = Str.find(0);
+            if (Pos != StringRef::npos)
+              Str = Str.substr(0, Pos);
+            Content.append(Str);
+          }
+        } else {
+          Info.FFDiag(Arg->getExprLoc());
+          return false;
+        }
+      }
+    } else {
+      Info.FFDiag(Arg->getExprLoc());
+      return false;
+    }
+  }
+
+  // Build the string literal token. The literal data includes quotes.
+  SmallString<68> LiteralData;
+  LiteralData.push_back('"');
+  LiteralData.append(Content);
+  LiteralData.push_back('"');
+
+  // Allocate the literal data in ASTContext.
+  char *StoredData = new (Info.Ctx) char[LiteralData.size()];
+  std::copy(LiteralData.begin(), LiteralData.end(), StoredData);
+
+  // Create the string literal token.
+  Token Tok;
+  Tok.startToken();
+  Tok.setKind(tok::string_literal);
+  Tok.setLocation(E->getBeginLoc());
+  Tok.setLiteralData(StoredData);
+  Tok.setLength(LiteralData.size());
+
+  // Create a token sequence containing just this token plus eof.
+  Token *Tokens = new (Info.Ctx) Token[2];
+  Tokens[0] = Tok;
+  Tokens[1].startToken();
+  Tokens[1].setKind(tok::eof);
+  Tokens[1].setLocation(E->getEndLoc());
+
+  auto *TSD = new (Info.Ctx) TokenSequenceData();
+  TSD->Tokens = Tokens;
+  TSD->NumTokens = 2;
+
+  return Success(APValue(TSD), E);
 }
 
 bool ReflectionEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
@@ -18339,6 +18463,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXBuiltinInjectExprClass:
   case Expr::CXXBuiltinReportTokensExprClass:
   case Expr::CXXBuiltinIdExprClass:
+  case Expr::CXXBuiltinStrLiteralExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::ExtractLValueExprClass:

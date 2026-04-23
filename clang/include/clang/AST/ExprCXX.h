@@ -5884,6 +5884,82 @@ public:
   }
 };
 
+/// Represents a call to __builtin_str_literal(...), which produces a
+/// token_sequence containing a single string literal token formed by
+/// concatenating the arguments.
+class CXXBuiltinStrLiteralExpr : public Expr {
+  // Same per-arg storage as CXXBuiltinIdExpr: 3 slots per logical argument.
+  Stmt **Args;
+  unsigned NumArgs;
+  SourceLocation KwLoc;
+  SourceLocation LParenLoc;
+  SourceLocation RParenLoc;
+
+  CXXBuiltinStrLiteralExpr(ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+                           ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
+                           SourceLocation KwLoc, SourceLocation LParenLoc,
+                           SourceLocation RParenLoc);
+  CXXBuiltinStrLiteralExpr(EmptyShell Empty, unsigned NumArgs);
+
+public:
+  static CXXBuiltinStrLiteralExpr *Create(ASTContext &C, QualType Ty,
+                                          ArrayRef<Expr *> Args,
+                                          ArrayRef<Expr *> SizeCalls,
+                                          ArrayRef<Expr *> DataCalls,
+                                          SourceLocation KwLoc,
+                                          SourceLocation LParenLoc,
+                                          SourceLocation RParenLoc);
+  static CXXBuiltinStrLiteralExpr *CreateEmpty(ASTContext &C, unsigned NumArgs);
+
+  unsigned getNumArgs() const { return NumArgs; }
+  Expr *getArg(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast<Expr>(Args[3 * I]);
+  }
+  void setArg(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[3 * I] = E;
+  }
+
+  Expr *getSizeCall(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast_or_null<Expr>(Args[3 * I + 1]);
+  }
+  Expr *getDataCall(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast_or_null<Expr>(Args[3 * I + 2]);
+  }
+  void setSizeCall(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[3 * I + 1] = E;
+  }
+  void setDataCall(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[3 * I + 2] = E;
+  }
+
+  SourceLocation getKwLoc() const { return KwLoc; }
+  void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
+
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return KwLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() { return child_range(Args, Args + 3 * NumArgs); }
+  const_child_range children() const {
+    return const_child_range(Args, Args + 3 * NumArgs);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXBuiltinStrLiteralExprClass;
+  }
+};
+
 // Implementation detail of the 'is_accessible' metafunction.
 // Used to "reach up the stack" to find the context from which the metafunction
 // was called, such that the accessibility of a class member can thereafter be

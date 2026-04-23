@@ -190,6 +190,7 @@ def CXXSpliceExpr : StmtNode<Expr>;
 def CXXBuiltinInjectExpr : StmtNode<Expr>;
 def CXXBuiltinReportTokensExpr : StmtNode<Expr>;
 def CXXBuiltinIdExpr : StmtNode<Expr>;
+def CXXBuiltinStrLiteralExpr : StmtNode<Expr>;
 def StackLocationExpr : StmtNode<Expr>;
 def ExtractLValueExpr : StmtNode<Expr>;
 def ExplDependentCallExpr : StmtNode<Expr>;

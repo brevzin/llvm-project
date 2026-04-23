@@ -2197,6 +2197,49 @@ CXXBuiltinIdExpr *CXXBuiltinIdExpr::CreateEmpty(ASTContext &C,
   return E;
 }
 
+CXXBuiltinStrLiteralExpr::CXXBuiltinStrLiteralExpr(
+    ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+    ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
+    SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc)
+    : Expr(CXXBuiltinStrLiteralExprClass, Ty, VK_PRValue, OK_Ordinary),
+      NumArgs(Args.size()), KwLoc(KwLoc), LParenLoc(LParenLoc),
+      RParenLoc(RParenLoc) {
+  assert(SizeCalls.size() == NumArgs && DataCalls.size() == NumArgs);
+  this->Args = new (C) Stmt *[3 * NumArgs];
+  ExprDependence Deps = ExprDependence::None;
+  for (unsigned I = 0; I < NumArgs; ++I) {
+    this->Args[3 * I + 0] = Args[I];
+    this->Args[3 * I + 1] = SizeCalls[I];
+    this->Args[3 * I + 2] = DataCalls[I];
+    Deps |= Args[I]->getDependence();
+    if (SizeCalls[I])
+      Deps |= SizeCalls[I]->getDependence();
+    if (DataCalls[I])
+      Deps |= DataCalls[I]->getDependence();
+  }
+  setDependence(Deps);
+}
+
+CXXBuiltinStrLiteralExpr::CXXBuiltinStrLiteralExpr(EmptyShell Empty,
+                                                   unsigned NumArgs)
+    : Expr(CXXBuiltinStrLiteralExprClass, Empty), Args(nullptr),
+      NumArgs(NumArgs) {}
+
+CXXBuiltinStrLiteralExpr *CXXBuiltinStrLiteralExpr::Create(
+    ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+    ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
+    SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinStrLiteralExpr(C, Ty, Args, SizeCalls, DataCalls,
+                                          KwLoc, LParenLoc, RParenLoc);
+}
+
+CXXBuiltinStrLiteralExpr *
+CXXBuiltinStrLiteralExpr::CreateEmpty(ASTContext &C, unsigned NumArgs) {
+  auto *E = new (C) CXXBuiltinStrLiteralExpr(EmptyShell(), NumArgs);
+  E->Args = new (C) Stmt *[3 * NumArgs];
+  return E;
+}
+
 StackLocationExpr::StackLocationExpr(QualType ResultTy, SourceRange Range,
                                      int FrameOffset)
     : Expr(StackLocationExprClass, ResultTy, VK_PRValue, OK_Ordinary),

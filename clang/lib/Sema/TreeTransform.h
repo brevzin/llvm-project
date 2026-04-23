@@ -9215,6 +9215,22 @@ TreeTransform<Derived>::TransformCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
 }
 
 template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinStrLiteralExpr(
+    CXXBuiltinStrLiteralExpr *E) {
+  SmallVector<Expr *, 4> Inputs;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I)
+    Inputs.push_back(E->getArg(I));
+  SmallVector<Expr *, 4> TransformedArgs;
+  if (getDerived().TransformExprs(Inputs.data(), Inputs.size(),
+                                  /*IsCall=*/true, TransformedArgs))
+    return ExprError();
+
+  return getSema().ActOnCXXBuiltinStrLiteral(E->getKwLoc(), E->getLParenLoc(),
+                                             TransformedArgs, E->getRParenLoc());
+}
+
+template <typename Derived>
 SpliceResult
 TreeTransform<Derived>::TransformSpliceSpecifier(SpliceSpecifier *Splice) {
   ExprResult OpResult;
