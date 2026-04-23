@@ -487,7 +487,7 @@ void ASTStmtWriter::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
   VisitExpr(E);
   Record.AddSourceLocation(E->getOperatorLoc());
   // FIXME: Token sequences currently round-trip through PCH/modules as an
-  // empty value (see PropertiesBase.td). Implement proper Token array
+  // empty token sequence (see PropertiesBase.td). Implement proper Token array
   // serialization when this becomes load-bearing.
   Record.AddAPValue(E->getValue());
   Record.AddSourceRange(E->getOperandRange());

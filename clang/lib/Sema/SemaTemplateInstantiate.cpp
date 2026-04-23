@@ -2716,14 +2716,14 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
   // Scan tokens for identifiers matching template parameters, or
   // annot_token_seq_expr tokens containing expressions that need transformation.
   bool HasSubstitutions = false;
-  for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-    if (TSD->Tokens[I].is(tok::identifier)) {
-      IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
+  for (const Token &Tok : *TSD) {
+    if (Tok.is(tok::identifier)) {
+      IdentifierInfo *II = Tok.getIdentifierInfo();
       if (II && ParamMap.count(II->getName())) {
         HasSubstitutions = true;
         break;
       }
-    } else if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
+    } else if (Tok.is(tok::annot_token_seq_expr)) {
       // All interpolation expressions need to be transformed during
       // instantiation, since they may reference local declarations
       // from the template that have been instantiated to new decls.
@@ -2737,14 +2737,14 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
         inherited::TransformCXXTokenSequenceExpr(E));
 
   ASTContext &Ctx = getSema().Context;
-  Token *NewTokens = new (Ctx) Token[TSD->NumTokens];
-  for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-    NewTokens[I] = TSD->Tokens[I];
+  SmallVector<Token, 16> NewTokens(TSD->size());
+  for (unsigned I = 0; I < TSD->size(); ++I) {
+    NewTokens[I] = (*TSD)[I];
 
-    if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
+    if ((*TSD)[I].is(tok::annot_token_seq_expr)) {
       // Transform all expressions inside interpolation tokens.
       Expr *SubExpr = static_cast<Expr *>(
-          TSD->Tokens[I].getAnnotationValue());
+          (*TSD)[I].getAnnotationValue());
       if (SubExpr) {
         ExprResult Transformed = TransformExpr(SubExpr);
         if (!Transformed.isInvalid()) {
@@ -2763,8 +2763,8 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
       continue;
     }
 
-    if (!TSD->Tokens[I].is(tok::identifier)) continue;
-    IdentifierInfo *II = TSD->Tokens[I].getIdentifierInfo();
+    if (!(*TSD)[I].is(tok::identifier)) continue;
+    IdentifierInfo *II = (*TSD)[I].getIdentifierInfo();
     if (!II) continue;
     auto It = ParamMap.find(II->getName());
     if (It == ParamMap.end()) continue;
@@ -2779,7 +2779,7 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
       assert(Arg.getKind() == TemplateArgument::Type);
       QualType QT = Arg.getAsType();
       NewTokens[I].setKind(tok::annot_typename);
-      NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
+      NewTokens[I].setAnnotationEndLoc((*TSD)[I].getLocation());
       NewTokens[I].setAnnotationValue(QT.getAsOpaquePtr());
     } else if (isa<NonTypeTemplateParmDecl>(PI.Param)) {
       // Non-type template parameter: substitute with annot_token_seq_expr.
@@ -2789,19 +2789,17 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
       } else if (Arg.getKind() == TemplateArgument::Integral) {
         Val = IntegerLiteral::Create(
             Ctx, Arg.getAsIntegral(), Arg.getIntegralType(),
-            TSD->Tokens[I].getLocation());
+            (*TSD)[I].getLocation());
       }
       if (Val) {
         NewTokens[I].setKind(tok::annot_token_seq_expr);
-        NewTokens[I].setAnnotationEndLoc(TSD->Tokens[I].getLocation());
+        NewTokens[I].setAnnotationEndLoc((*TSD)[I].getLocation());
         NewTokens[I].setAnnotationValue(static_cast<void *>(Val));
       }
     }
   }
 
-  auto *NewTSD = new (Ctx) TokenSequenceData();
-  NewTSD->Tokens = NewTokens;
-  NewTSD->NumTokens = TSD->NumTokens;
+  const TokenSequenceData *NewTSD = CreateTokenSequenceData(Ctx, NewTokens);
 
   return RecordConsteval.RecordAndReturn(
       CXXTokenSequenceExpr::Create(Ctx, E->getOperatorLoc(),

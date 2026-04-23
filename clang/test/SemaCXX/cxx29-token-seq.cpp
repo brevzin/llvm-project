@@ -294,6 +294,9 @@ namespace N11 {
     static_assert(^^{ } + ^^{ x } == ^^{ x });
     static_assert(^^{ x } + ^^{ } == ^^{ x });
     static_assert(^^{ } + ^^{ } == ^^{ });
+    static_assert(token_sequence() + ^^{ x } == ^^{ x });
+    static_assert(^^{ x } + token_sequence() == ^^{ x });
+    static_assert(token_sequence() + token_sequence() == ^^{ });
 
     // += for token_sequence (local variable)
     consteval auto concat_test() -> token_sequence {
@@ -351,6 +354,20 @@ namespace N11 {
         return s.body;
     }
     static_assert(member_ref_compound() == ^^{ x z });
+
+    consteval auto default_compound() -> token_sequence {
+        token_sequence ts;
+        ts += ^^{ x };
+        return ts;
+    }
+    static_assert(default_compound() == ^^{ x });
+
+    consteval auto default_compound_empty_rhs() -> token_sequence {
+        token_sequence ts;
+        ts += token_sequence();
+        return ts;
+    }
+    static_assert(default_compound_empty_rhs() == ^^{ });
 }
 
 namespace N12 {
@@ -481,6 +498,8 @@ namespace N18 {
     // Empty token sequences are a no-op when injected.
     consteval { queue_injection(^^{}); }
     consteval { queue_injection(^^{ }); }
+    consteval { queue_injection(token_sequence()); }
+    consteval { report_tokens("empty token_sequence()", token_sequence()); }
     static_assert(true);
 }
 

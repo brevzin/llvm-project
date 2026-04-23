@@ -17,6 +17,7 @@
 #define LLVM_CLANG_AST_REFLECTION_H
 
 #include "clang/AST/Type.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
 #include <optional>
 #include <string>
@@ -49,7 +50,7 @@ enum class ReflectionKind {
   ///
   /// Corresponds to an APValue (plus a QualType).
   Object,
-  
+
   /// \brief A reflection of a value (i.e., the result of a prvalue).
   ///
   /// Corresponds to an APValue (plus a QualType).
@@ -122,10 +123,27 @@ enum class ReflectionKind {
 
 
 /// \brief Representation of a captured token sequence from ^^{ ... }.
-struct TokenSequenceData {
-  const Token *Tokens;
-  unsigned NumTokens;
+/// Essentially an ArrayRef<Token> allocated in the ASTContext.
+struct TokenSequenceData : public ArrayRef<Token> {
+  TokenSequenceData() = default;
+  TokenSequenceData(const Token *Data, size_t Length)
+      : ArrayRef<Token>(Data, Length) {}
 };
+
+/// Allocate token sequence storage in the ASTContext. Empty sequences are
+/// represented with an empty array.
+const TokenSequenceData *CreateTokenSequenceData(ASTContext &Ctx,
+                                                 ArrayRef<Token> Tokens);
+
+const TokenSequenceData *CreateTokenSequenceData(ASTContext &Ctx,
+                                                 ArrayRef<Token> Tokens1,
+                                                 ArrayRef<Token> Tokens2);
+
+
+/// Allocate an empty token sequence in the ASTContext.
+inline const TokenSequenceData *CreateEmptyTokenSequenceData(ASTContext &Ctx) {
+  return CreateTokenSequenceData(Ctx, {});
+}
 
 /// \brief Representation of a hypothetical data member, which could be used to
 /// complete an incomplete class definition using the 'std::meta::define_class'

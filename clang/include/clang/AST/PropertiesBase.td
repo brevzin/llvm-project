@@ -439,7 +439,7 @@ let Class = PropertyTypeCase<APValue, "TokenSequence"> in {
   // FIXME: Token sequences currently don't round-trip through PCH/modules.
   // Implement proper Token array serialization when this becomes load-bearing.
   def : Creator<[{
-    return APValue(static_cast<const TokenSequenceData *>(nullptr));
+    return APValue(CreateEmptyTokenSequenceData(ctx));
   }]>;
 }
 let Class = PropertyTypeCase<APValue, "Reflection"> in {

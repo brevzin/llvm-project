@@ -1175,7 +1175,9 @@ void Parser::ProcessTokenInjections(
     SourceLocation Loc = Inj.Loc;
     const TokenSequenceData *TSD = Inj.TSD;
     // Build a token stream with an eof sentinel at the end.
-    SmallVector<Token, 16> Toks(TSD->Tokens, TSD->Tokens + TSD->NumTokens);
+    SmallVector<Token, 16> Toks;
+    assert(TSD && "token sequence injection must carry token data");
+    Toks.append(TSD->begin(), TSD->end());
     Token Eof;
     Eof.startToken();
     Eof.setKind(tok::eof);

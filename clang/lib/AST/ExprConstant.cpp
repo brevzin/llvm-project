@@ -4900,25 +4900,8 @@ struct CompoundAssignSubobjectHandler {
       return false;
     }
 
-    const TokenSequenceData *LHSTSD = Subobj.getTokenSequence();
-    const TokenSequenceData *RHSTSD = RHS.getTokenSequence();
-
-    SmallVector<Token, 32> NewTokens;
-    for (unsigned I = 0; I < LHSTSD->NumTokens; ++I) {
-      if (LHSTSD->Tokens[I].is(tok::eof))
-        break;
-      NewTokens.push_back(LHSTSD->Tokens[I]);
-    }
-    for (unsigned I = 0; I < RHSTSD->NumTokens; ++I)
-      NewTokens.push_back(RHSTSD->Tokens[I]);
-
-    Token *StoredTokens = new (Info.Ctx) Token[NewTokens.size()];
-    std::copy(NewTokens.begin(), NewTokens.end(), StoredTokens);
-
-    auto *NewTSD = new (Info.Ctx) TokenSequenceData();
-    NewTSD->Tokens = StoredTokens;
-    NewTSD->NumTokens = NewTokens.size();
-
+    const TokenSequenceData *NewTSD =
+        CreateTokenSequenceData(Info.Ctx, *Subobj.getTokenSequence(), *RHS.getTokenSequence());
     Subobj = APValue(NewTSD);
     return true;
   }
@@ -16896,11 +16879,9 @@ static void PrintTokenSequenceToStderr(const TokenSequenceData *TSD,
   OS << "^^{ ";
 
   bool NeedSpace = false;
-  for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-    const Token &Tok = TSD->Tokens[I];
-    if (Tok.is(tok::eof))
-      break;
+  assert(TSD && "token sequence must have token data");
 
+  for (const Token &Tok : *TSD) {
     // Spacing: don't add space before closing/separating punctuation,
     // or after opening punctuation.
     bool IsOpenPunct = Tok.isOneOf(tok::l_paren, tok::l_brace, tok::l_square);
@@ -17170,8 +17151,7 @@ public:
 
   bool ZeroInitialization(const Expr *E) {
     if (E->getType()->isTokenSequenceType()) {
-      // Zero-init for token_sequence is the empty sequence (null TSD).
-      Result = APValue(static_cast<const TokenSequenceData *>(nullptr));
+      Result = APValue(CreateEmptyTokenSequenceData(Info.Ctx));
     } else {
       // Zero-init for info is the null reflection.
       Result = APValue(ReflectionKind::Null, nullptr);
@@ -17204,8 +17184,8 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
   {
     const TokenSequenceData *TSD = Refl.getTokenSequence();
     bool HasInterpolations = false;
-    for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-      if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
+    for (const Token &Tok : *TSD) {
+      if (Tok.is(tok::annot_token_seq_expr)) {
         HasInterpolations = true;
         break;
       }
@@ -17216,13 +17196,13 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
       // Use a SmallVector since token sequence interpolation can change the
       // number of tokens.
       SmallVector<Token, 32> NewTokens;
-      NewTokens.reserve(TSD->NumTokens);
-      for (unsigned I = 0; I < TSD->NumTokens; ++I) {
-        if (TSD->Tokens[I].is(tok::annot_token_seq_expr)) {
+      NewTokens.reserve(TSD->size());
+      for (const Token &SrcTok : *TSD) {
+        if (SrcTok.is(tok::annot_token_seq_expr)) {
           // Extract the unevaluated expression from the annotation token.
           // The annotation value is the Expr* stored by setExprAnnotation.
           Expr *SubExpr = static_cast<Expr *>(
-              TSD->Tokens[I].getAnnotationValue());
+              SrcTok.getAnnotationValue());
 
           // Evaluate the expression in the current constexpr context.
           APValue Val;
@@ -17233,11 +17213,7 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
               return false;
             assert(Val.isTokenSequence());
             const TokenSequenceData *Inner = Val.getTokenSequence();
-            for (unsigned J = 0; J < Inner->NumTokens; ++J) {
-              if (Inner->Tokens[J].is(tok::eof))
-                break;
-              NewTokens.push_back(Inner->Tokens[J]);
-            }
+            NewTokens.append(Inner->begin(), Inner->end());
           } else if (ExprTy->isReflectionType()) {
             // Reflection-typed expression: evaluate and check kind.
             if (!EvaluateAsRValue(Info, SubExpr, Val))
@@ -17253,7 +17229,7 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
                   QT = AT->getDeducedType();
 
               // Create an annot_typename token carrying the type.
-              Token Tok = TSD->Tokens[I];
+              Token Tok = SrcTok;
               Tok.setKind(tok::annot_typename);
               Tok.setAnnotationValue(QT.getAsOpaquePtr());
               NewTokens.push_back(Tok);
@@ -17261,7 +17237,7 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
               IdentifierInfo *II = Val.getReflectedIdentifier();
 
               // Create a tok::identifier token.
-              Token Tok = TSD->Tokens[I];
+              Token Tok = SrcTok;
               Tok.setKind(tok::identifier);
               Tok.setIdentifierInfo(II);
               Tok.setLength(II->getLength());
@@ -17280,7 +17256,7 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
                   VD, /*RefersToEnclosingVariableOrCapture=*/false,
                   SubExpr->getExprLoc(), DeclTy, VK);
 
-              Token Tok = TSD->Tokens[I];
+              Token Tok = SrcTok;
               Tok.setAnnotationValue(static_cast<void *>(DRE));
               NewTokens.push_back(Tok);
             } else {
@@ -17293,7 +17269,7 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
                   OK_Ordinary, SubExpr);
               ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
 
-              Token Tok = TSD->Tokens[I];
+              Token Tok = SrcTok;
               Tok.setAnnotationValue(static_cast<void *>(CE));
               NewTokens.push_back(Tok);
             }
@@ -17308,7 +17284,7 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
                 OK_Ordinary, SubExpr);
             ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
 
-            Token Tok = TSD->Tokens[I];
+            Token Tok = SrcTok;
             Tok.setAnnotationValue(static_cast<void *>(CE));
             NewTokens.push_back(Tok);
           } else {
@@ -17322,22 +17298,17 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
             OVE->setIsUnique(true);
             ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
 
-            Token Tok = TSD->Tokens[I];
+            Token Tok = SrcTok;
             Tok.setAnnotationValue(static_cast<void *>(CE));
             NewTokens.push_back(Tok);
           }
         } else {
-          NewTokens.push_back(TSD->Tokens[I]);
+          NewTokens.push_back(SrcTok);
         }
       }
 
-      // Copy to ASTContext-allocated array.
-      Token *AllocTokens = new (Info.Ctx) Token[NewTokens.size()];
-      std::copy(NewTokens.begin(), NewTokens.end(), AllocTokens);
-
-      auto *NewTSD = new (Info.Ctx) TokenSequenceData();
-      NewTSD->Tokens = AllocTokens;
-      NewTSD->NumTokens = NewTokens.size();
+      const TokenSequenceData *NewTSD =
+          CreateTokenSequenceData(Info.Ctx, NewTokens);
       return Success(APValue(NewTSD), E);
     }
   }
@@ -17569,17 +17540,9 @@ bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
   Tok.setLiteralData(StoredData);
   Tok.setLength(LiteralData.size());
 
-  // Create a token sequence containing just this token plus eof.
-  Token *Tokens = new (Info.Ctx) Token[2];
-  Tokens[0] = Tok;
-  Tokens[1].startToken();
-  Tokens[1].setKind(tok::eof);
-  Tokens[1].setLocation(E->getEndLoc());
-
-  auto *TSD = new (Info.Ctx) TokenSequenceData();
-  TSD->Tokens = Tokens;
-  TSD->NumTokens = 2;
-
+  // Create a token sequence containing just this token.
+  Token Tokens[] = {Tok};
+  const TokenSequenceData *TSD = CreateTokenSequenceData(Info.Ctx, Tokens);
   return Success(APValue(TSD), E);
 }
 
@@ -17604,27 +17567,8 @@ bool ReflectionEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
     return false;
   }
 
-  const TokenSequenceData *LHSTSD = LHSVal.getTokenSequence();
-  const TokenSequenceData *RHSTSD = RHSVal.getTokenSequence();
-
-  // Concatenate the tokens, excluding the trailing eof from the LHS.
-  SmallVector<Token, 32> NewTokens;
-  for (unsigned I = 0; I < LHSTSD->NumTokens; ++I) {
-    if (LHSTSD->Tokens[I].is(tok::eof))
-      break;
-    NewTokens.push_back(LHSTSD->Tokens[I]);
-  }
-  for (unsigned I = 0; I < RHSTSD->NumTokens; ++I) {
-    NewTokens.push_back(RHSTSD->Tokens[I]);
-  }
-
-  Token *StoredTokens = new (Info.Ctx) Token[NewTokens.size()];
-  std::copy(NewTokens.begin(), NewTokens.end(), StoredTokens);
-
-  auto *NewTSD = new (Info.Ctx) TokenSequenceData();
-  NewTSD->Tokens = StoredTokens;
-  NewTSD->NumTokens = NewTokens.size();
-
+  const TokenSequenceData *NewTSD =
+    CreateTokenSequenceData(Info.Ctx, *LHSVal.getTokenSequence(), *RHSVal.getTokenSequence());
   return Success(APValue(NewTSD), E);
 }
 }  // end anonymous namespace

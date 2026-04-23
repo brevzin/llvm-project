@@ -989,14 +989,7 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OperatorLoc,
 ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
                                                   SourceRange OperandRange,
                                                   ArrayRef<Token> Tokens) {
-  // Allocate the tokens in the ASTContext.
-  Token *StoredTokens = new (Context) Token[Tokens.size()];
-  std::copy(Tokens.begin(), Tokens.end(), StoredTokens);
-
-  auto *TSD = new (Context) TokenSequenceData();
-  TSD->Tokens = StoredTokens;
-  TSD->NumTokens = Tokens.size();
-
+  const TokenSequenceData *TSD = CreateTokenSequenceData(Context, Tokens);
   return CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD);
 }
 
