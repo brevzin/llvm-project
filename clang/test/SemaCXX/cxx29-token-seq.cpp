@@ -7,7 +7,6 @@ namespace std::meta {
     using info = decltype(^^::);
     using token_sequence = decltype(^^{ });
 
-
     template <class... Ts>
     consteval auto id(Ts const&...) -> info;
 
@@ -24,8 +23,6 @@ using std::meta::info;
 using std::meta::token_sequence;
 using std::meta::id;
 using std::meta::str_lit;
-using std::meta::queue_injection;
-using std::meta::report_tokens;
 
 struct string_view {
 private:
@@ -371,7 +368,7 @@ namespace N12 {
         consteval {
             Builder b;
             b += ^^{ static constexpr int x = 1; };
-            queue_injection(b);
+            std::meta::queue_injection(b);
         }
     };
 
@@ -408,7 +405,7 @@ namespace N14 {
 
     consteval {
         Derived d;
-        queue_injection(d);
+        std::meta::queue_injection(d);
     }
     static_assert(inherited_conv_ok == 1);
 
@@ -420,7 +417,7 @@ namespace N14 {
 
     consteval { // expected-error {{evaluating expression of a consteval block must be a constant expression}}
         OnlyRvalue x;
-        queue_injection(x); // expected-error {{no matching function for call}}
+        std::meta::queue_injection(x); // expected-error {{no matching function for call}}
     }
     static_assert(refqual_conv_bug == 1); // expected-error {{use of undeclared identifier 'refqual_conv_bug'}}
 }
@@ -439,7 +436,7 @@ namespace N15 {
 
     consteval {
         X x;
-        queue_injection(x);
+        std::meta::queue_injection(x);
     }
     static_assert(choose == 2);
 }
@@ -456,7 +453,7 @@ namespace N16 {
 
     consteval {
         X x;
-        queue_injection(x);
+        std::meta::queue_injection(x);
     }
     static_assert(conv_template_ok == 1);
 }
@@ -475,7 +472,7 @@ namespace N17 {
 
     consteval {
         D d;
-        queue_injection(d);
+        std::meta::queue_injection(d);
     }
     static_assert(using_conv_ok == 1);
 }
