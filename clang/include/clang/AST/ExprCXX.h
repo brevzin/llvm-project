@@ -5529,29 +5529,29 @@ public:
 /// The captured tokens may include interpolation expressions (introduced via
 /// `\(...)`) which are evaluated when the token sequence is materialized.
 class CXXTokenSequenceExpr : public Expr {
-  // The captured token sequence data.
-  const TokenSequenceData *TokSeq;
+  // The captured token sequence data (pointer + size into ASTContext storage).
+  TokenSequenceData TokSeq;
 
   // Source locations.
   SourceLocation OperatorLoc;
   SourceRange OperandRange;
 
   CXXTokenSequenceExpr(const ASTContext &C, QualType ExprTy,
-                       const TokenSequenceData *TSD);
+                       TokenSequenceData TSD);
   CXXTokenSequenceExpr(EmptyShell Empty);
 
 public:
   static CXXTokenSequenceExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
                                       SourceRange OperandRange,
-                                      const TokenSequenceData *TSD);
+                                      TokenSequenceData TSD);
   static CXXTokenSequenceExpr *CreateEmpty(const ASTContext &C);
 
   /// Returns the captured token sequence data.
-  const TokenSequenceData *getTokenSequence() const { return TokSeq; }
-  void setTokenSequence(const TokenSequenceData *TSD) { TokSeq = TSD; }
+  TokenSequenceData getTokenSequence() const { return TokSeq; }
+  void setTokenSequence(TokenSequenceData TSD) { TokSeq = TSD; }
 
   /// Returns an APValue representing this token sequence.
-  APValue getValue() const { return APValue(TokSeq); }
+  APValue getValue() const;
 
   SourceLocation getBeginLoc() const LLVM_READONLY { return OperatorLoc; }
   SourceLocation getEndLoc() const LLVM_READONLY {

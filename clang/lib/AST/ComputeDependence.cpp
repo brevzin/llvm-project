@@ -1022,8 +1022,8 @@ ExprDependence clang::computeDependence(CXXReflectExpr *E,
 ExprDependence clang::computeDependence(CXXTokenSequenceExpr *E) {
   // Token sequences may contain dependent interpolation expressions.
   ExprDependence D = ExprDependence::None;
-  const TokenSequenceData *TSD = E->getTokenSequence();
-  for (const Token &Tok : *TSD) {
+  TokenSequenceData TSD = E->getTokenSequence();
+  for (const Token &Tok : TSD) {
     if (Tok.is(tok::annot_token_seq_expr)) {
       const Expr *InterpExpr =
           reinterpret_cast<const Expr *>(Tok.getAnnotationValue());

@@ -644,7 +644,7 @@ public:
     struct TokenInjection {
       SourceLocation Loc;
       DeclContext *TargetDC = nullptr; // null = inject at current context
-      const TokenSequenceData *TSD;
+      TokenSequenceData TSD;
     };
 
     /// Token sequences pending injection from std::meta::queue_injection calls

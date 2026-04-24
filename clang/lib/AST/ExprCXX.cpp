@@ -1936,19 +1936,19 @@ CXXReflectExpr::CXXReflectExpr(const ASTContext &C, QualType ExprTy, APValue RV)
 }
 
 CXXTokenSequenceExpr::CXXTokenSequenceExpr(const ASTContext &C, QualType ExprTy,
-                                           const TokenSequenceData *TSD)
+                                           TokenSequenceData TSD)
     : Expr(CXXTokenSequenceExprClass, ExprTy, VK_PRValue, OK_Ordinary),
       TokSeq(TSD) {
   setDependence(computeDependence(this));
 }
 
 CXXTokenSequenceExpr::CXXTokenSequenceExpr(EmptyShell Empty)
-    : Expr(CXXTokenSequenceExprClass, Empty), TokSeq(nullptr) {}
+    : Expr(CXXTokenSequenceExprClass, Empty), TokSeq() {}
 
 CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(ASTContext &C,
                                                    SourceLocation OperatorLoc,
                                                    SourceRange OperandRange,
-                                                   const TokenSequenceData *TSD) {
+                                                   TokenSequenceData TSD) {
   auto *E = new (C) CXXTokenSequenceExpr(C, C.TokenSequenceTy, TSD);
   E->setOperatorLoc(OperatorLoc);
   E->setOperandRange(OperandRange);
@@ -1957,6 +1957,10 @@ CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(ASTContext &C,
 
 CXXTokenSequenceExpr *CXXTokenSequenceExpr::CreateEmpty(const ASTContext &C) {
   return new (C) CXXTokenSequenceExpr(EmptyShell{});
+}
+
+APValue CXXTokenSequenceExpr::getValue() const {
+  return APValue(TokSeq);
 }
 
 CXXReflectExpr::CXXReflectExpr(EmptyShell Empty)

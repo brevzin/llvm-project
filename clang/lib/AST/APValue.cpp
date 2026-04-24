@@ -741,12 +741,11 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
     return;
 
   case TokenSequence: {
-    const TokenSequenceData *TSD = getTokenSequence();
-    assert(TSD && "token sequence APValue must have token data");
+    TokenSequenceData TSD = getTokenSequence();
     // Profile only the semantic tokens. Older or synthesized sequences may
     // still carry a trailing eof token, which is ignored here.
-    ID.AddInteger(TSD->size());
-    for (const Token &Tok : *TSD) {
+    ID.AddInteger(TSD.size());
+    for (const Token &Tok : TSD) {
       ID.AddInteger(Tok.getKind());
       if (Tok.is(tok::annot_typename))
         QualType::getFromOpaquePtr(Tok.getAnnotationValue()).Profile(ID);

@@ -4900,8 +4900,8 @@ struct CompoundAssignSubobjectHandler {
       return false;
     }
 
-    const TokenSequenceData *NewTSD =
-        CreateTokenSequenceData(Info.Ctx, *Subobj.getTokenSequence(), *RHS.getTokenSequence());
+    TokenSequenceData NewTSD =
+        CreateTokenSequenceData(Info.Ctx, Subobj.getTokenSequence(), RHS.getTokenSequence());
     Subobj = APValue(NewTSD);
     return true;
   }
@@ -16979,8 +16979,8 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
     OS << " at " << PLoc.getFilename() << ":" << PLoc.getLine();
   OS << " \"" << Msg << "\":\n  ";
 
-  const TokenSequenceData *TSD = Operand.getTokenSequence();
-  PrintTokenSequenceToStderr(TSD, Info.Ctx);
+  TokenSequenceData TSD = Operand.getTokenSequence();
+  PrintTokenSequenceToStderr(&TSD, Info.Ctx);
   OS << "\n";
 
   return true;
@@ -17038,7 +17038,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinInjectExpr(
     TargetDC = dyn_cast<DeclContext>(NSDecl);
   }
 
-  const TokenSequenceData *TSD = Operand.getTokenSequence();
+  TokenSequenceData TSD = Operand.getTokenSequence();
   Info.EvalStatus.PendingInjections.push_back(
       {E->getBeginLoc(), TargetDC, TSD});
   return true;
@@ -17182,9 +17182,9 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
 
   // Resolve any interpolation expressions in the token sequence.
   {
-    const TokenSequenceData *TSD = Refl.getTokenSequence();
+    TokenSequenceData TSD = Refl.getTokenSequence();
     bool HasInterpolations = false;
-    for (const Token &Tok : *TSD) {
+    for (const Token &Tok : TSD) {
       if (Tok.is(tok::annot_token_seq_expr)) {
         HasInterpolations = true;
         break;
@@ -17196,8 +17196,8 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
       // Use a SmallVector since token sequence interpolation can change the
       // number of tokens.
       SmallVector<Token, 32> NewTokens;
-      NewTokens.reserve(TSD->size());
-      for (const Token &SrcTok : *TSD) {
+      NewTokens.reserve(TSD.size());
+      for (const Token &SrcTok : TSD) {
         if (SrcTok.is(tok::annot_token_seq_expr)) {
           // Extract the unevaluated expression from the annotation token.
           // The annotation value is the Expr* stored by setExprAnnotation.
@@ -17212,8 +17212,8 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
             if (!EvaluateAsRValue(Info, SubExpr, Val))
               return false;
             assert(Val.isTokenSequence());
-            const TokenSequenceData *Inner = Val.getTokenSequence();
-            NewTokens.append(Inner->begin(), Inner->end());
+            TokenSequenceData Inner = Val.getTokenSequence();
+            NewTokens.append(Inner.begin(), Inner.end());
           } else if (ExprTy->isReflectionType()) {
             // Reflection-typed expression: evaluate and check kind.
             if (!EvaluateAsRValue(Info, SubExpr, Val))
@@ -17307,7 +17307,7 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
         }
       }
 
-      const TokenSequenceData *NewTSD =
+      TokenSequenceData NewTSD =
           CreateTokenSequenceData(Info.Ctx, NewTokens);
       return Success(APValue(NewTSD), E);
     }
@@ -17542,7 +17542,7 @@ bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
 
   // Create a token sequence containing just this token.
   Token Tokens[] = {Tok};
-  const TokenSequenceData *TSD = CreateTokenSequenceData(Info.Ctx, Tokens);
+  TokenSequenceData TSD = CreateTokenSequenceData(Info.Ctx, Tokens);
   return Success(APValue(TSD), E);
 }
 
@@ -17567,8 +17567,8 @@ bool ReflectionEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
     return false;
   }
 
-  const TokenSequenceData *NewTSD =
-    CreateTokenSequenceData(Info.Ctx, *LHSVal.getTokenSequence(), *RHSVal.getTokenSequence());
+  TokenSequenceData NewTSD =
+    CreateTokenSequenceData(Info.Ctx, LHSVal.getTokenSequence(), RHSVal.getTokenSequence());
   return Success(APValue(NewTSD), E);
 }
 }  // end anonymous namespace

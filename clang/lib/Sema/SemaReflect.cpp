@@ -989,7 +989,7 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OperatorLoc,
 ExprResult Sema::ActOnCXXTokenSequenceReflection(SourceLocation OpLoc,
                                                   SourceRange OperandRange,
                                                   ArrayRef<Token> Tokens) {
-  const TokenSequenceData *TSD = CreateTokenSequenceData(Context, Tokens);
+  TokenSequenceData TSD = CreateTokenSequenceData(Context, Tokens);
   return CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD);
 }
 

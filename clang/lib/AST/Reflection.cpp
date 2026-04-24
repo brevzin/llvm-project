@@ -18,21 +18,20 @@
 
 namespace clang {
 
-const TokenSequenceData *CreateTokenSequenceData(ASTContext &Ctx,
-                                                 ArrayRef<Token> Tokens) {
+TokenSequenceData CreateTokenSequenceData(ASTContext &Ctx,
+                                          ArrayRef<Token> Tokens) {
   Token *StoredTokens = nullptr;
   if (!Tokens.empty()) {
     StoredTokens = new (Ctx) Token[Tokens.size()];
     std::copy(Tokens.begin(), Tokens.end(), StoredTokens);
   }
 
-  auto *TSD = new (Ctx) TokenSequenceData(StoredTokens, Tokens.size());
-  return TSD;
+  return TokenSequenceData(StoredTokens, Tokens.size());
 }
 
-const TokenSequenceData *CreateTokenSequenceData(ASTContext &Ctx,
-                                                 ArrayRef<Token> Tokens1,
-                                                 ArrayRef<Token> Tokens2) {
+TokenSequenceData CreateTokenSequenceData(ASTContext &Ctx,
+                                          ArrayRef<Token> Tokens1,
+                                          ArrayRef<Token> Tokens2) {
 
   Token *StoredTokens = nullptr;
   size_t Size = Tokens1.size() + Tokens2.size();
@@ -42,8 +41,7 @@ const TokenSequenceData *CreateTokenSequenceData(ASTContext &Ctx,
     std::copy(Tokens2.begin(), Tokens2.end(), Next);
   }
 
-  auto *TSD = new (Ctx) TokenSequenceData(StoredTokens, Size);
-  return TSD;
+  return TokenSequenceData(StoredTokens, Size);
 }
 
 bool TagDataMemberSpec::operator==(TagDataMemberSpec const &Rhs) const {

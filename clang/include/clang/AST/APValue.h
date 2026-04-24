@@ -325,7 +325,7 @@ private:
   typedef llvm::AlignedCharArrayUnion<void *, APSInt, APFloat, ComplexAPSInt,
                                       ComplexAPFloat, Vec, Arr, StructData,
                                       UnionData, AddrLabelDiffData,
-                                      ReflectionData> DataType;
+                                      ReflectionData, TokenSequenceData> DataType;
   static const size_t DataSize = sizeof(DataType);
 
   DataType Data;
@@ -483,7 +483,7 @@ public:
     MakeReflection(); setReflection(RK, Data);
   }
   /// Creates a token sequence APValue from raw token sequence data.
-  explicit APValue(const TokenSequenceData *TSD)
+  explicit APValue(TokenSequenceData TSD)
       : Kind(None), AllowConstexprUnknown(false), UnderlyingTy(),
         ReflectionDepth() {
     MakeTokenSequence();
@@ -785,9 +785,9 @@ public:
   CXXBaseSpecifier *getReflectedBaseSpecifier() const;
   TagDataMemberSpec *getReflectedDataMemberSpec() const;
   CXX26AnnotationAttr *getReflectedAnnotation() const;
-  const TokenSequenceData *getTokenSequence() const {
+  TokenSequenceData getTokenSequence() const {
     assert(isTokenSequence() && "Invalid accessor");
-    return *(const TokenSequenceData * const *)(const char *)&Data;
+    return *(const TokenSequenceData *)(const char *)&Data;
   }
   IdentifierInfo *getReflectedIdentifier() const;
 
@@ -834,9 +834,9 @@ public:
     ((AddrLabelDiffData *)(char *)&Data)->RHSExpr = RHSExpr;
   }
   void setReflection(ReflectionKind RK, const void *Data);
-  void setTokenSequence(const TokenSequenceData *TSD) {
+  void setTokenSequence(TokenSequenceData TSD) {
     assert(isTokenSequence() && "Invalid accessor");
-    *(const TokenSequenceData **)(char *)&Data = TSD;
+    *(TokenSequenceData *)(char *)&Data = TSD;
   }
 
 private:
@@ -898,7 +898,7 @@ private:
   }
   void MakeTokenSequence() {
     assert(isAbsent() && "Bad state change");
-    *(const TokenSequenceData **)(char *)&Data = nullptr;
+    new ((TokenSequenceData *)(char *)&Data) TokenSequenceData();
     Kind = TokenSequence;
   }
 
