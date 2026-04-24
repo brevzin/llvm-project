@@ -742,8 +742,6 @@ void APValue::Profile(llvm::FoldingSetNodeID &ID) const {
 
   case TokenSequence: {
     TokenSequenceData TSD = getTokenSequence();
-    // Profile only the semantic tokens. Older or synthesized sequences may
-    // still carry a trailing eof token, which is ignored here.
     ID.AddInteger(TSD.size());
     for (const Token &Tok : TSD) {
       ID.AddInteger(Tok.getKind());
