@@ -390,6 +390,21 @@ namespace N12 {
     };
 
     static_assert(S<int>::x == 1);
+
+    namespace Target { }
+
+    struct TargetWrapper {
+        consteval operator info() const {
+            return ^^Target;
+        }
+    };
+
+    consteval {
+        queue_injection(TargetWrapper(),
+                        ^^{ inline constexpr int target_ns_conv_ok = 1; });
+    }
+
+    static_assert(Target::target_ns_conv_ok == 1);
 }
 
 namespace N13 {

@@ -1062,6 +1062,8 @@ ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
   } else {
     llvm_unreachable("invalid number of arguments");
   }
+  if (TargetNS)
+    TargetNS = TryConvertTo(*this, TargetNS, TokenOpTarget::MetaInfo);
   Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
   return CXXBuiltinInjectExpr::Create(Context, Context.VoidTy, Operand,
                                        KwLoc, LParenLoc, RParenLoc, TargetNS);
