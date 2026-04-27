@@ -33,6 +33,7 @@
 #include "clang/Sema/Scope.h"
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaHLSL.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/TimeProfiler.h"
 #include <optional>
@@ -1169,6 +1170,30 @@ void Parser::TokenInjectionCallback(void *P,
   static_cast<Parser *>(P)->ProcessTokenInjections(Injections);
 }
 
+static void collectInjectedLocalDeclsForLookup(
+    Stmt *S, SmallVectorImpl<NamedDecl *> &Decls) {
+  auto AddDecl = [&](NamedDecl *ND) {
+    if (!ND->getDeclName() || llvm::is_contained(Decls, ND))
+      return;
+    Decls.push_back(ND);
+  };
+
+  auto *DS = dyn_cast<DeclStmt>(S);
+  if (!DS)
+    return;
+
+  for (Decl *D : DS->decls()) {
+    auto *ND = dyn_cast<NamedDecl>(D);
+    if (!ND)
+      continue;
+
+    AddDecl(ND);
+    if (auto *ED = dyn_cast<EnumDecl>(ND))
+      for (auto *ECD : ED->enumerators())
+        AddDecl(ECD);
+  }
+}
+
 void Parser::ProcessTokenInjections(
     SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
   for (auto &Inj : Injections) {
@@ -1227,24 +1252,73 @@ void Parser::ProcessTokenInjections(
       // Parsed statements are added to PendingInjectedStmts so the
       // enclosing compound statement can pick them up.
       //
-      // During template instantiation, the parser scope may not include
-      // the function's parameters and local variables (since the function
-      // body wasn't parsed by the parser — it was instantiated by Sema).
-      // Create a DeclScope and add the function's declarations so name
-      // lookup can find them.
-      ParseScope FnScope(this, Scope::DeclScope);
-      if (auto *FD = dyn_cast<FunctionDecl>(Actions.CurContext)) {
-        getCurScope()->setEntity(FD);
-        for (auto *P : FD->parameters())
-          Actions.PushOnScopeChains(P, getCurScope(), /*AddToContext=*/false);
-      }
+      // If we are still parsing the original, non-dependent function body,
+      // reuse the active block scope. This makes injected local declarations
+      // visible to the following statements in the same scope.
+      auto HasCurrentDeclContextScope = [&] {
+        for (Scope *S = getCurScope(); S; S = S->getParent())
+          if (S->getEntity() == Actions.CurContext)
+            return true;
+        return false;
+      };
+      bool ReuseCurrentScope = !Actions.inTemplateInstantiation() &&
+                               !Actions.CurContext->isDependentContext() &&
+                               HasCurrentDeclContextScope();
 
+      // During template instantiation, or while parsing a dependent function
+      // body, later ordinary source cannot look up names that are injected only
+      // after a consteval block is evaluated. Use a temporary lookup scope for
+      // the injected code in those cases.
+      std::optional<ParseScope> FnScope;
+      SmallVector<NamedDecl *, 8> SeededInjectedDecls;
+      SmallVector<NamedDecl *, 8> NewInjectedDecls;
+      if (!ReuseCurrentScope) {
+        FnScope.emplace(this, Scope::DeclScope);
+        if (auto *FD = dyn_cast<FunctionDecl>(Actions.CurContext)) {
+          getCurScope()->setEntity(FD);
+          for (auto *P : FD->parameters())
+            Actions.PushOnScopeChains(P, getCurScope(), /*AddToContext=*/false);
+        }
+
+        for (NamedDecl *D : Actions.InjectedLocalDeclsForLookup) {
+          if (!D->getDeclName() || getCurScope()->isDeclScope(D))
+            continue;
+          getCurScope()->AddDecl(D);
+          Actions.IdResolver.AddDecl(D);
+          SeededInjectedDecls.push_back(D);
+        }
+      }
+      auto RemoveTemporaryInjectedDecls = llvm::make_scope_exit([&] {
+        auto RemoveFromScope = [&](NamedDecl *D) {
+          if (!getCurScope()->isDeclScope(D))
+            return;
+          getCurScope()->RemoveDecl(D);
+          Actions.IdResolver.RemoveDecl(D);
+        };
+        for (NamedDecl *D : SeededInjectedDecls)
+          RemoveFromScope(D);
+        for (NamedDecl *D : NewInjectedDecls)
+          RemoveFromScope(D);
+      });
+
+      unsigned PendingInjectedStart = Actions.PendingInjectedStmts.size();
       StmtVector Stmts;
       while (Tok.isNot(tok::eof)) {
         StmtResult R =
             ParseStatementOrDeclaration(Stmts, ParsedStmtContext::Compound);
         if (R.isUsable())
           Actions.PendingInjectedStmts.push_back(R.get());
+      }
+
+      if (!ReuseCurrentScope) {
+        for (Stmt *S :
+             ArrayRef(Actions.PendingInjectedStmts).drop_front(
+                 PendingInjectedStart)) {
+          collectInjectedLocalDeclsForLookup(S, NewInjectedDecls);
+        }
+        for (NamedDecl *D : NewInjectedDecls)
+          if (!llvm::is_contained(Actions.InjectedLocalDeclsForLookup, D))
+            Actions.InjectedLocalDeclsForLookup.push_back(D);
       }
     } else if (Actions.CurContext->isRecord()) {
       // Inside a class body: parse member declarations.

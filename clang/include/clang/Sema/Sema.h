@@ -15754,6 +15754,12 @@ public:
   // to the enclosing compound statement.
   SmallVector<Stmt *> PendingInjectedStmts;
 
+  // Local declarations parsed from injected token sequences in the current
+  // compound statement. These are used to seed temporary parser scopes so later
+  // injected token sequences can look up earlier injected locals during
+  // template instantiation.
+  SmallVector<NamedDecl *> InjectedLocalDeclsForLookup;
+
   // Callback for processing token injections. The Parser registers this
   // so that Sema (during template instantiation) can feed injected tokens
   // back to the parser.

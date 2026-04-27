@@ -49,6 +49,7 @@
 #include "clang/Sema/SemaPseudoObject.h"
 #include "clang/Sema/SemaSYCL.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include <algorithm>
@@ -8182,7 +8183,15 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
   // restore them at the end so a nested transform can't drain stmts that
   // belong to the enclosing scope.
   SmallVector<Stmt *> SavedPendingInjected;
+  SmallVector<NamedDecl *> SavedInjectedLocalDeclsForLookup;
   SavedPendingInjected.swap(getSema().PendingInjectedStmts);
+  SavedInjectedLocalDeclsForLookup.swap(
+      getSema().InjectedLocalDeclsForLookup);
+  auto RestoreInjectedState = llvm::make_scope_exit([&] {
+    SavedPendingInjected.swap(getSema().PendingInjectedStmts);
+    SavedInjectedLocalDeclsForLookup.swap(
+        getSema().InjectedLocalDeclsForLookup);
+  });
   for (auto *B : S->body()) {
     StmtResult Result = getDerived().TransformStmt(
         B, IsStmtExpr && B == ExprResult ? StmtDiscardKind::StmtExprResult
@@ -8191,10 +8200,8 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
     if (Result.isInvalid()) {
       // Immediately fail if this was a DeclStmt, since it's very
       // likely that this will cause problems for future statements.
-      if (isa<DeclStmt>(B)) {
-        SavedPendingInjected.swap(getSema().PendingInjectedStmts);
+      if (isa<DeclStmt>(B))
         return StmtError();
-      }
 
       // Otherwise, just keep processing substatements and fail later.
       SubStmtInvalid = true;
@@ -8213,8 +8220,6 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
       SubStmtChanged = true;
     }
   }
-  // Restore the outer compound's pending stmts (typically empty).
-  SavedPendingInjected.swap(getSema().PendingInjectedStmts);
 
   if (SubStmtInvalid)
     return StmtError();

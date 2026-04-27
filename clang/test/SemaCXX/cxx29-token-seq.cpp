@@ -555,18 +555,56 @@ namespace N22 {
 }
 
 namespace N23 {
-    // Block-scope injection runs into the consteval lambda body, not the
-    // enclosing function. Document that the injected name is NOT visible
-    // in the outer scope. (When this changes, the FIXME below fires.)
+    // Block-scope injection in a non-dependent function makes the injected
+    // local visible to following statements in the same scope.
     consteval auto add_x() -> token_sequence { return ^^{ int x = 5; (void)x; }; }
     constexpr int caller() {
         consteval { queue_injection(add_x()); }
-        // FIXME: x = 5 was injected into the consteval lambda's compound
-        // and isn't visible here. Update this test if/when block-scope
-        // injection targets the enclosing function body.
-        return 0;
+        return x;
     }
-    static_assert(caller() == 0);
+    static_assert(caller() == 5);
+
+    template <typename T>
+    consteval auto add_template_x() -> token_sequence {
+        return ^^{ int template_x = 5; };
+    }
+
+    template <typename T>
+    constexpr int templated_lookup() {
+        consteval { queue_injection(add_template_x<T>()); }
+        return template_x; // expected-error {{use of undeclared identifier 'template_x'}}
+    }
+
+    template <typename T>
+    consteval token_sequence return_stmt() {
+        return ^^{ return template_x; };
+    }
+
+    template <typename T>
+    constexpr int templated_lookup2() {
+        consteval { queue_injection(add_template_x<T>()); }
+        consteval { queue_injection(return_stmt<T>()); }
+    }
+    static_assert(templated_lookup2<int>() == 5);
+
+    struct Guard {
+        constexpr Guard(int &n) : p(&n) { n = 1; }
+        constexpr ~Guard() { *p = 2; }
+        int *p;
+    };
+
+    template <typename T>
+    consteval auto add_guard() -> token_sequence {
+        return ^^{ Guard guard(n); };
+    }
+
+    template <typename T>
+    constexpr int templated_lifetime(T n) {
+        consteval { queue_injection(add_guard<T>()); }
+        return n;
+    }
+
+    static_assert(templated_lifetime(0) == 1);
 }
 
 namespace N24 {
