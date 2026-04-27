@@ -33,6 +33,7 @@
 #include "clang/Basic/OperatorKinds.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/Specifiers.h"
+#include "clang/Lex/Token.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <cassert>
@@ -1935,28 +1936,66 @@ CXXReflectExpr::CXXReflectExpr(const ASTContext &C, QualType ExprTy, APValue RV)
   setDependence(computeDependence(this, C));
 }
 
+static unsigned countInterpolationExprs(TokenSequenceData TSD) {
+  unsigned Count = 0;
+  for (const Token &Tok : TSD)
+    if (Tok.is(tok::annot_token_seq_expr))
+      ++Count;
+  return Count;
+}
+
 CXXTokenSequenceExpr::CXXTokenSequenceExpr(const ASTContext &C, QualType ExprTy,
-                                           TokenSequenceData TSD)
+                                           TokenSequenceData TSD,
+                                           unsigned NumInterpolationExprs)
     : Expr(CXXTokenSequenceExprClass, ExprTy, VK_PRValue, OK_Ordinary),
-      TokSeq(TSD) {
+      TokSeq(TSD), NumInterpolationExprs(NumInterpolationExprs) {
+  initializeInterpolationExprs();
   setDependence(computeDependence(this));
 }
 
-CXXTokenSequenceExpr::CXXTokenSequenceExpr(EmptyShell Empty)
-    : Expr(CXXTokenSequenceExprClass, Empty), TokSeq() {}
+CXXTokenSequenceExpr::CXXTokenSequenceExpr(EmptyShell Empty,
+                                           unsigned NumInterpolationExprs)
+    : Expr(CXXTokenSequenceExprClass, Empty), TokSeq(),
+      NumInterpolationExprs(NumInterpolationExprs) {
+  for (unsigned I = 0; I != NumInterpolationExprs; ++I)
+    setInterpolationExpr(I, nullptr);
+}
+
+void CXXTokenSequenceExpr::initializeInterpolationExprs() {
+  unsigned I = 0;
+  for (const Token &Tok : TokSeq) {
+    if (!Tok.is(tok::annot_token_seq_expr))
+      continue;
+    if (I == NumInterpolationExprs)
+      break;
+    setInterpolationExpr(I++,
+                         static_cast<Expr *>(Tok.getAnnotationValue()));
+  }
+  for (; I != NumInterpolationExprs; ++I)
+    setInterpolationExpr(I, nullptr);
+}
 
 CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(ASTContext &C,
                                                    SourceLocation OperatorLoc,
                                                    SourceRange OperandRange,
                                                    TokenSequenceData TSD) {
-  auto *E = new (C) CXXTokenSequenceExpr(C, C.TokenSequenceTy, TSD);
+  unsigned NumInterpolationExprs = countInterpolationExprs(TSD);
+  void *Mem =
+      C.Allocate(totalSizeToAlloc<Stmt *>(NumInterpolationExprs));
+  auto *E =
+      new (Mem) CXXTokenSequenceExpr(C, C.TokenSequenceTy, TSD,
+                                     NumInterpolationExprs);
   E->setOperatorLoc(OperatorLoc);
   E->setOperandRange(OperandRange);
   return E;
 }
 
-CXXTokenSequenceExpr *CXXTokenSequenceExpr::CreateEmpty(const ASTContext &C) {
-  return new (C) CXXTokenSequenceExpr(EmptyShell{});
+CXXTokenSequenceExpr *
+CXXTokenSequenceExpr::CreateEmpty(const ASTContext &C,
+                                  unsigned NumInterpolationExprs) {
+  void *Mem =
+      C.Allocate(totalSizeToAlloc<Stmt *>(NumInterpolationExprs));
+  return new (Mem) CXXTokenSequenceExpr(EmptyShell{}, NumInterpolationExprs);
 }
 
 APValue CXXTokenSequenceExpr::getValue() const {

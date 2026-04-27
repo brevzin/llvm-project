@@ -485,11 +485,14 @@ void ASTStmtWriter::VisitCXXReflectExpr(CXXReflectExpr *E) {
 
 void ASTStmtWriter::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
   VisitExpr(E);
+  Record.writeUInt32(E->getNumInterpolationExprs());
   Record.AddSourceLocation(E->getOperatorLoc());
   // FIXME: Token sequences currently round-trip through PCH/modules as an
   // empty token sequence (see PropertiesBase.td). Implement proper Token array
   // serialization when this becomes load-bearing.
   Record.AddAPValue(E->getValue());
+  for (Stmt *S : E->children())
+    Record.AddStmt(S);
   Record.AddSourceRange(E->getOperandRange());
   Code = serialization::EXPR_TOKEN_SEQUENCE;
 }

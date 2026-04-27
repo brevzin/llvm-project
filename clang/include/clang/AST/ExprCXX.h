@@ -5528,27 +5528,46 @@ public:
 ///
 /// The captured tokens may include interpolation expressions (introduced via
 /// `\(...)`) which are evaluated when the token sequence is materialized.
-class CXXTokenSequenceExpr : public Expr {
+class CXXTokenSequenceExpr final
+    : public Expr,
+      private llvm::TrailingObjects<CXXTokenSequenceExpr, Stmt *> {
+  friend class ASTStmtReader;
+  friend class ASTStmtWriter;
+  friend TrailingObjects;
+
   // The captured token sequence data (pointer + size into ASTContext storage).
   TokenSequenceData TokSeq;
+
+  unsigned NumInterpolationExprs;
 
   // Source locations.
   SourceLocation OperatorLoc;
   SourceRange OperandRange;
 
   CXXTokenSequenceExpr(const ASTContext &C, QualType ExprTy,
-                       TokenSequenceData TSD);
-  CXXTokenSequenceExpr(EmptyShell Empty);
+                       TokenSequenceData TSD, unsigned NumInterpolationExprs);
+  CXXTokenSequenceExpr(EmptyShell Empty, unsigned NumInterpolationExprs);
+
+  void initializeInterpolationExprs();
+  void setInterpolationExpr(unsigned I, Expr *E) {
+    getTrailingObjects()[I] = E;
+  }
 
 public:
   static CXXTokenSequenceExpr *Create(ASTContext &C, SourceLocation OperatorLoc,
                                       SourceRange OperandRange,
                                       TokenSequenceData TSD);
-  static CXXTokenSequenceExpr *CreateEmpty(const ASTContext &C);
+  static CXXTokenSequenceExpr *CreateEmpty(const ASTContext &C,
+                                           unsigned NumInterpolationExprs);
 
   /// Returns the captured token sequence data.
   TokenSequenceData getTokenSequence() const { return TokSeq; }
-  void setTokenSequence(TokenSequenceData TSD) { TokSeq = TSD; }
+  void setTokenSequence(TokenSequenceData TSD) {
+    TokSeq = TSD;
+    initializeInterpolationExprs();
+  }
+
+  unsigned getNumInterpolationExprs() const { return NumInterpolationExprs; }
 
   /// Returns an APValue representing this token sequence.
   APValue getValue() const;
@@ -5569,11 +5588,13 @@ public:
   void setOperandRange(SourceRange R) { OperandRange = R; }
 
   child_range children() {
-    return child_range(child_iterator(), child_iterator());
+    Stmt **Begin = getTrailingObjects();
+    return child_range(Begin, Begin + NumInterpolationExprs);
   }
 
   const_child_range children() const {
-    return const_child_range(const_child_iterator(), const_child_iterator());
+    Stmt *const *Begin = getTrailingObjects();
+    return const_child_range(Begin, Begin + NumInterpolationExprs);
   }
 
   static bool classof(const Stmt *T) {

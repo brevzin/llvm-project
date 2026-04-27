@@ -508,9 +508,14 @@ void ASTStmtReader::VisitCXXReflectExpr(CXXReflectExpr *E) {
 
 void ASTStmtReader::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
   VisitExpr(E);
+  unsigned NumInterpolationExprs = Record.readUInt32();
+  assert(NumInterpolationExprs == E->getNumInterpolationExprs() &&
+         "wrong number of token sequence interpolation expressions");
   E->setOperatorLoc(Record.readSourceLocation());
   APValue V = Record.readAPValue();
   E->setTokenSequence(V.getTokenSequence());
+  for (unsigned I = 0; I != NumInterpolationExprs; ++I)
+    E->setInterpolationExpr(I, Record.readSubExpr());
   E->setOperandRange(Record.readSourceRange());
 }
 
@@ -4709,7 +4714,8 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
       break;
     }
     case EXPR_TOKEN_SEQUENCE: {
-      S = CXXTokenSequenceExpr::CreateEmpty(Context);
+      S = CXXTokenSequenceExpr::CreateEmpty(
+          Context, Record[ASTStmtReader::NumExprFields]);
       break;
     }
     case EXPR_METAFUNCTION: {
