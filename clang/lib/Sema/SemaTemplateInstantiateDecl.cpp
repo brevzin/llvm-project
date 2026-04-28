@@ -5830,7 +5830,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
 
   // Postpone late parsed template instantiations.
   if (PatternDecl->isLateTemplateParsed() &&
-      !LateTemplateParser) {
+      !HasLateTemplateParser()) {
     Function->setInstantiationIsPending(true);
     LateParsedInstantiations.push_back(
         std::make_pair(Function, PointOfInstantiation));
@@ -5864,7 +5864,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
   // Call the LateTemplateParser callback if there is a need to late parse
   // a templated function definition.
   if (!Pattern && PatternDecl->isLateTemplateParsed() &&
-      LateTemplateParser) {
+      HasLateTemplateParser()) {
     // FIXME: Optimize to allow individual templates to be deserialized.
     if (PatternDecl->isFromASTFile())
       ExternalSource->ReadLateParsedTemplates(LateParsedTemplateMap);
@@ -5872,7 +5872,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
     auto LPTIter = LateParsedTemplateMap.find(PatternDecl);
     assert(LPTIter != LateParsedTemplateMap.end() &&
            "missing LateParsedTemplate");
-    LateTemplateParser(OpaqueParser, *LPTIter->second);
+    ParseLateTemplate(*LPTIter->second);
     Pattern = PatternDecl->getBody(PatternDecl);
     updateAttrsForLateParsedTemplate(PatternDecl, Function);
   }

@@ -1313,18 +1313,79 @@ public:
   sema::AnalysisBasedWarnings AnalysisWarnings;
   threadSafety::BeforeSet *ThreadSafetyDeclCache;
 
-  /// Callback to the parser to parse templated functions when needed.
-  typedef void LateTemplateParserCB(void *P, LateParsedTemplate &LPT);
-  typedef void LateTemplateParserCleanupCB(void *P);
-  LateTemplateParserCB *LateTemplateParser;
-  LateTemplateParserCleanupCB *LateTemplateParserCleanup;
-  void *OpaqueParser;
+  /// Bridge back into the parser for late parsing and token injection.
+  class SemaParserBridge {
+  public:
+    typedef void LateTemplateParserCB(void *P, LateParsedTemplate &LPT);
+    typedef void LateTemplateParserCleanupCB(void *P);
+    typedef void TokenInjectionCB(
+        void *P, SmallVectorImpl<Expr::EvalStatus::TokenInjection> &);
 
-  void SetLateTemplateParser(LateTemplateParserCB *LTP,
-                             LateTemplateParserCleanupCB *LTPCleanup, void *P) {
-    LateTemplateParser = LTP;
-    LateTemplateParserCleanup = LTPCleanup;
-    OpaqueParser = P;
+    void setParser(void *P) { OpaqueParser = P; }
+
+    void setLateTemplateParser(LateTemplateParserCB *LTP,
+                               LateTemplateParserCleanupCB *LTPCleanup) {
+      LateTemplateParser = LTP;
+      LateTemplateParserCleanup = LTPCleanup;
+    }
+
+    void setTokenInjectionCallback(TokenInjectionCB *CB) {
+      TokenInjectionCallback = CB;
+    }
+
+    bool hasLateTemplateParser() const { return LateTemplateParser; }
+
+    void parseLateTemplate(LateParsedTemplate &LPT) const {
+      assert(LateTemplateParser && OpaqueParser &&
+             "late template parsing requested without a parser bridge");
+      LateTemplateParser(OpaqueParser, LPT);
+    }
+
+    void cleanup() const {
+      if (LateTemplateParserCleanup && OpaqueParser)
+        LateTemplateParserCleanup(OpaqueParser);
+    }
+
+    bool canProcessTokenInjections() const {
+      return TokenInjectionCallback && OpaqueParser;
+    }
+
+    void processTokenInjections(
+        SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) const {
+      assert(TokenInjectionCallback && OpaqueParser &&
+             "token injection requested without a parser bridge");
+      TokenInjectionCallback(OpaqueParser, Injections);
+    }
+
+  private:
+    LateTemplateParserCB *LateTemplateParser = nullptr;
+    LateTemplateParserCleanupCB *LateTemplateParserCleanup = nullptr;
+    TokenInjectionCB *TokenInjectionCallback = nullptr;
+    void *OpaqueParser = nullptr;
+  };
+
+  void SetParserBridge(void *P) { ParserBridge.setParser(P); }
+  void SetLateTemplateParser(
+      SemaParserBridge::LateTemplateParserCB *LTP,
+      SemaParserBridge::LateTemplateParserCleanupCB *LTPCleanup) {
+    ParserBridge.setLateTemplateParser(LTP, LTPCleanup);
+  }
+  void SetTokenInjectionCallback(SemaParserBridge::TokenInjectionCB *CB) {
+    ParserBridge.setTokenInjectionCallback(CB);
+  }
+  bool HasLateTemplateParser() const {
+    return ParserBridge.hasLateTemplateParser();
+  }
+  void ParseLateTemplate(LateParsedTemplate &LPT) {
+    ParserBridge.parseLateTemplate(LPT);
+  }
+  void CleanupParserBridge() { ParserBridge.cleanup(); }
+  bool CanProcessTokenInjections() const {
+    return ParserBridge.canProcessTokenInjections();
+  }
+  void ProcessTokenInjectionsFromParserBridge(
+      SmallVectorImpl<Expr::EvalStatus::TokenInjection> &Injections) {
+    ParserBridge.processTokenInjections(Injections);
   }
 
   /// Callback to the parser to parse a type expressed as a string.
@@ -15761,13 +15822,6 @@ public:
   // may temporarily preload already-visible source locals as well.
   SmallVector<NamedDecl *> InjectedLocalDeclsForLookup;
 
-  // Callback for processing token injections. The Parser registers this
-  // so that Sema (during template instantiation) can feed injected tokens
-  // back to the parser.
-  typedef void TokenInjectionCB(void *P,
-      SmallVectorImpl<Expr::EvalStatus::TokenInjection> &);
-  TokenInjectionCB *TokenInjectionCallback = nullptr;
-
   void ProcessPendingTokenInjections();
 
   /// After a class definition completes, check its [[=expr]] annotations
@@ -15775,6 +15829,8 @@ public:
   void HandleAnnotationOnComplete(Decl *TagDecl);
 
 private:
+  SemaParserBridge ParserBridge;
+
   // Lambdas having bound references to this Sema object, used to evaluate
   // metafunction (C++26, P2996) at constant evaluation time.
   llvm::SmallDenseMap<unsigned, std::unique_ptr<CXXMetafunctionExpr::ImplFn>>

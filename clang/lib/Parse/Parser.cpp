@@ -83,8 +83,8 @@ Parser::Parser(Preprocessor &pp, Sema &actions, bool skipFunctionBodies)
         return this->ParseTypeFromString(TypeStr, Context, IncludeLoc);
       };
 
-  Actions.TokenInjectionCallback = &Parser::TokenInjectionCallback;
-  Actions.OpaqueParser = this;
+  Actions.SetParserBridge(this);
+  Actions.SetTokenInjectionCallback(&Parser::TokenInjectionCallback);
 }
 
 DiagnosticBuilder Parser::Diag(SourceLocation Loc, unsigned DiagID) {
@@ -726,7 +726,7 @@ bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result,
     }
 
     // Late template parsing can begin.
-    Actions.SetLateTemplateParser(LateTemplateParserCallback, nullptr, this);
+    Actions.SetLateTemplateParser(LateTemplateParserCallback, nullptr);
     Actions.ActOnEndOfTranslationUnit();
     //else don't tell Sema that we ended parsing: more input might come.
     return true;

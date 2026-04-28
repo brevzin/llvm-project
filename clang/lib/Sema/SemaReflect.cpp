@@ -2111,13 +2111,13 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
 }
 
 void Sema::ProcessPendingTokenInjections() {
-  if (PendingInjections.empty() || !TokenInjectionCallback)
+  if (PendingInjections.empty() || !CanProcessTokenInjections())
     return;
   // Move the injections out so the callback doesn't re-process them.
   SmallVector<Expr::EvalStatus::TokenInjection, 4>
       Injections = std::move(PendingInjections);
   PendingInjections.clear();
-  TokenInjectionCallback(OpaqueParser, Injections);
+  ProcessTokenInjectionsFromParserBridge(Injections);
 }
 
 void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
