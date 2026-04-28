@@ -1287,9 +1287,6 @@ void Parser::ProcessTokenInjections(
             Actions.PushOnScopeChains(P, getCurScope(), /*AddToContext=*/false);
         }
 
-        for (NamedDecl *D : Actions.InstantiatedLocalDeclsForLookup)
-          SeedLookupDecl(D);
-
         for (NamedDecl *D : Actions.InjectedLocalDeclsForLookup) {
           SeedLookupDecl(D);
         }

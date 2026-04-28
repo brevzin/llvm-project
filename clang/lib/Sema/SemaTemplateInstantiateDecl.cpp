@@ -2256,15 +2256,20 @@ Decl *TemplateDeclInstantiator::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
   // During normal parsing, ParseConstevalBlockDeclaration handles this,
   // but during template instantiation we need to invoke the parser via
   // callback.
-  SmallVector<NamedDecl *> SavedInstantiatedLocalDeclsForLookup;
-  SavedInstantiatedLocalDeclsForLookup.swap(
-      SemaRef.InstantiatedLocalDeclsForLookup);
-  auto RestoreLookupDecls = llvm::make_scope_exit([&] {
-    SavedInstantiatedLocalDeclsForLookup.swap(
-        SemaRef.InstantiatedLocalDeclsForLookup);
-  });
+  SmallVector<NamedDecl *> AddedInjectedLocalDeclsForLookup;
+  SmallVector<NamedDecl *> VisibleLocalDeclsForLookup;
   collectInstantiatedLocalDeclsForConstevalLookup(
-      SemaRef, D, SemaRef.InstantiatedLocalDeclsForLookup);
+      SemaRef, D, VisibleLocalDeclsForLookup);
+  for (NamedDecl *ND : VisibleLocalDeclsForLookup) {
+    if (llvm::is_contained(SemaRef.InjectedLocalDeclsForLookup, ND))
+      continue;
+    SemaRef.InjectedLocalDeclsForLookup.push_back(ND);
+    AddedInjectedLocalDeclsForLookup.push_back(ND);
+  }
+  auto RestoreLookupDecls = llvm::make_scope_exit([&] {
+    for (NamedDecl *ND : AddedInjectedLocalDeclsForLookup)
+      llvm::erase(SemaRef.InjectedLocalDeclsForLookup, ND);
+  });
   SemaRef.ProcessPendingTokenInjections();
 
   return Result;
