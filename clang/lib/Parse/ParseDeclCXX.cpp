@@ -1270,8 +1270,15 @@ void Parser::ProcessTokenInjections(
       // after a consteval block is evaluated. Use a temporary lookup scope for
       // the injected code in those cases.
       std::optional<ParseScope> FnScope;
-      SmallVector<NamedDecl *, 8> SeededInjectedDecls;
+      SmallVector<NamedDecl *, 8> SeededLookupDecls;
       SmallVector<NamedDecl *, 8> NewInjectedDecls;
+      auto SeedLookupDecl = [&](NamedDecl *D) {
+        if (!D->getDeclName() || getCurScope()->isDeclScope(D))
+          return;
+        getCurScope()->AddDecl(D);
+        Actions.IdResolver.AddDecl(D);
+        SeededLookupDecls.push_back(D);
+      };
       if (!ReuseCurrentScope) {
         FnScope.emplace(this, Scope::DeclScope);
         if (auto *FD = dyn_cast<FunctionDecl>(Actions.CurContext)) {
@@ -1280,12 +1287,11 @@ void Parser::ProcessTokenInjections(
             Actions.PushOnScopeChains(P, getCurScope(), /*AddToContext=*/false);
         }
 
+        for (NamedDecl *D : Actions.InstantiatedLocalDeclsForLookup)
+          SeedLookupDecl(D);
+
         for (NamedDecl *D : Actions.InjectedLocalDeclsForLookup) {
-          if (!D->getDeclName() || getCurScope()->isDeclScope(D))
-            continue;
-          getCurScope()->AddDecl(D);
-          Actions.IdResolver.AddDecl(D);
-          SeededInjectedDecls.push_back(D);
+          SeedLookupDecl(D);
         }
       }
       auto RemoveTemporaryInjectedDecls = llvm::make_scope_exit([&] {
@@ -1295,7 +1301,7 @@ void Parser::ProcessTokenInjections(
           getCurScope()->RemoveDecl(D);
           Actions.IdResolver.RemoveDecl(D);
         };
-        for (NamedDecl *D : SeededInjectedDecls)
+        for (NamedDecl *D : SeededLookupDecls)
           RemoveFromScope(D);
         for (NamedDecl *D : NewInjectedDecls)
           RemoveFromScope(D);

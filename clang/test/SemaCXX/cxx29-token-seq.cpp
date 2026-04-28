@@ -602,6 +602,24 @@ namespace N23 {
     }
     static_assert(templated_lookup2<int>() == 5);
 
+    template <int N>
+    constexpr int templated_lookup3() {
+        int local = 5;
+        consteval { queue_injection(^^{ return local + \(N); }); }
+    }
+    static_assert(templated_lookup3<2>() == 7);
+
+    template <int N>
+    constexpr int templated_lookup4() {
+        {
+            int hidden = 5;
+            (void)hidden;
+        }
+        consteval { queue_injection(^^{ return hidden + \(N); }); } // expected-error {{use of undeclared identifier 'hidden'}}
+        return 0;
+    }
+    constexpr int hidden_lookup = templated_lookup4<2>();
+
     struct Guard {
         constexpr Guard(int &n) : p(&n) { n = 1; }
         constexpr ~Guard() { *p = 2; }

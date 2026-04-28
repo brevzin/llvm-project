@@ -15760,6 +15760,12 @@ public:
   // template instantiation.
   SmallVector<NamedDecl *> InjectedLocalDeclsForLookup;
 
+  // Previously-declared local declarations that are visible at the current
+  // template-instantiation token injection site. These are used to seed the
+  // parser's temporary lookup scope so injected tokens reparse with the same
+  // local visibility as the originating consteval block.
+  SmallVector<NamedDecl *> InstantiatedLocalDeclsForLookup;
+
   // Callback for processing token injections. The Parser registers this
   // so that Sema (during template instantiation) can feed injected tokens
   // back to the parser.
