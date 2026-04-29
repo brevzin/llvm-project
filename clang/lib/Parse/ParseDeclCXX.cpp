@@ -1326,29 +1326,39 @@ void Parser::ProcessTokenInjections(
     } else if (Actions.CurContext->isRecord()) {
       // Inside a class body: parse member declarations.
       Decl *TagDecl = cast<Decl>(Actions.CurContext);
-      ParsingClassDefinition ParsingDef(*this, TagDecl,
-                                        /*TopLevelClass=*/true,
-                                        /*IsInterface=*/false);
-      // Create a scope with the class as entity so that
-      // CheckTemplateDeclScope can find it when parsing member templates.
-      ParseScope ClassScope(this, Scope::ClassScope | Scope::DeclScope);
-      getCurScope()->setEntity(Actions.CurContext);
-      // Ensure the field collector has a scope, since ActOnCXXMemberDeclarator
-      // unconditionally calls FieldCollector->Add() for field declarations.
-      // During template instantiation, there may not be an active scope.
-      Actions.FieldCollector->StartClass();
+      bool HasActiveClassParsing =
+          !ClassStack.empty() && getCurrentClass().TagOrTemplate == TagDecl;
+      std::optional<ParsingClassDefinition> ParsingDef;
+      std::optional<ParseScope> ClassScope;
+      if (!HasActiveClassParsing) {
+        ParsingDef.emplace(*this, TagDecl, /*TopLevelClass=*/true,
+                           /*IsInterface=*/false);
+        // Create a scope with the class as entity so that
+        // CheckTemplateDeclScope can find it when parsing member templates.
+        ClassScope.emplace(this, Scope::ClassScope | Scope::DeclScope);
+        getCurScope()->setEntity(Actions.CurContext);
+        // Ensure the field collector has a scope, since
+        // ActOnCXXMemberDeclarator unconditionally calls FieldCollector->Add()
+        // for field declarations. During template instantiation, there may not
+        // be an active scope.
+        Actions.FieldCollector->StartClass();
+      }
       while (Tok.isNot(tok::eof)) {
         ParsedAttributes DeclAttrs(AttrFactory);
         ParsedTemplateInfo TemplateInfo;
         ParseCXXClassMemberDeclaration(AS_public, DeclAttrs, TemplateInfo);
       }
-      // Process late-parsed members: method declarations, member
-      // initializers, and method definitions. This must happen before
-      // PopParsingClass destroys the LateParsedDeclarations.
-      ParseLexedMethodDeclarations(getCurrentClass());
-      ParseLexedMemberInitializers(getCurrentClass());
-      ParseLexedMethodDefs(getCurrentClass());
-      Actions.FieldCollector->FinishClass();
+      if (!HasActiveClassParsing) {
+        // Process late-parsed members: method declarations, member
+        // initializers, and method definitions. This must happen before
+        // PopParsingClass destroys the LateParsedDeclarations. When injecting
+        // into an actively-parsed class, leave those declarations on the
+        // existing class stack so they see the complete member-specification.
+        ParseLexedMethodDeclarations(getCurrentClass());
+        ParseLexedMemberInitializers(getCurrentClass());
+        ParseLexedMethodDefs(getCurrentClass());
+        Actions.FieldCollector->FinishClass();
+      }
     } else {
       // Namespace/global scope: parse external declarations.
       while (Tok.isNot(tok::eof)) {

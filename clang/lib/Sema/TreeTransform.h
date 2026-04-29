@@ -8183,14 +8183,13 @@ TreeTransform<Derived>::TransformCompoundStmt(CompoundStmt *S,
   // restore them at the end so a nested transform can't drain stmts that
   // belong to the enclosing scope.
   SmallVector<Stmt *> SavedPendingInjected;
-  SmallVector<NamedDecl *> SavedInjectedLocalDeclsForLookup;
   SavedPendingInjected.swap(getSema().PendingInjectedStmts);
-  SavedInjectedLocalDeclsForLookup.swap(
-      getSema().InjectedLocalDeclsForLookup);
+  unsigned SavedInjectedLocalDeclsForLookupSize =
+      getSema().InjectedLocalDeclsForLookup.size();
   auto RestoreInjectedState = llvm::make_scope_exit([&] {
     SavedPendingInjected.swap(getSema().PendingInjectedStmts);
-    SavedInjectedLocalDeclsForLookup.swap(
-        getSema().InjectedLocalDeclsForLookup);
+    getSema().InjectedLocalDeclsForLookup.resize(
+        SavedInjectedLocalDeclsForLookupSize);
   });
   for (auto *B : S->body()) {
     StmtResult Result = getDerived().TransformStmt(

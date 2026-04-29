@@ -2101,11 +2101,11 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
       Diag(ConstevalLoc, diag::err_consteval_block_not_constexpr);
       for (PartialDiagnosticAt PD : Diags)
         Diag(PD.first, PD.second);
+    } else {
+      // Collect any pending token injections from queue_injection calls.
+      PendingInjections.append(ER.PendingInjections.begin(),
+                               ER.PendingInjections.end());
     }
-
-    // Collect any pending token injections from queue_injection calls.
-    PendingInjections.append(ER.PendingInjections.begin(),
-                             ER.PendingInjections.end());
   }
   return Result;
 }

@@ -2747,18 +2747,21 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
           TSD[I].getAnnotationValue());
       if (SubExpr) {
         ExprResult Transformed = TransformExpr(SubExpr);
-        if (!Transformed.isInvalid()) {
-          // TransformExpr may strip implicit conversions inserted by the
-          // original ActOnTokenSequenceInterpolation (e.g., when the
-          // operand had a user-defined conversion to token_sequence/info).
-          // Re-apply the same conversion logic so the substituted operand
-          // carries the conversion in the new instantiation.
-          Transformed = getSema().ActOnTokenSequenceInterpolation(
-              Transformed.get());
-          if (!Transformed.isInvalid())
-            NewTokens[I].setAnnotationValue(
-                static_cast<void *>(Transformed.get()));
-        }
+        if (Transformed.isInvalid())
+          return ExprError();
+
+        // TransformExpr may strip implicit conversions inserted by the
+        // original ActOnTokenSequenceInterpolation (e.g., when the
+        // operand had a user-defined conversion to token_sequence/info).
+        // Re-apply the same conversion logic so the substituted operand
+        // carries the conversion in the new instantiation.
+        Transformed = getSema().ActOnTokenSequenceInterpolation(
+            Transformed.get());
+        if (Transformed.isInvalid())
+          return ExprError();
+
+        NewTokens[I].setAnnotationValue(
+            static_cast<void *>(Transformed.get()));
       }
       continue;
     }

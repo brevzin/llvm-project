@@ -1170,12 +1170,13 @@ StmtResult Parser::ParseCompoundStatementBody(bool isStmtExpr) {
   // Save outer pending injected stmts so a nested compound being parsed
   // through this loop can't drain stmts that belong to the enclosing scope.
   SmallVector<Stmt *> SavedPendingInjected;
-  SmallVector<NamedDecl *> SavedInjectedLocalDeclsForLookup;
   SavedPendingInjected.swap(Actions.PendingInjectedStmts);
-  SavedInjectedLocalDeclsForLookup.swap(Actions.InjectedLocalDeclsForLookup);
+  unsigned SavedInjectedLocalDeclsForLookupSize =
+      Actions.InjectedLocalDeclsForLookup.size();
   auto RestorePending = llvm::make_scope_exit([&] {
     SavedPendingInjected.swap(Actions.PendingInjectedStmts);
-    SavedInjectedLocalDeclsForLookup.swap(Actions.InjectedLocalDeclsForLookup);
+    Actions.InjectedLocalDeclsForLookup.resize(
+        SavedInjectedLocalDeclsForLookupSize);
   });
 
   bool LastIsError = false;

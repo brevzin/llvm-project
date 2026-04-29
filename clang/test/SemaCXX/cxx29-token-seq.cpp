@@ -725,3 +725,61 @@ namespace N28 {
     // User-defined string-like type works with str_lit.
     static_assert(str_lit(string_view("world")) == ^^{ "world" });
 }
+
+namespace N29 {
+    // Failed consteval-block evaluation must not commit injections that were
+    // queued before the failure.
+    int runtime();
+    consteval { // expected-error {{evaluating expression of a consteval block must be a constant expression}}
+        queue_injection(^^{ constexpr int leaked = 42; });
+        runtime();
+    }
+    static_assert(leaked == 42); // expected-error {{use of undeclared identifier 'leaked'}}
+}
+
+namespace N30 {
+    // Injected locals from an outer block remain visible to injected code in a
+    // nested block during template instantiation.
+    template <class T>
+    constexpr int nested_injected_lookup() {
+        consteval { queue_injection(^^{ int x = 1; }); }
+        {
+            consteval { queue_injection(^^{ return x; }); }
+        }
+    }
+    static_assert(nested_injected_lookup<int>() == 1);
+}
+
+namespace N31 {
+    // Invalid interpolation substitution should stop instantiation cleanly
+    // rather than leaving the old dependent expression to be evaluated.
+    template <class T>
+    constexpr int invalid_interpolation() {
+        consteval {
+            // expected-error@+1 {{type 'int' cannot be used prior to '::' because it has no members}}
+            queue_injection(^^{ return \(typename T::nope{}); });
+        }
+        return 0;
+    }
+    void trigger_invalid_interpolation() {
+        (void)invalid_interpolation<int>();
+    }
+}
+
+namespace N32 {
+    // Late-parsed pieces of injected class members need to see later members
+    // of the same class, like ordinary inline member definitions and default
+    // member initializers do.
+    struct C {
+        consteval {
+            queue_injection(^^{
+                int a = sizeof(b);
+                constexpr int f() const { return g(); }
+            });
+        }
+        int b = 1;
+        constexpr int g() const { return b; }
+    };
+    static_assert(C{}.a == sizeof(int));
+    static_assert(C{}.f() == 1);
+}
