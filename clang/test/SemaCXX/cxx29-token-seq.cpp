@@ -16,7 +16,8 @@ namespace std::meta {
     consteval auto queue_injection(token_sequence) -> void;
     consteval auto queue_injection(info target_ns, token_sequence) -> void;
 
-    consteval auto report_tokens(char const* msg, token_sequence tokens) -> void;
+    template <class M>
+    consteval auto report_tokens(M const& msg, token_sequence tokens) -> void;
 }
 
 using std::meta::info;
@@ -165,6 +166,16 @@ namespace N5 {
         });
     }
     static_assert(he == 2);
+
+    // Test char arguments in id and str_lit
+    consteval {
+        queue_injection(^^{
+            constexpr int \(id('_', 5)) = 55;
+            constexpr char const* \(id("ch", 'a', 'r', '_', "str")) = \(str_lit("hea", 'd'));
+        });
+    }
+    static_assert(_5 == 55);
+    static_assert(__builtin_strcmp(char_str, "head") == 0);
 }
 
 namespace N6 {
@@ -276,10 +287,16 @@ namespace N9 {
 }
 
 namespace N10 {
-    consteval void bad_report() {
-        string_view sv("hello");
-        report_tokens(sv, ^^{ int x; }); // expected-error {{no matching function for call to 'report_tokens'}}
+    consteval void good_report() {
+        string_view sv("from string_view");
+        report_tokens(sv, ^^{ int x; }); // works with user-defined string types
     }
+
+    consteval void call_report() {
+        good_report();
+    }
+
+    consteval int force_report = (call_report(), 0);
 }
 
 namespace N11 {

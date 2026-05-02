@@ -16872,6 +16872,123 @@ static bool EvaluateOperandAsRValue(EvalInfo &Info, const Expr *SubExpr,
   return true;
 }
 
+/// Extract a string from an argument expression, appending to Result.
+/// Handles four cases:
+/// 1. User-defined string types with size()/data() (when SizeCall is provided)
+/// 2. String literals and pointers/arrays to char
+/// 3. Char types (appended as single character)
+/// 4. Other integers (converted to decimal string)
+/// Returns false on error.
+static bool ExtractStringFromArg(EvalInfo &Info, Expr *Arg,
+                                 Expr *SizeCall, Expr *DataCall,
+                                 SmallVectorImpl<char> &Result) {
+  // User-defined string-like argument: Sema pre-built the size() and data()
+  // calls. Evaluate them inline against the current Info so that any
+  // function parameters in the surrounding call frame are visible.
+  if (SizeCall) {
+    assert(DataCall && "size without data");
+    APSInt SizeValue;
+    if (!::EvaluateInteger(SizeCall, SizeValue, Info))
+      return false;
+    uint64_t Size = SizeValue.getZExtValue();
+    LValue Pointer;
+    if (!::EvaluatePointer(DataCall, Pointer, Info))
+      return false;
+    QualType CharTy = DataCall->getType()->getPointeeType();
+    for (uint64_t J = 0; J < Size; ++J) {
+      APValue Char;
+      if (!handleLValueToRValueConversion(Info, DataCall, CharTy, Pointer,
+                                           Char))
+        return false;
+      Result.push_back(static_cast<char>(Char.getInt().getExtValue()));
+      if (!HandleLValueArrayAdjustment(Info, DataCall, Pointer, CharTy, 1))
+        return false;
+    }
+    return true;
+  }
+
+  if (Arg->getType()->isCharType()) {
+    // Char argument: append as single character.
+    APValue Val;
+    if (!EvaluateAsRValue(Info, Arg, Val))
+      return false;
+    Result.push_back(static_cast<char>(Val.getInt().getExtValue()));
+    return true;
+  }
+
+  if (Arg->getType()->isIntegralOrEnumerationType()) {
+    // Integer argument: convert to decimal string.
+    APValue Val;
+    if (!EvaluateAsRValue(Info, Arg, Val))
+      return false;
+    Val.getInt().toString(Result, 10);
+    return true;
+  }
+
+  if (Arg->getType()->isPointerType() || Arg->getType()->isArrayType()) {
+    // String argument: try to extract a string literal.
+    // Strip implicit casts to find the underlying StringLiteral.
+    const Expr *Stripped = Arg->IgnoreParenImpCasts();
+    if (const auto *SL = dyn_cast<StringLiteral>(Stripped)) {
+      StringRef Str = SL->getString();
+      // Exclude the null terminator if present.
+      if (!Str.empty() && Str.back() == '\0')
+        Str = Str.drop_back();
+      Result.append(Str.begin(), Str.end());
+      return true;
+    }
+
+    // Non-literal: evaluate and follow the LValue base back to a
+    // StringLiteral. For array-typed glvalues (e.g. a forwarding
+    // reference parameter `Ts const&` bound to a string literal), we
+    // must use EvaluateLValue rather than EvaluateAsRValue — the
+    // latter would lvalue-to-rvalue-load the array contents into an
+    // Array APValue and lose the base we want to follow.
+    APValue Val;
+    if (Arg->getType()->isArrayType()) {
+      LValue LV;
+      if (!EvaluateLValue(Arg, LV, Info))
+        return false;
+      LV.moveInto(Val);
+    } else if (!EvaluateAsRValue(Info, Arg, Val)) {
+      return false;
+    }
+
+    if (!Val.isLValue()) {
+      Info.FFDiag(Arg->getExprLoc());
+      return false;
+    }
+
+    APValue::LValueBase Base = Val.getLValueBase();
+    if (!Base) {
+      Info.FFDiag(Arg->getExprLoc());
+      return false;
+    }
+
+    if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
+            Base.dyn_cast<const Expr *>())) {
+      StringRef Str = SLit->getString();
+      int64_t Off = Val.getLValueOffset().getQuantity();
+      if (Off >= 0 && (uint64_t)Off <= (uint64_t)Str.size()) {
+        Str = Str.substr(Off);
+        StringRef::size_type Pos = Str.find(0);
+        if (Pos != StringRef::npos)
+          Str = Str.substr(0, Pos);
+        Result.append(Str.begin(), Str.end());
+      }
+      return true;
+    }
+
+    Info.FFDiag(Arg->getExprLoc());
+    return false;
+  }
+
+  // Class-typed args reach here only if Sema didn't pre-build the
+  // size()/data() calls — which means the type was rejected.
+  Info.FFDiag(Arg->getExprLoc());
+  return false;
+}
+
 static void PrintTokenSequenceToStderr(const TokenSequenceData *TSD,
                                        ASTContext &Ctx) {
   llvm::raw_fd_ostream &OS = llvm::errs();
@@ -16953,9 +17070,11 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
   if (Info.checkingPotentialConstantExpression())
     return false;
 
-  // Get the message string.
-  const auto *SL = cast<StringLiteral>(E->getMessage()->IgnoreParenCasts());
-  StringRef Msg = SL->getString();
+  // Extract the message string.
+  SmallString<64> MsgStr;
+  if (!ExtractStringFromArg(Info, E->getMessage(), E->getMsgSizeCall(),
+                            E->getMsgDataCall(), MsgStr))
+    return false;
 
   // Evaluate the operand. Sema has already inserted any user-defined
   // conversion to std::meta::token_sequence on the operand expression.
@@ -16977,7 +17096,7 @@ bool VoidExprEvaluator::VisitCXXBuiltinReportTokensExpr(
   OS << "std::meta::report_tokens";
   if (PLoc.isValid())
     OS << " at " << PLoc.getFilename() << ":" << PLoc.getLine();
-  OS << " \"" << Msg << "\":\n  ";
+  OS << " \"" << MsgStr << "\":\n  ";
 
   TokenSequenceData TSD = Operand.getTokenSequence();
   PrintTokenSequenceToStderr(&TSD, Info.Ctx);
@@ -17329,102 +17448,9 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
   // Evaluate each argument and concatenate into an identifier string.
   SmallString<64> Name;
   for (unsigned I = 0; I < E->getNumArgs(); ++I) {
-    Expr *Arg = E->getArg(I);
-
-    // User-defined string-like argument: Sema pre-built the size() and data()
-    // calls. Evaluate them inline against the current Info so that any
-    // function parameters in the surrounding call frame are visible.
-    if (Expr *SizeCall = E->getSizeCall(I)) {
-      Expr *DataCall = E->getDataCall(I);
-      assert(DataCall && "size without data");
-      APSInt SizeValue;
-      if (!::EvaluateInteger(SizeCall, SizeValue, Info))
-        return false;
-      uint64_t Size = SizeValue.getZExtValue();
-      LValue Pointer;
-      if (!::EvaluatePointer(DataCall, Pointer, Info))
-        return false;
-      QualType CharTy = DataCall->getType()->getPointeeType();
-      for (uint64_t J = 0; J < Size; ++J) {
-        APValue Char;
-        if (!handleLValueToRValueConversion(Info, DataCall, CharTy, Pointer,
-                                             Char))
-          return false;
-        Name.push_back(static_cast<char>(Char.getInt().getExtValue()));
-        if (!HandleLValueArrayAdjustment(Info, DataCall, Pointer, CharTy, 1))
-          return false;
-      }
-      continue;
-    }
-
-    if (Arg->getType()->isIntegralOrEnumerationType()) {
-      // Integer argument: convert to decimal string.
-      APValue Val;
-      if (!EvaluateAsRValue(Info, Arg, Val))
-        return false;
-      Val.getInt().toString(Name, 10);
-    } else if (Arg->getType()->isPointerType() ||
-               Arg->getType()->isArrayType()) {
-      // String argument: try to extract a string literal.
-      // Strip implicit casts to find the underlying StringLiteral.
-      const Expr *Stripped = Arg->IgnoreParenImpCasts();
-      if (const auto *SL = dyn_cast<StringLiteral>(Stripped)) {
-        StringRef Str = SL->getString();
-        // Exclude the null terminator if present.
-        if (!Str.empty() && Str.back() == '\0')
-          Str = Str.drop_back();
-        Name.append(Str);
-      } else {
-        // Non-literal: evaluate and follow the LValue base back to a
-        // StringLiteral. For array-typed glvalues (e.g. a forwarding
-        // reference parameter `Ts const&` bound to a string literal), we
-        // must use EvaluateLValue rather than EvaluateAsRValue — the
-        // latter would lvalue-to-rvalue-load the array contents into an
-        // Array APValue and lose the base we want to follow.
-        APValue Val;
-        if (Arg->getType()->isArrayType()) {
-          LValue LV;
-          if (!EvaluateLValue(Arg, LV, Info))
-            return false;
-          LV.moveInto(Val);
-        } else if (!EvaluateAsRValue(Info, Arg, Val)) {
-          return false;
-        }
-
-        if (!Val.isLValue()) {
-          Info.FFDiag(Arg->getExprLoc());
-          return false;
-        }
-
-        APValue::LValueBase Base = Val.getLValueBase();
-        if (!Base) {
-          Info.FFDiag(Arg->getExprLoc());
-          return false;
-        }
-
-        if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
-                Base.dyn_cast<const Expr *>())) {
-          StringRef Str = SLit->getString();
-          int64_t Off = Val.getLValueOffset().getQuantity();
-          if (Off >= 0 && (uint64_t)Off <= (uint64_t)Str.size()) {
-            Str = Str.substr(Off);
-            StringRef::size_type Pos = Str.find(0);
-            if (Pos != StringRef::npos)
-              Str = Str.substr(0, Pos);
-            Name.append(Str);
-          }
-        } else {
-          Info.FFDiag(Arg->getExprLoc());
-          return false;
-        }
-      }
-    } else {
-      // Class-typed args reach here only if Sema didn't pre-build the
-      // size()/data() calls — which means the early-out above already
-      // rejected the type. Anything else is unsupported.
-      Info.FFDiag(Arg->getExprLoc());
+    if (!ExtractStringFromArg(Info, E->getArg(I), E->getSizeCall(I),
+                              E->getDataCall(I), Name))
       return false;
-    }
   }
 
   IdentifierInfo &II = Info.Ctx.Idents.get(Name);
@@ -17436,90 +17462,9 @@ bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
   // Evaluate each argument and concatenate into a string.
   SmallString<64> Content;
   for (unsigned I = 0; I < E->getNumArgs(); ++I) {
-    Expr *Arg = E->getArg(I);
-
-    // User-defined string-like argument: Sema pre-built the size() and data()
-    // calls.
-    if (Expr *SizeCall = E->getSizeCall(I)) {
-      Expr *DataCall = E->getDataCall(I);
-      assert(DataCall && "size without data");
-      APSInt SizeValue;
-      if (!::EvaluateInteger(SizeCall, SizeValue, Info))
-        return false;
-      uint64_t Size = SizeValue.getZExtValue();
-      LValue Pointer;
-      if (!::EvaluatePointer(DataCall, Pointer, Info))
-        return false;
-      QualType CharTy = DataCall->getType()->getPointeeType();
-      for (uint64_t J = 0; J < Size; ++J) {
-        APValue Char;
-        if (!handleLValueToRValueConversion(Info, DataCall, CharTy, Pointer,
-                                             Char))
-          return false;
-        Content.push_back(static_cast<char>(Char.getInt().getExtValue()));
-        if (!HandleLValueArrayAdjustment(Info, DataCall, Pointer, CharTy, 1))
-          return false;
-      }
-      continue;
-    }
-
-    if (Arg->getType()->isIntegralOrEnumerationType()) {
-      // Integer argument: convert to decimal string.
-      APValue Val;
-      if (!EvaluateAsRValue(Info, Arg, Val))
-        return false;
-      Val.getInt().toString(Content, 10);
-    } else if (Arg->getType()->isPointerType() ||
-               Arg->getType()->isArrayType()) {
-      // String argument: extract the string content.
-      const Expr *Stripped = Arg->IgnoreParenImpCasts();
-      if (const auto *SL = dyn_cast<StringLiteral>(Stripped)) {
-        StringRef Str = SL->getString();
-        if (!Str.empty() && Str.back() == '\0')
-          Str = Str.drop_back();
-        Content.append(Str);
-      } else {
-        APValue Val;
-        if (Arg->getType()->isArrayType()) {
-          LValue LV;
-          if (!EvaluateLValue(Arg, LV, Info))
-            return false;
-          LV.moveInto(Val);
-        } else if (!EvaluateAsRValue(Info, Arg, Val)) {
-          return false;
-        }
-
-        if (!Val.isLValue()) {
-          Info.FFDiag(Arg->getExprLoc());
-          return false;
-        }
-
-        APValue::LValueBase Base = Val.getLValueBase();
-        if (!Base) {
-          Info.FFDiag(Arg->getExprLoc());
-          return false;
-        }
-
-        if (const auto *SLit = dyn_cast_or_null<StringLiteral>(
-                Base.dyn_cast<const Expr *>())) {
-          StringRef Str = SLit->getString();
-          int64_t Off = Val.getLValueOffset().getQuantity();
-          if (Off >= 0 && (uint64_t)Off <= (uint64_t)Str.size()) {
-            Str = Str.substr(Off);
-            StringRef::size_type Pos = Str.find(0);
-            if (Pos != StringRef::npos)
-              Str = Str.substr(0, Pos);
-            Content.append(Str);
-          }
-        } else {
-          Info.FFDiag(Arg->getExprLoc());
-          return false;
-        }
-      }
-    } else {
-      Info.FFDiag(Arg->getExprLoc());
+    if (!ExtractStringFromArg(Info, E->getArg(I), E->getSizeCall(I),
+                              E->getDataCall(I), Content))
       return false;
-    }
   }
 
   // Build the string literal token. The literal data includes quotes.

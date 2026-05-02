@@ -2165,27 +2165,38 @@ CXXBuiltinInjectExpr *CXXBuiltinInjectExpr::CreateEmpty(ASTContext &C) {
 }
 
 CXXBuiltinReportTokensExpr::CXXBuiltinReportTokensExpr(
-    QualType Ty, Expr *Msg, Expr *Operand, SourceLocation KwLoc,
-    SourceLocation LParenLoc, SourceLocation RParenLoc)
+    QualType Ty, Expr *Msg, Expr *MsgSizeCall, Expr *MsgDataCall,
+    Expr *Operand, SourceLocation KwLoc, SourceLocation LParenLoc,
+    SourceLocation RParenLoc)
     : Expr(CXXBuiltinReportTokensExprClass, Ty, VK_PRValue, OK_Ordinary),
       KwLoc(KwLoc), LParenLoc(LParenLoc), RParenLoc(RParenLoc) {
   Args[0] = Msg;
-  Args[1] = Operand;
-  setDependence(Msg->getDependence() | Operand->getDependence());
+  Args[1] = MsgSizeCall;
+  Args[2] = MsgDataCall;
+  Args[3] = Operand;
+  ExprDependence Deps = Msg->getDependence() | Operand->getDependence();
+  if (MsgSizeCall)
+    Deps |= MsgSizeCall->getDependence();
+  if (MsgDataCall)
+    Deps |= MsgDataCall->getDependence();
+  setDependence(Deps);
 }
 
 CXXBuiltinReportTokensExpr::CXXBuiltinReportTokensExpr(EmptyShell Empty)
     : Expr(CXXBuiltinReportTokensExprClass, Empty) {
   Args[0] = nullptr;
   Args[1] = nullptr;
+  Args[2] = nullptr;
+  Args[3] = nullptr;
 }
 
 CXXBuiltinReportTokensExpr *CXXBuiltinReportTokensExpr::Create(
-    ASTContext &C, QualType Ty, Expr *Msg, Expr *Operand,
-    SourceLocation KwLoc, SourceLocation LParenLoc,
-    SourceLocation RParenLoc) {
-  return new (C) CXXBuiltinReportTokensExpr(Ty, Msg, Operand, KwLoc,
-                                             LParenLoc, RParenLoc);
+    ASTContext &C, QualType Ty, Expr *Msg, Expr *MsgSizeCall,
+    Expr *MsgDataCall, Expr *Operand, SourceLocation KwLoc,
+    SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinReportTokensExpr(Ty, Msg, MsgSizeCall, MsgDataCall,
+                                             Operand, KwLoc, LParenLoc,
+                                             RParenLoc);
 }
 
 CXXBuiltinReportTokensExpr *

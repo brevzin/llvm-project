@@ -1078,15 +1078,85 @@ ExprResult Sema::ActOnCXXBuiltinReportTokens(SourceLocation KwLoc,
   Expr *Msg = Args[0];
   Expr *Operand = Args[1];
   Operand = TryConvertTo(*this, Operand, TokenOpTarget::TokenSequence);
-  // Verify the message is a string literal.
-  if (!isa<StringLiteral>(Msg->IgnoreParenCasts())) {
-    Diag(Msg->getBeginLoc(), diag::err_expected_string_literal)
-        << /*in*/ 0 << "'report_tokens'";
-    return ExprError();
+
+  // Process the message argument using the same rules as id/str_lit: supports
+  // string literals, pointers, arrays, and user-defined types with data()/size().
+  Expr *MsgSizeCall = nullptr;
+  Expr *MsgDataCall = nullptr;
+
+  if (!Msg->isTypeDependent() && !Msg->isValueDependent()) {
+    QualType T = Msg->getType().getNonReferenceType();
+
+    // String-literal / pointer / array args evaluate directly.
+    if (!T->isPointerType() && !T->isArrayType()) {
+      // Class type: must have data() returning const char* and size() returning
+      // size_t (matching static_assert user-defined message rules).
+      auto *RD = T->getAsCXXRecordDecl();
+      if (!RD) {
+        Diag(Msg->getExprLoc(), diag::err_user_defined_msg_invalid)
+            << /*StringEvaluationContext::StaticAssert=*/0;
+        return ExprError();
+      }
+
+      SourceLocation Loc = Msg->getBeginLoc();
+      auto FindMember = [&](StringRef Name) -> std::optional<LookupResult> {
+        DeclarationName DN = PP.getIdentifierInfo(Name);
+        LookupResult R(*this, DN, Loc, Sema::LookupMemberName);
+        LookupQualifiedName(R, RD);
+        if (R.empty())
+          return std::nullopt;
+        return std::move(R);
+      };
+      auto Size = FindMember("size");
+      auto Data = FindMember("data");
+      if (!Size || !Data) {
+        Diag(Loc, diag::err_user_defined_msg_missing_member_function)
+            << /*StringEvaluationContext::StaticAssert=*/0
+            << ((!Size && !Data) ? 2 : !Size ? 0 : 1);
+        return ExprError();
+      }
+
+      auto BuildCall = [&](LookupResult &LR) -> ExprResult {
+        ExprResult Ref = BuildMemberReferenceExpr(
+            Msg, Msg->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
+            SourceLocation(), nullptr, LR, nullptr, nullptr);
+        if (Ref.isInvalid())
+          return ExprError();
+        ExprResult Call = BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc, nullptr,
+                                         false, true);
+        if (Call.isInvalid())
+          return ExprError();
+        return TemporaryMaterializationConversion(Call.get());
+      };
+
+      QualType SizeT = Context.getSizeType();
+      QualType ConstCharPtr = Context.getPointerType(
+          Context.getConstType(Context.CharTy));
+
+      ExprResult SizeCall = BuildCall(*Size);
+      ExprResult DataCall = BuildCall(*Data);
+      if (SizeCall.isInvalid() || DataCall.isInvalid())
+        return ExprError();
+
+      ExprResult SizeConv = BuildConvertedConstantExpression(
+          SizeCall.get(), SizeT, CCEKind::StaticAssertMessageSize);
+      ExprResult DataConv = BuildConvertedConstantExpression(
+          DataCall.get(), ConstCharPtr, CCEKind::StaticAssertMessageData);
+      if (SizeConv.isInvalid() || DataConv.isInvalid()) {
+        Diag(Loc, diag::err_user_defined_msg_invalid_mem_fn_ret_ty)
+            << /*StringEvaluationContext::StaticAssert=*/0
+            << (SizeConv.isInvalid() ? /*size*/ 0 : /*data*/ 1);
+        return ExprError();
+      }
+
+      MsgSizeCall = SizeConv.get();
+      MsgDataCall = DataConv.get();
+    }
   }
+
   return CXXBuiltinReportTokensExpr::Create(Context, Context.VoidTy, Msg,
-                                             Operand, KwLoc, LParenLoc,
-                                             RParenLoc);
+                                             MsgSizeCall, MsgDataCall, Operand,
+                                             KwLoc, LParenLoc, RParenLoc);
 }
 
 ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,

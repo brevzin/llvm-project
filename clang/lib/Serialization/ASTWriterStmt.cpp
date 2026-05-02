@@ -532,6 +532,8 @@ void ASTStmtWriter::VisitCXXBuiltinReportTokensExpr(
   Record.AddSourceLocation(E->getLParenLoc());
   Record.AddSourceLocation(E->getRParenLoc());
   Record.AddStmt(E->getMessage());
+  Record.AddStmt(E->getMsgSizeCall());
+  Record.AddStmt(E->getMsgDataCall());
   Record.AddStmt(E->getOperand());
   Code = serialization::EXPR_BUILTIN_REPORT_TOKENS;
 }

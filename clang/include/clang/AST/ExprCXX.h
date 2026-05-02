@@ -5772,20 +5772,23 @@ public:
 };
 
 class CXXBuiltinReportTokensExpr : public Expr {
-  // Args[0] = Message (StringLiteral), Args[1] = Operand (token sequence)
-  Stmt *Args[2];
+  // Args[0] = Message, Args[1] = MsgSizeCall, Args[2] = MsgDataCall,
+  // Args[3] = Operand (token sequence)
+  Stmt *Args[4];
   SourceLocation KwLoc;
   SourceLocation LParenLoc;
   SourceLocation RParenLoc;
 
-  CXXBuiltinReportTokensExpr(QualType Ty, Expr *Msg, Expr *Operand,
+  CXXBuiltinReportTokensExpr(QualType Ty, Expr *Msg, Expr *MsgSizeCall,
+                              Expr *MsgDataCall, Expr *Operand,
                               SourceLocation KwLoc, SourceLocation LParenLoc,
                               SourceLocation RParenLoc);
   CXXBuiltinReportTokensExpr(EmptyShell Empty);
 
 public:
   static CXXBuiltinReportTokensExpr *Create(ASTContext &C, QualType Ty,
-                                             Expr *Msg, Expr *Operand,
+                                             Expr *Msg, Expr *MsgSizeCall,
+                                             Expr *MsgDataCall, Expr *Operand,
                                              SourceLocation KwLoc,
                                              SourceLocation LParenLoc,
                                              SourceLocation RParenLoc);
@@ -5794,8 +5797,14 @@ public:
   Expr *getMessage() const { return cast<Expr>(Args[0]); }
   void setMessage(Expr *E) { Args[0] = E; }
 
-  Expr *getOperand() const { return cast<Expr>(Args[1]); }
-  void setOperand(Expr *E) { Args[1] = E; }
+  Expr *getMsgSizeCall() const { return cast_or_null<Expr>(Args[1]); }
+  void setMsgSizeCall(Expr *E) { Args[1] = E; }
+
+  Expr *getMsgDataCall() const { return cast_or_null<Expr>(Args[2]); }
+  void setMsgDataCall(Expr *E) { Args[2] = E; }
+
+  Expr *getOperand() const { return cast<Expr>(Args[3]); }
+  void setOperand(Expr *E) { Args[3] = E; }
 
   SourceLocation getKwLoc() const { return KwLoc; }
   void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
@@ -5810,10 +5819,10 @@ public:
   SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
 
   child_range children() {
-    return child_range(Args, Args + 2);
+    return child_range(Args, Args + 4);
   }
   const_child_range children() const {
-    return const_child_range(Args, Args + 2);
+    return const_child_range(Args, Args + 4);
   }
 
   static bool classof(const Stmt *T) {

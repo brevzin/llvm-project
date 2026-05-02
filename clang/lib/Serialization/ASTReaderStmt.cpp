@@ -553,6 +553,8 @@ void ASTStmtReader::VisitCXXBuiltinReportTokensExpr(
   E->setLParenLoc(Record.readSourceLocation());
   E->setRParenLoc(Record.readSourceLocation());
   E->setMessage(Record.readExpr());
+  E->setMsgSizeCall(Record.readExpr());
+  E->setMsgDataCall(Record.readExpr());
   E->setOperand(Record.readExpr());
 }
 
