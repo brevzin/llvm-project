@@ -4396,7 +4396,12 @@ ExprResult TreeTransform<Derived>::TransformInitializer(Expr *Init,
     Init = Binder->getSubExpr();
 
   if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Init))
-    Init = ICE->getSubExprAsWritten();
+    // Don't strip derived-to-base casts that represent base-specifier splices;
+    // they affect type deduction.
+    if (!((ICE->getCastKind() == CK_DerivedToBase ||
+           ICE->getCastKind() == CK_UncheckedDerivedToBase) &&
+          isa<CXXSpliceExpr>(ICE->getSubExpr())))
+      Init = ICE->getSubExprAsWritten();
 
   if (CXXStdInitializerListExpr *ILE =
           dyn_cast<CXXStdInitializerListExpr>(Init))
@@ -14425,6 +14430,38 @@ TreeTransform<Derived>::TransformConditionalOperator(ConditionalOperator *E) {
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformImplicitCastExpr(ImplicitCastExpr *E) {
+  // Derived-to-base casts from base specifier splices (e.g., object.[:base:])
+  // must be preserved. Unlike normal implicit conversions that can be
+  // recomputed by semantic analysis, these casts represent the semantic
+  // meaning of the splice expression itself. If we strip them, the expression
+  // type reverts to the derived type, causing incorrect template argument
+  // deduction.
+  if ((E->getCastKind() == CK_DerivedToBase ||
+       E->getCastKind() == CK_UncheckedDerivedToBase) &&
+      isa<CXXSpliceExpr>(E->getSubExpr())) {
+    auto *SE = cast<CXXSpliceExpr>(E->getSubExpr());
+    ExprResult Model = getDerived().TransformExpr(SE->getModel());
+    if (Model.isInvalid())
+      return ExprError();
+
+    if (!getDerived().AlwaysRebuild() && Model.get() == SE->getModel())
+      return E;
+
+    Expr *SubExpr = CXXSpliceExpr::Create(
+        getSema().Context, Model.get()->getValueKind(),
+        SE->getTemplateKeywordLoc(), SE->getSplice(), Model.get(),
+        SE->allowMemberReference());
+
+    // Copy the base path from the original cast.
+    CXXCastPath BasePath(E->path_begin(), E->path_end());
+
+    // Rebuild the derived-to-base cast with the transformed subexpression.
+    // The cast path and type should remain the same.
+    return ImplicitCastExpr::Create(
+        getSema().Context, E->getType(), E->getCastKind(), SubExpr,
+        &BasePath, E->getValueKind(), getSema().CurFPFeatureOverrides());
+  }
+
   // Implicit casts are eliminated during transformation, since they
   // will be recomputed by semantic analysis after transformation.
   return getDerived().TransformExpr(E->getSubExprAsWritten());

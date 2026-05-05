@@ -1222,6 +1222,11 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
         if (IsArrow)
           DerivedType = DerivedType->getPointeeType();
 
+        // Preserve cv-qualifiers from the derived expression on the base type.
+        // e.g., if we have `const Derived&` accessing a Base, result is `const Base&`.
+        Qualifiers DerivedQuals = DerivedType.getQualifiers();
+        BaseType = Context.getQualifiedType(BaseType, DerivedQuals);
+
         CXXRecordDecl *DerivedRD = DerivedType->getAsCXXRecordDecl();
         if (!DerivedRD) {
           Diag(Base->getExprLoc(), diag::err_typecheck_member_reference_struct_union)
@@ -1241,12 +1246,29 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
           return ExprError();
         }
 
-        // Build the derived-to-base cast path.
+        // Build the derived-to-base cast path. If the object is more-derived
+        // than the class that owns the reflected base specifier, first cast to
+        // that owning class and then append the reflected base conversion. This
+        // preserves the specific base subobject named by the reflection instead
+        // of asking for a possibly-ambiguous conversion straight to BaseType.
         CXXCastPath BasePath;
-        if (CheckDerivedToBaseConversion(DerivedType, BaseType,
+        QualType SpecDerivedType = Context.getTypeDeclType(SpecDerivedRD);
+        SpecDerivedType = Context.getQualifiedType(SpecDerivedType,
+                                                   DerivedQuals);
+        if (DerivedRD->getCanonicalDecl() != SpecDerivedRD->getCanonicalDecl()) {
+          if (CheckDerivedToBaseConversion(DerivedType, SpecDerivedType,
+                                           Base->getExprLoc(),
+                                           Base->getSourceRange(), &BasePath))
+            return ExprError();
+        }
+
+        CXXCastPath DirectBasePath;
+        if (CheckDerivedToBaseConversion(SpecDerivedType, BaseType,
                                          Base->getExprLoc(),
-                                         Base->getSourceRange(), &BasePath))
+                                         Base->getSourceRange(),
+                                         &DirectBasePath))
           return ExprError();
+        BasePath.append(DirectBasePath.begin(), DirectBasePath.end());
 
         // For arrow operator, dereference the pointer first.
         ExprResult BaseResult(Base);
@@ -1256,9 +1278,15 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
             return ExprError();
         }
 
-        // Build the derived-to-base cast.
+        // Build the derived-to-base cast. Keep the splice in the AST as a
+        // marker so template transformation can distinguish this semantic
+        // base-subobject access from ordinary derived-to-base conversions.
         ExprValueKind VK = BaseResult.get()->getValueKind();
-        return ImpCastExprToType(BaseResult.get(), BaseType,
+        Expr *BaseSplice =
+            CXXSpliceExpr::Create(Context, VK, RHS->getTemplateKeywordLoc(),
+                                  RHS->getSplice(), BaseResult.get(),
+                                  RHS->allowMemberReference());
+        return ImpCastExprToType(BaseSplice, BaseType,
                                  CK_DerivedToBase, VK, &BasePath);
       }
     }

@@ -17033,12 +17033,21 @@ static void PrintTokenSequenceToStderr(const TokenSequenceData *TSD,
               else
                 OS << "<decl>";
               break;
+            case ReflectionKind::BaseSpecifier: {
+              // Print the base class type for base specifier reflections.
+              const CXXBaseSpecifier *Base = V.getReflectedBaseSpecifier();
+              Base->getType().print(OS, PP);
+              break;
+            }
             default:
-              V.printPretty(OS, PP, QualType());
+              // For other reflection kinds, use the expression's type
+              // (which is std::meta::info) to avoid null type issues when
+              // the reflection is stored as an LValue.
+              V.printPretty(OS, PP, CE->getType(), &Ctx);
               break;
             }
           } else {
-            V.printPretty(OS, PP, CE->getType());
+            V.printPretty(OS, PP, CE->getType(), &Ctx);
           }
         } else {
           E->printPretty(OS, nullptr, PP);
