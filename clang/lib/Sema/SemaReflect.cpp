@@ -2100,10 +2100,23 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
                                      Splice, Result, AllowMemberReference);
       break;
     }
+    case ReflectionKind::BaseSpecifier:
+      if (AllowMemberReference) {
+        // Base specifier splices are only valid as member references.
+        // Create a CXXSpliceExpr that holds the evaluated reflection value
+        // so BuildMemberReferenceExpr can handle it.
+        Expr *OVE = new (Context) OpaqueValueExpr(Splice->getBeginLoc(),
+                                                  Context.MetaInfoTy,
+                                                  VK_PRValue);
+        Expr *CE = ConstantExpr::Create(Context, OVE, Refl);
+        Result = CXXSpliceExpr::Create(Context, VK_LValue, TemplateKWLoc,
+                                       Splice, CE, AllowMemberReference);
+        break;
+      }
+      [[fallthrough]];
     case ReflectionKind::Null:
     case ReflectionKind::Type:
     case ReflectionKind::Namespace:
-    case ReflectionKind::BaseSpecifier:
     case ReflectionKind::Parameter:
     case ReflectionKind::DataMemberSpec:
     case ReflectionKind::Annotation:

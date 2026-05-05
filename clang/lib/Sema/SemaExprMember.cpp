@@ -1208,6 +1208,62 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
     return BuildDependentMemberSpliceExpr(Base, OpLoc, IsArrow, RHS);
   }
 
+  // Check if the RHS is a base specifier reflection. If so, perform a
+  // derived-to-base cast instead of member access.
+  if (auto *CE = dyn_cast_or_null<ConstantExpr>(RHS->getModel())) {
+    if (CE->hasAPValueResult()) {
+      const APValue &V = CE->getAPValueResult();
+      if (V.isReflectedBaseSpecifier()) {
+        CXXBaseSpecifier *BaseSpec = V.getReflectedBaseSpecifier();
+        QualType BaseType = BaseSpec->getType();
+
+        // Get the derived class from the base expression.
+        QualType DerivedType = Base->getType();
+        if (IsArrow)
+          DerivedType = DerivedType->getPointeeType();
+
+        CXXRecordDecl *DerivedRD = DerivedType->getAsCXXRecordDecl();
+        if (!DerivedRD) {
+          Diag(Base->getExprLoc(), diag::err_typecheck_member_reference_struct_union)
+              << Base->getType() << Base->getSourceRange()
+              << RHS->getSourceRange();
+          return ExprError();
+        }
+
+        // Verify the base specifier's derived class matches or is a base of
+        // the expression's type.
+        CXXRecordDecl *SpecDerivedRD = BaseSpec->getDerived();
+        if (DerivedRD->getCanonicalDecl() != SpecDerivedRD->getCanonicalDecl() &&
+            !IsDerivedFrom(Base->getExprLoc(), DerivedRD, SpecDerivedRD)) {
+          Diag(Base->getExprLoc(), diag::err_class_not_derived_from_base)
+              << DerivedRD << SpecDerivedRD
+              << SourceRange(Base->getBeginLoc(), RHS->getEndLoc());
+          return ExprError();
+        }
+
+        // Build the derived-to-base cast path.
+        CXXCastPath BasePath;
+        if (CheckDerivedToBaseConversion(DerivedType, BaseType,
+                                         Base->getExprLoc(),
+                                         Base->getSourceRange(), &BasePath))
+          return ExprError();
+
+        // For arrow operator, dereference the pointer first.
+        ExprResult BaseResult(Base);
+        if (IsArrow) {
+          BaseResult = CreateBuiltinUnaryOp(OpLoc, UO_Deref, Base);
+          if (BaseResult.isInvalid())
+            return ExprError();
+        }
+
+        // Build the derived-to-base cast.
+        ExprValueKind VK = BaseResult.get()->getValueKind();
+        return ImpCastExprToType(BaseResult.get(), BaseType,
+                                 CK_DerivedToBase, VK, &BasePath);
+      }
+    }
+  }
+
   CXXScopeSpec SS;
   NamedDecl *ND = nullptr;
   TemplateArgumentListInfo TemplateArgs(RHS->getBeginLoc(), RHS->getEndLoc());
