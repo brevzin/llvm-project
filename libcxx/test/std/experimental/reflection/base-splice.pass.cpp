@@ -92,4 +92,59 @@ constexpr int test_chain_access() {
 
 static_assert(test_chain_access() == 42);
 
+// Test subobjects_of - returns bases then nonstatic data members
+struct F {
+  int f1 = 10;
+  int f2 = 20;
+};
+
+struct G : F {
+  int g1 = 30;
+  int g2 = 40;
+};
+
+consteval auto test_subobjects_of() {
+  constexpr auto ctx = std::meta::access_context::unchecked();
+  auto subs = subobjects_of(^^G, ctx);
+
+  // Should have 3 subobjects: F (base), g1, g2
+  if (subs.size() != 3) return false;
+
+  // First is the base class specifier
+  if (!is_base(subs[0])) return false;
+
+  // Next are the data members
+  if (!is_nonstatic_data_member(subs[1])) return false;
+  if (!is_nonstatic_data_member(subs[2])) return false;
+
+  if (identifier_of(subs[1]) != "g1") return false;
+  if (identifier_of(subs[2]) != "g2") return false;
+
+  return true;
+}
+
+static_assert(test_subobjects_of());
+
+// Test that subobjects_of works with splicing
+consteval auto get_subobject(int idx) {
+  return subobjects_of(^^G, std::meta::access_context::unchecked())[idx];
+}
+
+constexpr int test_subobjects_splice() {
+  G g;
+
+  // Access the base via splice
+  constexpr auto base = get_subobject(0);
+  int base_sum = g.[:base:].f1 + g.[:base:].f2;
+
+  // Access the data members via splice
+  constexpr auto m1 = get_subobject(1);
+  constexpr auto m2 = get_subobject(2);
+  int member_sum = g.[:m1:] + g.[:m2:];
+
+  return base_sum + member_sum;
+}
+
+static_assert(test_subobjects_splice() == 10 + 20 + 30 + 40);
+
 int main() {}
