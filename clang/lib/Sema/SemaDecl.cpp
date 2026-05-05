@@ -14721,6 +14721,7 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   // We save and restore var's evaluation state to prevent that from
   // interfering with checkForConstantInitialization's assertion.
   if (!var->isConsteval() && var->hasInit() &&
+      !var->getInit()->isValueDependent() &&
       !isCheckingDefaultArgumentOrInitializer() &&
       !RebuildingImmediateInvocation && !isUnevaluatedContext()) {
     EvaluatedStmt *Eval = var->ensureEvaluatedStmt();
