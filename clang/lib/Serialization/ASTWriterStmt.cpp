@@ -567,6 +567,17 @@ void ASTStmtWriter::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *E) {
   Code = serialization::EXPR_BUILTIN_STR_LITERAL;
 }
 
+void ASTStmtWriter::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *E) {
+  VisitExpr(E);
+  Record.AddSourceLocation(E->getKwLoc());
+  Record.AddSourceLocation(E->getLParenLoc());
+  Record.AddSourceLocation(E->getRParenLoc());
+  Record.AddStmt(E->getArg());
+  Record.AddStmt(E->getSizeCall());
+  Record.AddStmt(E->getDataCall());
+  Code = serialization::EXPR_BUILTIN_TOKENIZE;
+}
+
 void ASTStmtWriter::VisitCXXSpliceExpr(CXXSpliceExpr *E) {
   VisitExpr(E);
   Record.AddSourceLocation(E->getTemplateKWLoc());

@@ -5990,6 +5990,58 @@ public:
   }
 };
 
+/// CXXBuiltinTokenizeExpr - Represents std::meta::tokenize(string).
+/// Lexes a string into a token_sequence at compile time.
+class CXXBuiltinTokenizeExpr : public Expr {
+  // 3 Stmt* slots: Arg, SizeCall (may be null), DataCall (may be null)
+  Stmt *SubExprs[3];
+  SourceLocation KwLoc;
+  SourceLocation LParenLoc;
+  SourceLocation RParenLoc;
+
+  CXXBuiltinTokenizeExpr(QualType Ty, Expr *Arg, Expr *SizeCall, Expr *DataCall,
+                         SourceLocation KwLoc, SourceLocation LParenLoc,
+                         SourceLocation RParenLoc);
+  CXXBuiltinTokenizeExpr(EmptyShell Empty);
+
+public:
+  static CXXBuiltinTokenizeExpr *Create(ASTContext &C, QualType Ty,
+                                        Expr *Arg, Expr *SizeCall, Expr *DataCall,
+                                        SourceLocation KwLoc,
+                                        SourceLocation LParenLoc,
+                                        SourceLocation RParenLoc);
+  static CXXBuiltinTokenizeExpr *CreateEmpty(ASTContext &C);
+
+  Expr *getArg() const { return cast<Expr>(SubExprs[0]); }
+  void setArg(Expr *E) { SubExprs[0] = E; }
+
+  Expr *getSizeCall() const { return cast_or_null<Expr>(SubExprs[1]); }
+  Expr *getDataCall() const { return cast_or_null<Expr>(SubExprs[2]); }
+  void setSizeCall(Expr *E) { SubExprs[1] = E; }
+  void setDataCall(Expr *E) { SubExprs[2] = E; }
+
+  SourceLocation getKwLoc() const { return KwLoc; }
+  void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
+
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  void setLParenLoc(SourceLocation Loc) { LParenLoc = Loc; }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation Loc) { RParenLoc = Loc; }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return KwLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() { return child_range(SubExprs, SubExprs + 3); }
+  const_child_range children() const {
+    return const_child_range(SubExprs, SubExprs + 3);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXBuiltinTokenizeExprClass;
+  }
+};
+
 // Implementation detail of the 'is_accessible' metafunction.
 // Used to "reach up the stack" to find the context from which the metafunction
 // was called, such that the accessibility of a class member can thereafter be

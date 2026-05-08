@@ -6921,6 +6921,8 @@ static InterceptedMetaFnPtr getInterceptedMetaFn(const FunctionDecl *FDecl) {
     return &Sema::ActOnCXXBuiltinId;
   if (Name == "str_lit" && QualName == "std::meta::str_lit")
     return &Sema::ActOnCXXBuiltinStrLiteral;
+  if (Name == "tokenize" && QualName == "std::meta::tokenize")
+    return &Sema::ActOnCXXBuiltinTokenize;
   if (Name == "queue_injection" && QualName == "std::meta::queue_injection")
     return &Sema::ActOnCXXBuiltinInject;
   if (Name == "report_tokens" && QualName == "std::meta::report_tokens")

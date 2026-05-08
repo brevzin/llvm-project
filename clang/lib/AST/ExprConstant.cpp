@@ -57,6 +57,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/TargetBuiltins.h"
+#include "clang/Lex/Lexer.h"
 #include "clang/Lex/Token.h"
 #include "clang/Basic/TargetInfo.h"
 #include "llvm/ADT/APFixedPoint.h"
@@ -17297,6 +17298,7 @@ public:
   bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
   bool VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E);
   bool VisitCXXBuiltinStrLiteralExpr(const CXXBuiltinStrLiteralExpr *E);
+  bool VisitCXXBuiltinTokenizeExpr(const CXXBuiltinTokenizeExpr *E);
   bool VisitBinaryOperator(const BinaryOperator *E);
 };
 
@@ -17496,6 +17498,59 @@ bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
 
   // Create a token sequence containing just this token.
   Token Tokens[] = {Tok};
+  TokenSequenceData TSD = CreateTokenSequenceData(Info.Ctx, Tokens);
+  return Success(APValue(TSD), E);
+}
+
+bool ReflectionEvaluator::VisitCXXBuiltinTokenizeExpr(
+    const CXXBuiltinTokenizeExpr *E) {
+  // Extract the string content from the argument.
+  SmallString<64> Content;
+  if (!ExtractStringFromArg(Info, E->getArg(), E->getSizeCall(),
+                            E->getDataCall(), Content))
+    return false;
+
+  // Lex the string content into tokens.
+  // We use a raw lexer since we don't have a Preprocessor available here.
+  // The Lexer requires null-terminated input, so ensure the buffer is
+  // null-terminated.
+  Content.push_back('\0');
+  SmallVector<Token, 16> Tokens;
+  const char *BufStart = Content.data();
+  const char *BufEnd = Content.data() + Content.size() - 1;
+
+  Lexer RawLex(E->getBeginLoc(), Info.Ctx.getLangOpts(),
+               BufStart, BufStart, BufEnd);
+
+  Token Tok;
+  while (true) {
+    RawLex.LexFromRawLexer(Tok);
+    if (Tok.is(tok::eof))
+      break;
+
+    // Handle raw identifiers - we need to convert them to proper identifiers
+    // or keywords.
+    if (Tok.is(tok::raw_identifier)) {
+      // Look up the identifier to see if it's a keyword.
+      IdentifierInfo &II = Info.Ctx.Idents.get(
+          StringRef(Tok.getRawIdentifier()));
+      Tok.setKind(II.getTokenID());
+      Tok.setIdentifierInfo(&II);
+    }
+
+    // For literals, we need to store the literal data in ASTContext.
+    if (Tok.isLiteral() && Tok.getLiteralData()) {
+      unsigned Len = Tok.getLength();
+      char *StoredData = new (Info.Ctx) char[Len];
+      std::memcpy(StoredData, Tok.getLiteralData(), Len);
+      Tok.setLiteralData(StoredData);
+    }
+
+    // Set location to the expression location for all tokens.
+    Tok.setLocation(E->getBeginLoc());
+    Tokens.push_back(Tok);
+  }
+
   TokenSequenceData TSD = CreateTokenSequenceData(Info.Ctx, Tokens);
   return Success(APValue(TSD), E);
 }
@@ -18362,6 +18417,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXBuiltinReportTokensExprClass:
   case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXBuiltinStrLiteralExprClass:
+  case Expr::CXXBuiltinTokenizeExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::ExtractLValueExprClass:

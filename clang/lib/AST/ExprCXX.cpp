@@ -2294,6 +2294,36 @@ CXXBuiltinStrLiteralExpr::CreateEmpty(ASTContext &C, unsigned NumArgs) {
   return E;
 }
 
+CXXBuiltinTokenizeExpr::CXXBuiltinTokenizeExpr(
+    QualType Ty, Expr *Arg, Expr *SizeCall, Expr *DataCall,
+    SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc)
+    : Expr(CXXBuiltinTokenizeExprClass, Ty, VK_PRValue, OK_Ordinary),
+      KwLoc(KwLoc), LParenLoc(LParenLoc), RParenLoc(RParenLoc) {
+  SubExprs[0] = Arg;
+  SubExprs[1] = SizeCall;
+  SubExprs[2] = DataCall;
+  ExprDependence Deps = Arg->getDependence();
+  if (SizeCall)
+    Deps |= SizeCall->getDependence();
+  if (DataCall)
+    Deps |= DataCall->getDependence();
+  setDependence(Deps);
+}
+
+CXXBuiltinTokenizeExpr::CXXBuiltinTokenizeExpr(EmptyShell Empty)
+    : Expr(CXXBuiltinTokenizeExprClass, Empty) {}
+
+CXXBuiltinTokenizeExpr *CXXBuiltinTokenizeExpr::Create(
+    ASTContext &C, QualType Ty, Expr *Arg, Expr *SizeCall, Expr *DataCall,
+    SourceLocation KwLoc, SourceLocation LParenLoc, SourceLocation RParenLoc) {
+  return new (C) CXXBuiltinTokenizeExpr(Ty, Arg, SizeCall, DataCall,
+                                        KwLoc, LParenLoc, RParenLoc);
+}
+
+CXXBuiltinTokenizeExpr *CXXBuiltinTokenizeExpr::CreateEmpty(ASTContext &C) {
+  return new (C) CXXBuiltinTokenizeExpr(EmptyShell());
+}
+
 StackLocationExpr::StackLocationExpr(QualType ResultTy, SourceRange Range,
                                      int FrameOffset)
     : Expr(StackLocationExprClass, ResultTy, VK_PRValue, OK_Ordinary),

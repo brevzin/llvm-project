@@ -9240,6 +9240,19 @@ TreeTransform<Derived>::TransformCXXBuiltinStrLiteralExpr(
 }
 
 template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXBuiltinTokenizeExpr(
+    CXXBuiltinTokenizeExpr *E) {
+  ExprResult Arg = getDerived().TransformExpr(E->getArg());
+  if (Arg.isInvalid())
+    return ExprError();
+
+  Expr *Args[] = {Arg.get()};
+  return getSema().ActOnCXXBuiltinTokenize(E->getKwLoc(), E->getLParenLoc(),
+                                           Args, E->getRParenLoc());
+}
+
+template <typename Derived>
 SpliceResult
 TreeTransform<Derived>::TransformSpliceSpecifier(SpliceSpecifier *Splice) {
   ExprResult OpResult;

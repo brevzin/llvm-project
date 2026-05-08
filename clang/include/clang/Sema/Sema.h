@@ -15687,6 +15687,11 @@ public:
                                        ArrayRef<Expr *> Args,
                                        SourceLocation RParenLoc);
 
+  ExprResult ActOnCXXBuiltinTokenize(SourceLocation KwLoc,
+                                     SourceLocation LParenLoc,
+                                     ArrayRef<Expr *> Args,
+                                     SourceLocation RParenLoc);
+
   ExprResult ActOnCXXMetafunction(SourceLocation KwLoc,
                                   SourceLocation LParenLoc,
                                   SmallVectorImpl<Expr *> &Args,

@@ -13,6 +13,9 @@ namespace std::meta {
     template <class... Ts>
     consteval auto str_lit(Ts const&...) -> token_sequence;
 
+    template <class T>
+    consteval auto tokenize(T const&) -> token_sequence;
+
     consteval auto queue_injection(token_sequence) -> void;
     consteval auto queue_injection(info target_ns, token_sequence) -> void;
 
@@ -799,4 +802,71 @@ namespace N32 {
     };
     static_assert(C{}.a == sizeof(int));
     static_assert(C{}.f() == 1);
+}
+
+namespace N33 {
+    using std::meta::tokenize;
+
+    // Basic tokenize test - single identifier
+    static_assert(tokenize("x") == ^^{ x });
+
+    // Multiple tokens
+    static_assert(tokenize("a + b") == ^^{ a + b });
+
+    // Numeric literals - various bases
+    static_assert(tokenize("123") == ^^{ 123 });
+    static_assert(tokenize("0xCAFE") == ^^{ 0xCAFE });
+    static_assert(tokenize("0b1010") == ^^{ 0b1010 });
+    static_assert(tokenize("0777") == ^^{ 0777 });
+
+    // Numeric literals with suffixes
+    static_assert(tokenize("123u") == ^^{ 123u });
+    static_assert(tokenize("123ul") == ^^{ 123ul });
+    static_assert(tokenize("123ull") == ^^{ 123ull });
+
+    // Floating point literals
+    static_assert(tokenize("3.14") == ^^{ 3.14 });
+    static_assert(tokenize("3.14f") == ^^{ 3.14f });
+    static_assert(tokenize("1e10") == ^^{ 1e10 });
+
+    // Keywords
+    static_assert(tokenize("int") == ^^{ int });
+    static_assert(tokenize("return") == ^^{ return });
+    static_assert(tokenize("constexpr") == ^^{ constexpr });
+
+    // Operators
+    static_assert(tokenize("++") == ^^{ ++ });
+    static_assert(tokenize("->") == ^^{ -> });
+    static_assert(tokenize("::") == ^^{ :: });
+    static_assert(tokenize("...") == ^^{ ... });
+
+    // Complex expressions
+    static_assert(tokenize("x + y * z") == ^^{ x + y * z });
+    static_assert(tokenize("foo(1, 2)") == ^^{ foo(1, 2) });
+    static_assert(tokenize("a->b.c") == ^^{ a->b.c });
+
+    // Empty tokenize
+    static_assert(tokenize("") == ^^{ });
+
+    // Use tokenize with injection
+    struct S {
+        consteval {
+            queue_injection(tokenize("int x = 42;"));
+        }
+    };
+    static_assert(S{}.x == 42);
+
+    // tokenize with string_view (via consteval function)
+    consteval token_sequence make_tokens() {
+        string_view sv = "int y = 100;";
+        return tokenize(sv);
+    }
+    struct S2 {
+        consteval { queue_injection(make_tokens()); }
+    };
+    static_assert(S2{}.y == 100);
+
+    // Concatenating tokenize results
+    static_assert(tokenize("a") + tokenize("b") == ^^{ a b });
+    static_assert(tokenize("int") + tokenize("x") + tokenize(";") == ^^{ int x ; });
 }

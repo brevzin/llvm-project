@@ -3078,6 +3078,7 @@ DEF_TRAVERSE_STMT(CXXBuiltinInjectExpr, {})
 DEF_TRAVERSE_STMT(CXXBuiltinReportTokensExpr, {})
 DEF_TRAVERSE_STMT(CXXBuiltinIdExpr, {})
 DEF_TRAVERSE_STMT(CXXBuiltinStrLiteralExpr, {})
+DEF_TRAVERSE_STMT(CXXBuiltinTokenizeExpr, {})
 DEF_TRAVERSE_STMT(CXXSpliceExpr, {
   TRY_TO(TraverseSpliceSpecifier(S->getSplice()));
 })

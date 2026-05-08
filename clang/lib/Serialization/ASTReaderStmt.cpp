@@ -582,6 +582,16 @@ void ASTStmtReader::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *E) {
   }
 }
 
+void ASTStmtReader::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *E) {
+  VisitExpr(E);
+  E->setKwLoc(Record.readSourceLocation());
+  E->setLParenLoc(Record.readSourceLocation());
+  E->setRParenLoc(Record.readSourceLocation());
+  E->setArg(Record.readExpr());
+  E->setSizeCall(Record.readExpr());
+  E->setDataCall(Record.readExpr());
+}
+
 void ASTStmtReader::VisitCXXSpliceExpr(CXXSpliceExpr *E) {
   VisitExpr(E);
   E->setTemplateKWLoc(Record.readSourceLocation());
@@ -4740,6 +4750,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     case EXPR_BUILTIN_STR_LITERAL: {
       unsigned NumArgs = Record[ASTStmtReader::NumExprFields];
       S = CXXBuiltinStrLiteralExpr::CreateEmpty(Context, NumArgs);
+      break;
+    }
+    case EXPR_BUILTIN_TOKENIZE: {
+      S = CXXBuiltinTokenizeExpr::CreateEmpty(Context);
       break;
     }
     case EXPR_SPLICE: {

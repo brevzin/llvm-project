@@ -2404,6 +2404,11 @@ void StmtProfiler::VisitCXXBuiltinStrLiteralExpr(
   VisitExpr(E);
 }
 
+void StmtProfiler::VisitCXXBuiltinTokenizeExpr(
+    const CXXBuiltinTokenizeExpr *E) {
+  VisitExpr(E);
+}
+
 void StmtProfiler::VisitCXXSpliceExpr(const CXXSpliceExpr *E) {
   VisitExpr(E);
 }
