@@ -2831,7 +2831,10 @@ void StmtPrinter::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *S) {
 
 void StmtPrinter::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *S) {
   OS << "std::meta::tokenize(";
-  PrintExpr(S->getArg());
+  for (unsigned I = 0; I < S->getNumArgs(); ++I) {
+    if (I > 0) OS << ", ";
+    PrintExpr(S->getArg(I));
+  }
   OS << ")";
 }
 

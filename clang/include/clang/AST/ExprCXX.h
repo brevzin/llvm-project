@@ -5990,35 +5990,58 @@ public:
   }
 };
 
-/// CXXBuiltinTokenizeExpr - Represents std::meta::tokenize(string).
-/// Lexes a string into a token_sequence at compile time.
+/// CXXBuiltinTokenizeExpr - Represents std::meta::tokenize(...).
+/// Lexes concatenated arguments into a token_sequence at compile time.
 class CXXBuiltinTokenizeExpr : public Expr {
-  // 3 Stmt* slots: Arg, SizeCall (may be null), DataCall (may be null)
-  Stmt *SubExprs[3];
+  // Same per-arg storage as CXXBuiltinIdExpr: 3 slots per logical argument.
+  Stmt **Args;
+  unsigned NumArgs;
   SourceLocation KwLoc;
   SourceLocation LParenLoc;
   SourceLocation RParenLoc;
 
-  CXXBuiltinTokenizeExpr(QualType Ty, Expr *Arg, Expr *SizeCall, Expr *DataCall,
+  CXXBuiltinTokenizeExpr(ASTContext &C, QualType Ty, ArrayRef<Expr *> Args,
+                         ArrayRef<Expr *> SizeCalls, ArrayRef<Expr *> DataCalls,
                          SourceLocation KwLoc, SourceLocation LParenLoc,
                          SourceLocation RParenLoc);
-  CXXBuiltinTokenizeExpr(EmptyShell Empty);
+  CXXBuiltinTokenizeExpr(EmptyShell Empty, unsigned NumArgs);
 
 public:
   static CXXBuiltinTokenizeExpr *Create(ASTContext &C, QualType Ty,
-                                        Expr *Arg, Expr *SizeCall, Expr *DataCall,
+                                        ArrayRef<Expr *> Args,
+                                        ArrayRef<Expr *> SizeCalls,
+                                        ArrayRef<Expr *> DataCalls,
                                         SourceLocation KwLoc,
                                         SourceLocation LParenLoc,
                                         SourceLocation RParenLoc);
-  static CXXBuiltinTokenizeExpr *CreateEmpty(ASTContext &C);
+  static CXXBuiltinTokenizeExpr *CreateEmpty(ASTContext &C, unsigned NumArgs);
 
-  Expr *getArg() const { return cast<Expr>(SubExprs[0]); }
-  void setArg(Expr *E) { SubExprs[0] = E; }
+  unsigned getNumArgs() const { return NumArgs; }
+  Expr *getArg(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast<Expr>(Args[3 * I]);
+  }
+  void setArg(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[3 * I] = E;
+  }
 
-  Expr *getSizeCall() const { return cast_or_null<Expr>(SubExprs[1]); }
-  Expr *getDataCall() const { return cast_or_null<Expr>(SubExprs[2]); }
-  void setSizeCall(Expr *E) { SubExprs[1] = E; }
-  void setDataCall(Expr *E) { SubExprs[2] = E; }
+  Expr *getSizeCall(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast_or_null<Expr>(Args[3 * I + 1]);
+  }
+  Expr *getDataCall(unsigned I) const {
+    assert(I < NumArgs && "argument index out of range");
+    return cast_or_null<Expr>(Args[3 * I + 2]);
+  }
+  void setSizeCall(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[3 * I + 1] = E;
+  }
+  void setDataCall(unsigned I, Expr *E) {
+    assert(I < NumArgs && "argument index out of range");
+    Args[3 * I + 2] = E;
+  }
 
   SourceLocation getKwLoc() const { return KwLoc; }
   void setKwLoc(SourceLocation Loc) { KwLoc = Loc; }
@@ -6032,9 +6055,9 @@ public:
   SourceLocation getBeginLoc() const LLVM_READONLY { return KwLoc; }
   SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
 
-  child_range children() { return child_range(SubExprs, SubExprs + 3); }
+  child_range children() { return child_range(Args, Args + 3 * NumArgs); }
   const_child_range children() const {
-    return const_child_range(SubExprs, SubExprs + 3);
+    return const_child_range(Args, Args + 3 * NumArgs);
   }
 
   static bool classof(const Stmt *T) {

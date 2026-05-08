@@ -13,8 +13,8 @@ namespace std::meta {
     template <class... Ts>
     consteval auto str_lit(Ts const&...) -> token_sequence;
 
-    template <class T>
-    consteval auto tokenize(T const&) -> token_sequence;
+    template <class... Ts>
+    consteval auto tokenize(Ts const&...) -> token_sequence;
 
     consteval auto queue_injection(token_sequence) -> void;
     consteval auto queue_injection(info target_ns, token_sequence) -> void;
@@ -869,4 +869,23 @@ namespace N33 {
     // Concatenating tokenize results
     static_assert(tokenize("a") + tokenize("b") == ^^{ a b });
     static_assert(tokenize("int") + tokenize("x") + tokenize(";") == ^^{ int x ; });
+
+    // Multi-argument tokenize (concatenates before lexing)
+    static_assert(tokenize("12", "3u") == ^^{ 123u });
+    static_assert(tokenize(12, "3u") == ^^{ 123u });
+    static_assert(tokenize(12, '3', 'u') == ^^{ 123u });
+    static_assert(tokenize("0x", "CAFE") == ^^{ 0xCAFE });
+    static_assert(tokenize("foo", "_", "bar") == ^^{ foo_bar });
+    static_assert(tokenize("int", " ", "x", ";") == ^^{ int x ; });
+
+    // Multi-arg with string_view
+    consteval token_sequence make_multi_tokens() {
+        string_view type = "int";
+        string_view name = "z";
+        return tokenize(type, " ", name, " = 200;");
+    }
+    struct S3 {
+        consteval { queue_injection(make_multi_tokens()); }
+    };
+    static_assert(S3{}.z == 200);
 }

@@ -3078,10 +3078,11 @@ consteval auto id(Ts const&...) -> info;
 template <class... Ts>
 consteval auto str_lit(Ts const&...) -> token_sequence;
 
-// Tokenize a string into a token_sequence.
-// The string is lexed as C++ source code and the resulting tokens are returned.
-template <class T>
-consteval auto tokenize(T const&) -> token_sequence;
+// Tokenize strings into a token_sequence.
+// Arguments are concatenated and then lexed as C++ source code.
+// Accepts integers, characters, string literals, and types with data()/size().
+template <class... Ts>
+consteval auto tokenize(Ts const&...) -> token_sequence;
 
 // Queue token injection into the current or specified namespace.
 // Accepts any type convertible to token_sequence.

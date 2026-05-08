@@ -569,12 +569,15 @@ void ASTStmtWriter::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *E) {
 
 void ASTStmtWriter::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *E) {
   VisitExpr(E);
+  Record.push_back(E->getNumArgs());
   Record.AddSourceLocation(E->getKwLoc());
   Record.AddSourceLocation(E->getLParenLoc());
   Record.AddSourceLocation(E->getRParenLoc());
-  Record.AddStmt(E->getArg());
-  Record.AddStmt(E->getSizeCall());
-  Record.AddStmt(E->getDataCall());
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    Record.AddStmt(E->getArg(I));
+    Record.AddStmt(E->getSizeCall(I));
+    Record.AddStmt(E->getDataCall(I));
+  }
   Code = serialization::EXPR_BUILTIN_TOKENIZE;
 }
 

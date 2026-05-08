@@ -9243,13 +9243,16 @@ template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCXXBuiltinTokenizeExpr(
     CXXBuiltinTokenizeExpr *E) {
-  ExprResult Arg = getDerived().TransformExpr(E->getArg());
-  if (Arg.isInvalid())
+  SmallVector<Expr *, 4> Inputs;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I)
+    Inputs.push_back(E->getArg(I));
+  SmallVector<Expr *, 4> TransformedArgs;
+  if (getDerived().TransformExprs(Inputs.data(), Inputs.size(),
+                                  /*IsCall=*/true, TransformedArgs))
     return ExprError();
 
-  Expr *Args[] = {Arg.get()};
   return getSema().ActOnCXXBuiltinTokenize(E->getKwLoc(), E->getLParenLoc(),
-                                           Args, E->getRParenLoc());
+                                           TransformedArgs, E->getRParenLoc());
 }
 
 template <typename Derived>

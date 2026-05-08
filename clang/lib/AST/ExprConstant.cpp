@@ -17504,11 +17504,13 @@ bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
 
 bool ReflectionEvaluator::VisitCXXBuiltinTokenizeExpr(
     const CXXBuiltinTokenizeExpr *E) {
-  // Extract the string content from the argument.
+  // Extract and concatenate string content from all arguments.
   SmallString<64> Content;
-  if (!ExtractStringFromArg(Info, E->getArg(), E->getSizeCall(),
-                            E->getDataCall(), Content))
-    return false;
+  for (unsigned I = 0; I < E->getNumArgs(); ++I) {
+    if (!ExtractStringFromArg(Info, E->getArg(I), E->getSizeCall(I),
+                              E->getDataCall(I), Content))
+      return false;
+  }
 
   // Lex the string content into tokens.
   // We use a raw lexer since we don't have a Preprocessor available here.
