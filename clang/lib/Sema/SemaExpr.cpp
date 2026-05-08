@@ -6906,29 +6906,51 @@ using InterceptedMetaFnPtr = ExprResult (Sema::*)(SourceLocation KwLoc,
                                                    ArrayRef<Expr *> Args,
                                                    SourceLocation RParenLoc);
 
+// Check if DC is namespace 'std::meta' (or an inline namespace within it).
+static bool isStdMetaNamespace(const DeclContext *DC) {
+  // Walk through any inline namespaces (e.g., std::meta::reflection_v2).
+  while (DC && DC->isInlineNamespace())
+    DC = DC->getParent();
+
+  // Should be namespace 'meta'.
+  auto *Meta = dyn_cast_or_null<NamespaceDecl>(DC);
+  if (!Meta || !Meta->getIdentifier() || Meta->getName() != "meta")
+    return false;
+
+  // Parent should be namespace 'std'.
+  DC = Meta->getParent();
+  while (DC && DC->isInlineNamespace())
+    DC = DC->getParent();
+
+  auto *Std = dyn_cast_or_null<NamespaceDecl>(DC);
+  if (!Std || !Std->getIdentifier() || Std->getName() != "std")
+    return false;
+
+  // Parent should be the translation unit.
+  return Std->getParent()->isTranslationUnit();
+}
+
 // Returns a pointer to the Sema handler for intercepted std::meta functions,
 // or nullptr if the function is not intercepted.
 static InterceptedMetaFnPtr getInterceptedMetaFn(const FunctionDecl *FDecl) {
   if (!FDecl || !FDecl->getDeclName().isIdentifier())
     return nullptr;
 
-  // Check qualified name directly - handles inline namespaces like
-  // std::meta::reflection_v2 that are exposed as std::meta.
-  StringRef Name = FDecl->getName();
-  std::string QualName = FDecl->getQualifiedNameAsString();
+  // Quick check: must be in std::meta namespace.
+  if (!isStdMetaNamespace(FDecl->getDeclContext()))
+    return nullptr;
 
-  if (Name == "id" && QualName == "std::meta::id")
-    return &Sema::ActOnCXXBuiltinId;
-  if (Name == "str_lit" && QualName == "std::meta::str_lit")
-    return &Sema::ActOnCXXBuiltinStrLiteral;
-  if (Name == "tokenize" && QualName == "std::meta::tokenize")
-    return &Sema::ActOnCXXBuiltinTokenize;
-  if (Name == "queue_injection" && QualName == "std::meta::queue_injection")
-    return &Sema::ActOnCXXBuiltinInject;
-  if (Name == "report_tokens" && QualName == "std::meta::report_tokens")
-    return &Sema::ActOnCXXBuiltinReportTokens;
+  // Map from unqualified name to handler.
+  static const llvm::StringMap<InterceptedMetaFnPtr> Handlers = {
+      {"id", &Sema::ActOnCXXBuiltinId},
+      {"str_lit", &Sema::ActOnCXXBuiltinStrLiteral},
+      {"tokenize", &Sema::ActOnCXXBuiltinTokenize},
+      {"queue_injection", &Sema::ActOnCXXBuiltinInject},
+      {"report_tokens", &Sema::ActOnCXXBuiltinReportTokens},
+  };
 
-  return nullptr;
+  auto It = Handlers.find(FDecl->getName());
+  return It != Handlers.end() ? It->second : nullptr;
 }
 
 ExprResult Sema::BuildResolvedCallExpr(Expr *Fn, NamedDecl *NDecl,
