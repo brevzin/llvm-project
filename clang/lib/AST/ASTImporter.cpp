@@ -9110,7 +9110,7 @@ ExpectedStmt ASTNodeImporter::VisitTemplateStringLiteralExpr(
     return ToStructOrErr.takeError();
 
   Error Err = Error::success();
-  auto ToLoc = importChecked(Err, E->getBeginLoc());
+  auto ToRange = importChecked(Err, E->getSourceRange());
   if (Err)
     return std::move(Err);
 
@@ -9118,11 +9118,12 @@ ExpectedStmt ASTNodeImporter::VisitTemplateStringLiteralExpr(
   if (Error Err = ImportContainerChecked(E->getExprs(), ToExprs))
     return std::move(Err);
 
-  TemplateStringLiteralData *Data =
-      new (Importer.getToContext()) TemplateStringLiteralData(*E->getData());
+  ASTContext &ToCtx = Importer.getToContext();
+  auto *Data = new (ToCtx) TemplateStringLiteralData(*E->getData());
+  ToCtx.addDestruction(Data);
 
-  return TemplateStringLiteralExpr::Create(
-      Importer.getToContext(), *ToStructOrErr, Data, ToExprs, ToLoc);
+  return TemplateStringLiteralExpr::Create(ToCtx, *ToStructOrErr, Data,
+                                           ToExprs, ToRange);
 }
 
 ExpectedStmt ASTNodeImporter::VisitInitListExpr(InitListExpr *E) {

@@ -934,6 +934,11 @@ public:
       Visit(A->getType());
   }
 
+  void VisitTemplateStringLiteralExpr(const TemplateStringLiteralExpr *Node) {
+    if (Traversal != TK_IgnoreUnlessSpelledInSource)
+      Visit(Node->getStringStruct());
+  }
+
   void VisitLambdaExpr(const LambdaExpr *Node) {
     if (Traversal == TK_IgnoreUnlessSpelledInSource) {
       for (unsigned I = 0, N = Node->capture_size(); I != N; ++I) {

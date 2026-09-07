@@ -30,6 +30,10 @@ export namespace std {
 #endif
 #if _LIBCPP_STD_VER >= 26
   using std::dynamic_format;
+
+  // template strings (P3951)
+  using std::template_string;
+  using std::weak_template_string;
 #endif // _LIBCPP_STD_VER >= 26
 
   // [format.functions], formatting functions

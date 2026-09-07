@@ -2510,20 +2510,33 @@ void StmtPrinter::VisitLambdaExpr(LambdaExpr *Node) {
 }
 
 void StmtPrinter::VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E) {
+  // The string pieces are stored in format-string form (braces already
+  // doubled), so they can be printed verbatim. Each interpolation's
+  // FormatSpecifier is the whole replacement field, e.g. "{:*^{}}", with the
+  // (possibly nested) expressions elided; print those back in order.
   OS << "t\"";
   TemplateStringLiteralData *Data = E->getData();
   ArrayRef<Expr *> Exprs = E->getExprs();
-  
-  size_t ExprIdx = 0;
-  for (size_t i = 0; i < Data->StringPieces.size(); ++i) {
-    OS << Data->StringPieces[i];
-    if (i < Data->Interpolations.size()) {
-      OS << "${";
-      if (ExprIdx < Exprs.size())
+
+  for (size_t I = 0; I < Data->StringPieces.size(); ++I) {
+    OS.write_escaped(Data->StringPieces[I]);
+    if (I >= Data->Interpolations.size())
+      break;
+
+    const auto &Interp = Data->Interpolations[I];
+    unsigned ExprIdx = Interp.ExpressionIndex;
+    unsigned ExprEnd = std::min<unsigned>(ExprIdx + Interp.ExpressionCount,
+                                          Exprs.size());
+    StringRef Spec = Interp.FormatSpecifier;
+    for (size_t C = 0; C < Spec.size(); ++C) {
+      OS << Spec[C];
+      if (Spec[C] != '{' || ExprIdx >= ExprEnd)
+        continue;
+      // The field's own expression follows the opening brace; a nested "{}"
+      // is best-effort attributed to the next remaining nested expression
+      // (a pass-through "{}" and an elided "{width}" are stored identically).
+      if (C == 0 || (C + 1 < Spec.size() && Spec[C + 1] == '}'))
         PrintExpr(Exprs[ExprIdx++]);
-      if (!Data->Interpolations[i].FormatSpecifier.empty())
-        OS << ":" << Data->Interpolations[i].FormatSpecifier;
-      OS << "}";
     }
   }
   OS << "\"";

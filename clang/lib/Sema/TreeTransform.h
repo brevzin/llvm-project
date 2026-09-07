@@ -17137,12 +17137,8 @@ ExprResult TreeTransform<Derived>::TransformTemplateStringLiteralExpr(
   if (!getDerived().AlwaysRebuild() && !ArgumentChanged)
     return E;
 
-  CXXRecordDecl *NewStruct = getSema().BuildTemplateStringStruct(
-      E->getBeginLoc(), E->getData(), TransformedExprs);
-
-  return TemplateStringLiteralExpr::Create(getSema().Context, NewStruct,
-                                           E->getData(), TransformedExprs,
-                                           E->getBeginLoc());
+  return getSema().BuildTemplateStringLiteral(E->getSourceRange(),
+                                              E->getData(), TransformedExprs);
 }
 
 template<typename Derived>

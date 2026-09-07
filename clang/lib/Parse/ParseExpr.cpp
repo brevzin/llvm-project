@@ -26,10 +26,10 @@
 #include "clang/AST/Availability.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/LocInfoType.h"
+#include "clang/Basic/DiagnosticLex.h"
 #include "clang/Basic/PrettyStackTrace.h"
 #include "clang/Lex/Lexer.h"
 #include "clang/Lex/LiteralSupport.h"
-#include "clang/Lex/TemplateStringAnnotation.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
 #include "clang/Sema/DeclSpec.h"
@@ -1079,10 +1079,9 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
   case tok::utf8_string_literal:
   case tok::utf16_string_literal:
   case tok::utf32_string_literal:
+  case tok::template_string_literal: // primary-expression: t"..."
+  case tok::template_string_begin:   // primary-expression: t"...{expr}..."
     Res = ParseStringLiteralExpression(true);
-    break;
-  case tok::template_string_literal: // primary-expression: template-string-literal
-    Res = ParseTemplateStringLiteral();
     break;
   case tok::kw__Generic:   // primary-expression: generic-selection [C11 6.5.1]
     Res = ParseGenericSelectionExpression();
@@ -3156,7 +3155,9 @@ ExprResult Parser::ParseUnevaluatedStringLiteralExpression() {
 
 ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
                                                 bool Unevaluated) {
-  assert(tokenIsLikeStringLiteral(Tok, getLangOpts()) &&
+  assert((tokenIsLikeStringLiteral(Tok, getLangOpts()) ||
+          Tok.isOneOf(tok::template_string_literal,
+                      tok::template_string_begin)) &&
          "Not a string-literal-like token!");
 
   // String concatenation.
@@ -3165,25 +3166,16 @@ ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
   SmallVector<Token, 4> StringToks;
 
   do {
-    if (Tok.is(tok::template_string_literal)) {
-      // this will never be the first one
-      TemplateStringAnnotation A;
-      A.Loc = StringToks.front().getLocation();
-
-      StringLiteralParser Literal(StringToks, PP);
-      StringRef Str = Literal.GetString();
-      auto& Data = A.FormatStringData.emplace_back();
-      Data.reserve(Str.size() + 2);
-      Data.push_back('"');
-      Data.insert(Data.end(), Str.begin(), Str.end());
-      Data.push_back('"');
-
-      // don't consume this token yet, this function will handle it
-      return ParseTemplateStringLiteralExpression(A);
-    }
+    // A template string literal anywhere in the sequence makes the whole
+    // sequence a template string literal.
+    if (Tok.isOneOf(tok::template_string_literal, tok::template_string_begin))
+      return ParseTemplateStringLiteralExpression(
+          StringToks, AllowUserDefinedLiteral, Unevaluated);
     StringToks.push_back(Tok);
     ConsumeAnyToken();
-  } while (tokenIsLikeStringLiteral(Tok, getLangOpts()));
+  } while (tokenIsLikeStringLiteral(Tok, getLangOpts()) ||
+           Tok.isOneOf(tok::template_string_literal,
+                       tok::template_string_begin));
 
   if (Unevaluated) {
     assert(!AllowUserDefinedLiteral && "UDL are always evaluated");
@@ -3196,147 +3188,454 @@ ExprResult Parser::ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
                                                             : nullptr);
 }
 
-/// ParseTemplateStringLiteral - Parse a template string literal like t"x={expr}"
-static std::unique_ptr<TemplateStringAnnotation const>
-TemplateStringAnnotationOf(Token const& T)
-{
-  assert(T.is(tok::template_string_literal) && "Not a template string literal.");
-  const char *LiteralData = T.getLiteralData();
-  assert(LiteralData && "template string missing literal");
-  return std::unique_ptr<TemplateStringAnnotation const>(
-    reinterpret_cast<TemplateStringAnnotation const*>(LiteralData));
+namespace clang {
+/// State accumulated while parsing a template string literal and the string
+/// literals concatenated with it.
+struct TemplateStringParts {
+  TemplateStringLiteralData Data;
+  /// Every interpolated expression, in source order (a field's own
+  /// expression followed by those nested in its format specifier).
+  SmallVector<Expr *, 8> Exprs;
+  /// The ud-suffix, if any literal in the sequence had one.
+  IdentifierInfo *UDSuffix = nullptr;
+  SourceLocation UDSuffixLoc;
+
+  /// The interpolation whose field is currently open, if any.
+  TemplateStringLiteralData::InterpolationData CurInterp;
+  /// Unprocessed text of the open field's format specifier, "{" onwards.
+  std::string CurSpecRaw;
+  SourceLocation CurSpecLoc;
+  /// Number of unclosed replacement-field '{'s; 0 between fields.
+  unsigned FieldDepth = 0;
+
+  TemplateStringParts() { Data.StringPieces.emplace_back(); }
+  std::string &lastPiece() { return Data.StringPieces.back(); }
+};
+} // namespace clang
+
+ExprResult Parser::SkipRestOfTemplateString() {
+  unsigned Depth = 0;
+  while (Tok.isNot(tok::eof)) {
+    if (Depth == 0 &&
+        !(tokenIsLikeStringLiteral(Tok, getLangOpts()) ||
+          Tok.isOneOf(tok::template_string_literal, tok::template_string_begin,
+                      tok::template_string_middle, tok::template_string_end)))
+      break;
+    if (Tok.is(tok::template_string_begin))
+      ++Depth;
+    else if (Tok.is(tok::template_string_end) && Depth > 0)
+      --Depth;
+    ConsumeAnyToken();
+  }
+  return ExprError();
 }
 
-ExprResult Parser::ParseTemplateStringLiteral() {
-  assert(Tok.is(tok::template_string_literal) && "Not a template string literal!");
-  Token StringTok = Tok;
-  ConsumeAnyToken();
-  return ParseTemplateStringLiteralExpression(*TemplateStringAnnotationOf(StringTok));
+bool Parser::NoteTemplateStringUDSuffix(TemplateStringParts &Parts,
+                                        StringRef Suffix, SourceLocation Loc) {
+  if (!Parts.UDSuffix) {
+    Parts.UDSuffix = PP.getIdentifierInfo(Suffix);
+    Parts.UDSuffixLoc = Loc;
+    return true;
+  }
+  if (Parts.UDSuffix->getName() == Suffix)
+    return true;
+  Diag(Loc, diag::err_string_concat_mixed_suffix)
+      << Parts.UDSuffix->getName() << Suffix;
+  return false;
 }
 
-ExprResult Parser::ParseTemplateStringLiteralExpression(TemplateStringAnnotation const& Init)
-{
-  SourceLocation Loc = Init.Loc;
-  TemplateStringAnnotation Annotation = Init;
+bool Parser::ProcessTemplateStringText(StringRef Text, SourceLocation Loc,
+                                       std::string &Out) {
+  if (Text.empty())
+    return true;
 
-  auto AppendString = [&](StringRef Str){
-    auto& Last = Annotation.FormatStringData.back();
-    Last.insert(Last.end() - 1, Str.begin(), Str.end());
+  // Run the text through StringLiteralParser as a synthetic ordinary string
+  // literal. Its diagnostics are offsets into the token's spelling, so place
+  // the token one character before the text, where the source has the
+  // character introducing this run.
+  SmallString<64> Spelling;
+  Spelling.push_back('"');
+  Spelling += Text;
+  Spelling.push_back('"');
+
+  Token SynthTok;
+  SynthTok.startToken();
+  SynthTok.setKind(tok::string_literal);
+  SynthTok.setLocation(Loc);
+  SynthTok.setLength(Spelling.size());
+  SynthTok.setLiteralData(Spelling.data());
+
+  StringLiteralParser Literal(SynthTok, PP);
+  if (Literal.hadError)
+    return false;
+  Out += Literal.GetString();
+  return true;
+}
+
+bool Parser::AppendTemplateStringPlainPiece(const Token &StrTok,
+                                            TemplateStringParts &Parts) {
+  if (StrTok.isNot(tok::string_literal)) {
+    Diag(StrTok, diag::err_template_string_bad_concat);
+    return false;
+  }
+
+  StringLiteralParser Literal(StrTok, PP);
+  if (Literal.hadError)
+    return false;
+  Parts.lastPiece() += Literal.GetString();
+
+  if (Literal.getUDSuffix().empty())
+    return true;
+  SourceLocation SuffixLoc = Lexer::AdvanceToTokenCharacter(
+      StrTok.getLocation(), Literal.getUDSuffixOffset(),
+      PP.getSourceManager(), getLangOpts());
+  return NoteTemplateStringUDSuffix(Parts, Literal.getUDSuffix(), SuffixLoc);
+}
+
+Parser::TemplateStringFragment
+Parser::ProcessTemplateStringFragment(const Token &FragTok,
+                                      TemplateStringParts &Parts) {
+  SmallString<128> SpellingBuf;
+  StringRef Sp = PP.getSpelling(FragTok, SpellingBuf);
+  auto LocAt = [&](size_t I) {
+    return FragTok.getLocation().getLocWithOffset(I);
   };
 
-  // Consume other template string literals
-  while (tokenIsLikeStringLiteral(Tok, getLangOpts())) {
-    if (Tok.is(tok::template_string_literal)) {
-      auto Next = TemplateStringAnnotationOf(Tok);
-      ConsumeAnyToken();
+  bool AtLiteralStart = FragTok.isOneOf(tok::template_string_literal,
+                                        tok::template_string_begin);
+  assert(AtLiteralStart == (Parts.FieldDepth == 0) &&
+         "fragment does not match field state");
 
-      // the 1st string piece appends to the end of the last string piece of the
-      // previous one. the other pieces just get appended).
-      // Last is "xxx" and Str is "yyy" (incl quotes). Need to produce "xxxyyy"
-      auto& First = Next->FormatStringData.front();
-      AppendString(StringRef(First.data() + 1, First.size() - 2));
-      Annotation.FormatStringData.append(Next->FormatStringData.begin() + 1,
-                                        Next->FormatStringData.end());
+  size_t I = AtLiteralStart ? 2 : 0; // Skip the t" prefix.
 
-      // the Interpolations start offset by the amount of currente xpressions
-      for (size_t I : Next->Interpolations) {
-        Annotation.Interpolations.push_back(I + Annotation.ExpressionTokens.size());
+  // Piece text is collected raw (escapes unprocessed) and processed per run.
+  std::string Run;
+  size_t RunStart = I;
+  auto FlushRun = [&] {
+    bool OK = ProcessTemplateStringText(
+        Run, LocAt(RunStart ? RunStart - 1 : 0), Parts.lastPiece());
+    Run.clear();
+    return OK;
+  };
+
+  for (; I < Sp.size(); ++I) {
+    char C = Sp[I];
+    char Next = I + 1 < Sp.size() ? Sp[I + 1] : 0;
+
+    if (Parts.FieldDepth > 0) {
+      // Format specifier text.
+      Parts.CurSpecRaw += C;
+      if (C == '\\' && I + 1 < Sp.size()) {
+        Parts.CurSpecRaw += Sp[++I];
+      } else if (C == '{') {
+        ++Parts.FieldDepth;
+        if (Next != '}' && Next != ':') {
+          // A nested field with its own expression; the lexer ended the
+          // fragment here.
+          assert(I + 1 == Sp.size() && "nested field not at fragment end");
+          return TemplateStringFragment::Expression;
+        }
+        // "{}" and "{:...}" are passed through to the format library.
+      } else if (C == '}') {
+        if (--Parts.FieldDepth == 0) {
+          // The field is complete.
+          auto &Interp = Parts.CurInterp;
+          if (!ProcessTemplateStringText(Parts.CurSpecRaw, Parts.CurSpecLoc,
+                                         Interp.FormatSpecifier))
+            return TemplateStringFragment::Error;
+          Parts.Data.Interpolations.push_back(std::move(Interp));
+          Parts.Data.StringPieces.emplace_back();
+          RunStart = I + 1;
+        }
       }
+      continue;
+    }
 
-      // And the ExpressionTokens just append
-      Annotation.ExpressionTokens.append(Next->ExpressionTokens);
-    } else {
-      // this is just a string literal piece, so this appends onto the end
-      StringLiteralParser Literal(Tok, PP);
-      AppendString(Literal.GetString());
-      ConsumeAnyToken();
+    // Literal piece text.
+    switch (C) {
+    case '\\':
+      Run += C;
+      if (I + 1 < Sp.size())
+        Run += Sp[++I];
+      break;
+    case '{':
+      if (Next == '{') {
+        Run += "{{";
+        ++I;
+        break;
+      }
+      // A new replacement field begins; the lexer ended the fragment here.
+      assert(I + 1 == Sp.size() && "field start not at fragment end");
+      if (!FlushRun())
+        return TemplateStringFragment::Error;
+      Parts.FieldDepth = 1;
+      Parts.CurInterp = TemplateStringLiteralData::InterpolationData();
+      Parts.CurInterp.ExpressionIndex = Parts.Exprs.size();
+      Parts.CurInterp.ExpressionCount = 0;
+      Parts.CurSpecRaw = "{";
+      Parts.CurSpecLoc = LocAt(I);
+      return TemplateStringFragment::Expression;
+    case '}':
+      // The lexer diagnosed unescaped '}'; treat both forms as one brace,
+      // kept doubled since pieces are format-string text.
+      Run += "}}";
+      if (Next == '}')
+        ++I;
+      break;
+    case '"': {
+      // End of the literal; anything after is the ud-suffix.
+      if (!FlushRun())
+        return TemplateStringFragment::Error;
+      if (FragTok.hasUDSuffix()) {
+        StringRef Suffix = Sp.substr(I + 1);
+        if (!NoteTemplateStringUDSuffix(*&Parts, Suffix, LocAt(I + 1)))
+          return TemplateStringFragment::Error;
+      }
+      return TemplateStringFragment::Done;
+    }
+    default:
+      Run += C;
+      break;
     }
   }
+  llvm_unreachable("template string fragment has no terminator");
+}
 
-  // llvm::errs() << "[DEBUG] ParseTemplateStringLiteral with "
-  //              << Annotation->FormatString.size() << " string literals and "
-  //              << Annotation->ExpressionTokens.size() << " expressions.\n";
+/// Parse one interpolated expression from its (already macro-expanded)
+/// tokens. \p ColonLoc is the location of the ':' that ended the expression,
+/// if any.
+ExprResult Parser::ParseTemplateStringExpression(SmallVectorImpl<Token> &Toks,
+                                                 SourceLocation ColonLoc) {
+  // Parse from the token buffer the way late-parsed code is: terminate it
+  // with an eof carrying a marker, followed by the current token so that it
+  // is not lost.
+  Token Eof;
+  Eof.startToken();
+  Eof.setKind(tok::eof);
+  Eof.setLocation(Toks.back().getEndLoc());
+  Eof.setEofData(&Toks);
+  Toks.push_back(Eof);
+  Toks.push_back(Tok);
+  PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                      /*IsReinject=*/true);
+  ConsumeAnyToken();
 
-  // Save the current token to restore later
-  Token SavedToken = Tok;
+  ExprResult Res;
+  {
+    // The braces delimit the expression, so '>' is always an operator.
+    GreaterThanIsOperatorScope G(GreaterThanIsOperator, true);
+    Res = ParseAssignmentExpression();
+  }
 
-  // Parse each pre-tokenized expression
-  SmallVector<Expr*, 4> Exprs;
-  for (const auto &ExprTokens : Annotation.ExpressionTokens) {
-    if (ExprTokens.empty()) {
-      // Empty expression
-      Diag(Loc, diag::err_expected) << "expression";
-      return ExprError();
-    }
+  bool AtEnd = Tok.is(tok::eof) && Tok.getEofData() == &Toks;
+  if (!Res.isInvalid() && !AtEnd) {
+    Diag(Tok, diag::err_expected) << tok::r_brace;
+    Res = ExprError();
+  }
+  if (Res.isInvalid() && ColonLoc.isValid())
+    Diag(ColonLoc, diag::note_template_string_colon);
 
-    // Copy tokens and update identifier info for raw identifiers
-    SmallVector<Token, 8> ProcessedTokens;
-    for (Token Tok : ExprTokens) {
-      // Handle identifiers - need to look them up
-      if (Tok.is(tok::raw_identifier)) {
-        // Convert raw identifier to proper identifier
-        IdentifierInfo *II = PP.LookUpIdentifierInfo(Tok);
-        Tok.setKind(II->getTokenID());
-      }
-      // Use the StringTok location for all tokens to avoid SourceManager issues
-      Tok.setLocation(Loc);
-      ProcessedTokens.push_back(Tok);
-    }
-
-    // Add an EOF token to mark the end of this expression
-    Token EofTok;
-    EofTok.startToken();
-    EofTok.setKind(tok::eof);
-    EofTok.setLocation(Loc);
-    ProcessedTokens.push_back(EofTok);
-
-    // Inject tokens for this expression
-    PP.EnterTokenStream(ProcessedTokens, /*DisableMacroExpansion=*/true,
-                        /*IsReinject=*/false);
-
+  // Skip whatever is left (after an error) up to and including our eof.
+  while (Tok.isNot(tok::eof))
     ConsumeAnyToken();
+  if (Tok.getEofData() == &Toks)
+    ConsumeAnyToken();
+  return Res;
+}
 
-    // Parse the expression
-    ExprResult Expr = ParseAssignmentExpression();
-    if (Expr.isInvalid()) {
-      // Skip to the EOF we injected before restoring the saved token
-      while (Tok.isNot(tok::eof))
-        ConsumeAnyToken();
-      Tok = SavedToken;
-      return ExprError();
-    }
+ExprResult Parser::ParseTemplateStringLiteralExpression(
+    ArrayRef<Token> PrecedingStrings, bool AllowUserDefinedLiteral,
+    bool Unevaluated) {
+  assert(Tok.isOneOf(tok::template_string_literal,
+                     tok::template_string_begin) &&
+         "Not a template string!");
 
-    // After parsing the expression, we expect to be at the EOF we injected.
-    // If not, there are extra tokens (e.g. a comma operator) that are not
-    // valid in this context.
-    if (Tok.isNot(tok::eof)) {
-      Diag(Tok.getLocation(), diag::err_expected) << tok::r_brace;
-      while (Tok.isNot(tok::eof))
-        ConsumeAnyToken();
-      Tok = SavedToken;
-      return ExprError();
-    }
-
-    Exprs.push_back(Expr.get());
-
-    // the next token is now the EoF we injected, so revert it back to the saved one
-    Tok = SavedToken;
+  if (Unevaluated) {
+    Diag(Tok, diag::err_template_string_not_allowed);
+    return SkipRestOfTemplateString();
   }
 
-  // Call Sema to create the template string
-  ExprResult Result = Actions.ActOnTemplateStringLiteral(Loc, Annotation, Exprs);
-  if (Result.isInvalid())
+  SourceLocation BeginLoc = PrecedingStrings.empty()
+                                ? Tok.getLocation()
+                                : PrecedingStrings.front().getLocation();
+  SourceLocation EndLoc = Tok.getLocation();
+
+  TemplateStringParts Parts;
+  for (const Token &StrTok : PrecedingStrings)
+    if (!AppendTemplateStringPlainPiece(StrTok, Parts))
+      return SkipRestOfTemplateString();
+
+  auto IsSequenceToken = [&](const Token &T) {
+    return tokenIsLikeStringLiteral(T, getLangOpts()) ||
+           T.isOneOf(tok::template_string_literal, tok::template_string_begin);
+  };
+
+  while (IsSequenceToken(Tok)) {
+    if (Tok.isNot(tok::template_string_literal) &&
+        Tok.isNot(tok::template_string_begin)) {
+      if (!AppendTemplateStringPlainPiece(Tok, Parts))
+        return SkipRestOfTemplateString();
+      EndLoc = Tok.getLocation();
+      ConsumeAnyToken();
+      continue;
+    }
+
+    Token Frag = Tok;
+    EndLoc = Tok.getLocation();
+    ConsumeAnyToken();
+    TemplateStringFragment R = ProcessTemplateStringFragment(Frag, Parts);
+
+    while (R == TemplateStringFragment::Expression) {
+      bool MainExpr = Parts.FieldDepth == 1;
+
+      // Collect this expression's tokens: everything up to the next
+      // middle/end token of this literal (a nested template string's own
+      // parts are part of the expression).
+      SmallVector<Token, 16> FieldToks;
+      unsigned Depth = 0;
+      unsigned BracketDepth = 0;
+      while (true) {
+        if (Tok.isOneOf(tok::eof, tok::unknown))
+          return SkipRestOfTemplateString(); // The lexer already diagnosed.
+        if (Depth == 0 &&
+            Tok.isOneOf(tok::template_string_middle, tok::template_string_end))
+          break;
+        if (Depth == 0 && BracketDepth == 0) {
+          // These cannot occur at the top level of an interpolated
+          // expression: the literal was unterminated (which the lexer
+          // already diagnosed), so stop here rather than swallowing the
+          // rest of the file. The one legitimate top-level ';' introduces a
+          // name clause and is directly followed by a string literal.
+          if (Tok.isOneOf(tok::r_brace, tok::r_paren, tok::r_square) ||
+              (Tok.is(tok::semi) && NextToken().isNot(tok::string_literal)))
+            return SkipRestOfTemplateString();
+        }
+        switch (Tok.getKind()) {
+        case tok::template_string_begin:
+          ++Depth;
+          break;
+        case tok::template_string_end:
+          if (Depth > 0)
+            --Depth;
+          break;
+        case tok::l_paren:
+        case tok::l_square:
+        case tok::l_brace:
+          ++BracketDepth;
+          break;
+        case tok::r_paren:
+        case tok::r_square:
+        case tok::r_brace:
+          if (BracketDepth > 0)
+            --BracketDepth;
+          break;
+        default:
+          break;
+        }
+        FieldToks.push_back(Tok);
+        ConsumeAnyToken();
+      }
+      Token Sentinel = Tok;
+      EndLoc = Tok.getLocation();
+      ConsumeAnyToken();
+
+      SmallString<16> SentinelBuf;
+      bool SentinelIsColon =
+          PP.getSpelling(Sentinel, SentinelBuf).starts_with(":");
+
+      // Strip the name clause (';' string-literal) and a trailing '=' from
+      // the back of the expression.
+      std::optional<std::string> Clause;
+      bool HasEq = false;
+      while (!FieldToks.empty()) {
+        if (!Clause && FieldToks.size() >= 2 &&
+            FieldToks.back().is(tok::string_literal) &&
+            FieldToks[FieldToks.size() - 2].is(tok::semi)) {
+          StringLiteralParser ClauseLit(FieldToks.back(), PP);
+          if (ClauseLit.hadError)
+            return SkipRestOfTemplateString();
+          Clause.emplace(ClauseLit.GetString());
+          FieldToks.pop_back();
+          FieldToks.pop_back();
+          continue;
+        }
+        if (!HasEq && MainExpr && FieldToks.back().is(tok::equal)) {
+          HasEq = true;
+          FieldToks.pop_back();
+          continue;
+        }
+        break;
+      }
+
+      if (FieldToks.empty()) {
+        Diag(Sentinel, diag::err_template_string_empty_expression);
+        return SkipRestOfTemplateString();
+      }
+
+      if (MainExpr) {
+        auto &Interp = Parts.CurInterp;
+        if (Clause) {
+          // Derive the expression's display text from the clause: drop the
+          // trailing '=' when the field has one, and trim whitespace.
+          StringRef Text = *Clause;
+          if (HasEq) {
+            Text = Text.rtrim();
+            Text.consume_back("=");
+          }
+          Interp.ExpressionText = Text.trim().str();
+        } else {
+          // No clause: the expression is a single token whose spelling is
+          // its source text (the lexer synthesizes a clause otherwise).
+          SmallString<32> Buf;
+          Interp.ExpressionText = PP.getSpelling(FieldToks.front(), Buf).str();
+        }
+        if (HasEq) {
+          // "{x = }" prints the field's text before the value; braces in it
+          // are literal text of the format string, so they get doubled.
+          StringRef Splice =
+              Clause ? StringRef(*Clause) : StringRef(Interp.ExpressionText);
+          for (char C : Splice) {
+            Parts.lastPiece() += C;
+            if (C == '{' || C == '}')
+              Parts.lastPiece() += C;
+          }
+          if (!Clause)
+            Parts.lastPiece() += '=';
+        }
+      }
+
+      ExprResult Res = ParseTemplateStringExpression(
+          FieldToks, SentinelIsColon ? Sentinel.getLocation()
+                                     : SourceLocation());
+      if (Res.isInvalid())
+        return SkipRestOfTemplateString();
+      Parts.Exprs.push_back(Res.get());
+      ++Parts.CurInterp.ExpressionCount;
+
+      R = ProcessTemplateStringFragment(Sentinel, Parts);
+    }
+    if (R == TemplateStringFragment::Error)
+      return SkipRestOfTemplateString();
+  }
+
+  TemplateStringLiteralData &Data = Parts.Data;
+  for (size_t I = 0; I < Data.StringPieces.size(); ++I) {
+    Data.FormatString += Data.StringPieces[I];
+    if (I < Data.Interpolations.size())
+      Data.FormatString += Data.Interpolations[I].FormatSpecifier;
+  }
+
+  ExprResult Result = Actions.ActOnTemplateStringLiteral(
+      SourceRange(BeginLoc, EndLoc), std::move(Parts.Data), Parts.Exprs);
+  if (Result.isInvalid() || !Parts.UDSuffix)
+    return Result;
+
+  if (!AllowUserDefinedLiteral) {
+    Diag(Parts.UDSuffixLoc, diag::err_invalid_string_udl);
     return ExprError();
-
-  // Check for UDL suffix (any identifier following the template string)
-  if (Tok.is(tok::identifier)) {
-    IdentifierInfo *UDSuffix = Tok.getIdentifierInfo();
-    SourceLocation UDSuffixLoc = ConsumeToken();
-    Result = Actions.ActOnTemplateStringUDL(Result.get(), UDSuffix,
-                                             UDSuffixLoc, getCurScope());
   }
-
-  return Result;
+  return Actions.ActOnTemplateStringUDL(Result.get(), Parts.UDSuffix,
+                                        Parts.UDSuffixLoc, getCurScope());
 }
 
 ExprResult Parser::ParseGenericSelectionExpression() {

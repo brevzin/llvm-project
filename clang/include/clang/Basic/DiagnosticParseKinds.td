@@ -685,6 +685,16 @@ def err_destructor_tilde_scope : Error<
   "'~' in destructor name should be after nested name specifier">;
 def err_destructor_template_id : Error<
   "destructor name %0 does not refer to a template">;
+def err_template_string_empty_expression : Error<
+  "expected expression in template string replacement field">;
+def err_template_string_bad_concat : Error<
+  "only ordinary string literals can be concatenated with a template string "
+  "literal">;
+def err_template_string_not_allowed : Error<
+  "template string literal cannot be used here">;
+def note_template_string_colon : Note<
+  "':' ends the interpolated expression and begins the format specifier; "
+  "parenthesize the expression to use ':' within it">;
 def err_default_arg_unparsed : Error<
   "unexpected end of default argument expression">;
 def err_bracket_depth_exceeded : Error<

@@ -10540,6 +10540,11 @@ def err_literal_operator_param : Error<
   "invalid literal operator parameter type %0, did you mean %1?">;
 def err_literal_operator_template_with_params : Error<
   "literal operator template cannot have any parameters">;
+def err_literal_operator_template_bad_params : Error<
+  "literal operator template must have either no parameters or a single "
+  "non-pack parameter">;
+def err_template_string_void_expr : Error<
+  "cannot interpolate an expression of type 'void' in a template string">;
 def err_literal_operator_template : Error<
   "template parameter list for literal operator must be either 'char...' or 'typename T, T...'">;
 def err_literal_operator_extern_c : Error<

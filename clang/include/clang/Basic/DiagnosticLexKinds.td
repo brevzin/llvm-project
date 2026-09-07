@@ -328,6 +328,10 @@ def err_unevaluated_string_invalid_escape_sequence : Error<
 def err_string_concat_mixed_suffix : Error<
   "differing user-defined suffixes ('%0' and '%1') in string literal "
   "concatenation">;
+def err_template_string_unescaped_brace : Error<
+  "'}' in a template string literal must be escaped as '}}'">;
+def err_unterminated_template_string : Error<
+  "missing terminating '\"' character in template string literal">;
 def err_pp_invalid_udl : Error<
   "%select{character|integer}0 literal with user-defined suffix "
   "cannot be used in preprocessor constant expression">;

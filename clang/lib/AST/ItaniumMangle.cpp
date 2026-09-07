@@ -6077,6 +6077,16 @@ recurse:
     break;
   }
 
+  case Expr::TemplateStringLiteralExprClass: {
+    // Same situation as a lambda-expression: mangle as a literal of the
+    // generated struct type.
+    Out << "L";
+    mangleType(Context.getASTContext().getCanonicalTagType(
+        cast<TemplateStringLiteralExpr>(E)->getStringStruct()));
+    Out << "E";
+    break;
+  }
+
   case Expr::PackExpansionExprClass:
     NotPrimaryExpr();
     Out << "sp";

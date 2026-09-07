@@ -192,7 +192,6 @@ class TemplateArgumentLoc;
 class TemplateInstantiationCallback;
 class TemplatePartialOrderingContext;
 class TemplateSpecCandidateSet;
-class TemplateStringAnnotation;
 struct TemplateStringLiteralData;
 class Token;
 struct TokenSequenceData;
@@ -7583,22 +7582,23 @@ public:
   ExprResult ActOnUnevaluatedStringLiteral(ArrayRef<Token> StringToks);
 
   /// ActOnTemplateStringLiteral - Create a template string literal expression
-  ExprResult ActOnTemplateStringLiteral(SourceLocation Loc,
-                                        const TemplateStringAnnotation& Annotation,
-                                        ArrayRef<Expr*> Exprs);
+  /// from its processed contents and the parsed interpolated expressions.
+  ExprResult ActOnTemplateStringLiteral(SourceRange Range,
+                                        TemplateStringLiteralData &&Data,
+                                        ArrayRef<Expr *> Exprs);
+
+  /// BuildTemplateStringLiteral - Build the anonymous struct for a template
+  /// string literal and the expression initializing it. Used both when the
+  /// literal is first parsed and when it is instantiated.
+  ExprResult BuildTemplateStringLiteral(SourceRange Range,
+                                        TemplateStringLiteralData *Data,
+                                        ArrayRef<Expr *> Exprs);
 
   /// ActOnTemplateStringUDL - Handle a user-defined literal suffix on a
   /// template string literal, e.g. t"x={x}"_udl.
   ExprResult ActOnTemplateStringUDL(Expr *TemplateStringExpr,
-                                     IdentifierInfo *UDSuffix,
-                                     SourceLocation UDSuffixLoc,
-                                     Scope *S);
-
-  /// BuildTemplateStringStruct - Build the anonymous struct type for a
-  /// template string literal with the given processed data and expressions.
-  CXXRecordDecl *BuildTemplateStringStruct(SourceLocation Loc,
-                                           TemplateStringLiteralData *Data,
-                                           ArrayRef<Expr *> Exprs);
+                                    IdentifierInfo *UDSuffix,
+                                    SourceLocation UDSuffixLoc, Scope *S);
 
   /// ControllingExprOrType is either an opaque pointer coming out of a
   /// ParsedType or an Expr *. FIXME: it'd be better to split this interface

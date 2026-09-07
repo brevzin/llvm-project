@@ -2193,8 +2193,9 @@ public:
   const_child_range children() const;
 };
 
-/// Stores processed data for a template string literal that can persist in the
-/// AST (unlike TemplateStringAnnotation which contains raw Tokens).
+/// The processed, location-independent contents of a template string literal.
+/// Allocated in the ASTContext (with a registered destructor) and shared
+/// between a template string expression and its instantiations.
 struct TemplateStringLiteralData {
   /// The processed string pieces (already parsed from tokens).
   /// For t"Hello {x} world", this would be ["Hello ", " world"].
@@ -2238,12 +2239,13 @@ class TemplateStringLiteralExpr final
   /// Number of field initializer expressions.
   unsigned NumExprs;
 
-  /// Source location of the template string literal.
-  SourceLocation Loc;
+  /// The range of the literal (of the whole concatenated sequence, if the
+  /// literal was formed by concatenation).
+  SourceRange Range;
 
   TemplateStringLiteralExpr(QualType T, CXXRecordDecl *StringStruct,
                             TemplateStringLiteralData *Data,
-                            ArrayRef<Expr *> Exprs, SourceLocation Loc);
+                            ArrayRef<Expr *> Exprs, SourceRange Range);
 
   TemplateStringLiteralExpr(EmptyShell Empty, unsigned NumExprs);
 
@@ -2253,7 +2255,7 @@ public:
   static TemplateStringLiteralExpr *
   Create(const ASTContext &C, CXXRecordDecl *StringStruct,
          TemplateStringLiteralData *Data, ArrayRef<Expr *> Exprs,
-         SourceLocation Loc);
+         SourceRange Range);
 
   static TemplateStringLiteralExpr *CreateEmpty(const ASTContext &C,
                                                 unsigned NumExprs);
@@ -2287,8 +2289,9 @@ public:
     return getTrailingObjects()[I];
   }
 
-  SourceLocation getBeginLoc() const LLVM_READONLY { return Loc; }
-  SourceLocation getEndLoc() const LLVM_READONLY { return Loc; }
+  SourceLocation getBeginLoc() const LLVM_READONLY { return Range.getBegin(); }
+  SourceLocation getEndLoc() const LLVM_READONLY { return Range.getEnd(); }
+  SourceRange getSourceRange() const LLVM_READONLY { return Range; }
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == TemplateStringLiteralExprClass;

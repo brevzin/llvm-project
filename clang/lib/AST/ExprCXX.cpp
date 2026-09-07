@@ -1449,12 +1449,11 @@ LambdaExpr::const_child_range LambdaExpr::children() const {
 
 TemplateStringLiteralExpr::TemplateStringLiteralExpr(
     QualType T, CXXRecordDecl *StringStruct, TemplateStringLiteralData *Data,
-    ArrayRef<Expr *> Exprs, SourceLocation Loc)
+    ArrayRef<Expr *> Exprs, SourceRange Range)
     : Expr(TemplateStringLiteralExprClass, T, VK_PRValue, OK_Ordinary),
-      StringStruct(StringStruct), Data(Data), NumExprs(Exprs.size()), Loc(Loc) {
-  Expr **Stored = getTrailingObjects();
-  for (unsigned I = 0, N = Exprs.size(); I != N; ++I)
-    Stored[I] = Exprs[I];
+      StringStruct(StringStruct), Data(Data), NumExprs(Exprs.size()),
+      Range(Range) {
+  llvm::copy(Exprs, getTrailingObjects());
 
   setDependence(computeDependence(this));
 }
@@ -1467,12 +1466,12 @@ TemplateStringLiteralExpr::TemplateStringLiteralExpr(EmptyShell Empty,
 TemplateStringLiteralExpr *TemplateStringLiteralExpr::Create(
     const ASTContext &C, CXXRecordDecl *StringStruct,
     TemplateStringLiteralData *Data, ArrayRef<Expr *> Exprs,
-    SourceLocation Loc) {
+    SourceRange Range) {
   QualType T = C.getCanonicalTagType(StringStruct);
   unsigned Size = totalSizeToAlloc<Expr *>(Exprs.size());
   void *Mem = C.Allocate(Size);
   return new (Mem)
-      TemplateStringLiteralExpr(T, StringStruct, Data, Exprs, Loc);
+      TemplateStringLiteralExpr(T, StringStruct, Data, Exprs, Range);
 }
 
 TemplateStringLiteralExpr *

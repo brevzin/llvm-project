@@ -2968,7 +2968,12 @@ DEF_TRAVERSE_STMT(LambdaExpr, {
   ShouldVisitChildren = false;
 })
 
-DEF_TRAVERSE_STMT(TemplateStringLiteralExpr, {})
+DEF_TRAVERSE_STMT(TemplateStringLiteralExpr, {
+  // The interpolated expressions are the children; everything else (the
+  // generated struct and its consteval members) is implicit code.
+  if (getDerived().shouldVisitImplicitCode())
+    TRY_TO(TraverseDecl(S->getStringStruct()));
+})
 
 DEF_TRAVERSE_STMT(CXXUnresolvedConstructExpr, {
   // This is called for code like 'T()', where T is a template argument.

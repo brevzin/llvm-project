@@ -5420,9 +5420,22 @@ void ASTWriter::AddToken(const Token &Tok, RecordDataImpl &Record) {
     }
   } else {
     Record.push_back(Tok.getLength());
-    // FIXME: When reading literal tokens, reconstruct the literal pointer if it
-    // is needed.
     AddIdentifierRef(Tok.getIdentifierInfo(), Record);
+    // A literal token's spelling is normally recovered from the source at
+    // its location. Store it explicitly when it lives elsewhere (e.g. the
+    // scratch-space name clause a template string in a macro body carries).
+    StringRef OutOfLineSpelling;
+    if (Tok.isLiteral() && Tok.getLiteralData() && PP) {
+      bool Invalid = false;
+      SourceManager &SM = PP->getSourceManager();
+      const char *AtLoc = SM.getCharacterData(
+          SM.getSpellingLoc(Tok.getLocation()), &Invalid);
+      if (Invalid || AtLoc != Tok.getLiteralData())
+        OutOfLineSpelling = StringRef(Tok.getLiteralData(), Tok.getLength());
+    }
+    Record.push_back(!OutOfLineSpelling.empty());
+    if (!OutOfLineSpelling.empty())
+      AddString(OutOfLineSpelling, Record);
   }
 }
 
@@ -5762,6 +5775,8 @@ void ASTWriter::PrepareWritingSpecialDecls(Sema &SemaRef) {
                      PREDEF_DECL_BUILTIN_MS_GUID_ID);
   RegisterPredefDecl(Context.MSTypeInfoTagDecl,
                      PREDEF_DECL_BUILTIN_MS_TYPE_INFO_TAG_ID);
+  RegisterPredefDecl(Context.TemplateStringInterpolationDecl,
+                     PREDEF_DECL_TEMPLATE_STRING_INTERPOLATION_ID);
   RegisterPredefDecl(Context.ExternCContext, PREDEF_DECL_EXTERN_C_CONTEXT_ID);
   RegisterPredefDecl(Context.CFConstantStringTypeDecl,
                      PREDEF_DECL_CF_CONSTANT_STRING_ID);

@@ -316,6 +316,40 @@ public:
   /// Set the lexer's buffer pointer to \p Offset.
   void seek(unsigned Offset, bool IsAtStartOfLine);
 
+  /// Lexing state for a template string literal with replacement fields
+  /// (P3951). One entry per literal; entries nest when a template string
+  /// appears inside another's interpolated expression.
+  struct TemplateStringState {
+    enum PhaseKind : uint8_t {
+      /// Emitting ordinary tokens of an interpolated expression.
+      Expr,
+      /// The synthesized name-clause string token is pending.
+      PendingClauseString,
+      /// The clause was emitted; the middle/end part is scanned next.
+      PendingTrail,
+    };
+    PhaseKind Phase = Expr;
+    /// Number of unclosed replacement-field '{'s (1 while lexing the main
+    /// expression of a field; >1 within a nested field of a format spec).
+    unsigned FieldDepth = 1;
+    /// () [] {} nesting within the current expression.
+    unsigned BracketDepth = 0;
+    /// A ';' was seen at bracket depth 0: the user wrote a name clause.
+    bool SawSemi = false;
+    /// Number of tokens lexed for the current expression.
+    unsigned NumToks = 0;
+    /// Whether the expression so far is a single clean token that exactly
+    /// spans the expression text and cannot be a macro invocation.
+    bool SimpleToken = false;
+    tok::TokenKind LastTokKind = tok::unknown;
+    /// Start of the current expression's text (just past its '{').
+    const char *ExprStart = nullptr;
+    /// The synthesized name-clause string token, when Phase is
+    /// PendingClauseString.
+    Token PendingString;
+  };
+  SmallVector<TemplateStringState, 2> TemplateStringStack;
+
   /// Stringify - Convert the specified string into a C string by i) escaping
   /// '\\' and " characters and ii) replacing newline character(s) with "\\n".
   /// If Charify is true, this escapes the ' character instead of ".
@@ -767,6 +801,9 @@ private:
   bool LexStringLiteral      (Token &Result, const char *CurPtr,
                               tok::TokenKind Kind);
   bool LexTemplateStringLiteral(Token &Result, const char *CurPtr);
+  bool LexTemplateStringPart(Token &Result, const char *PartStart);
+  bool LexTemplateStringTerminator(Token &Result, const char *TermPtr);
+  void DiagnoseUnterminatedTemplateString(const char *Loc);
   bool LexRawStringLiteral   (Token &Result, const char *CurPtr,
                               tok::TokenKind Kind);
   bool LexAngledStringLiteral(Token &Result, const char *CurPtr);

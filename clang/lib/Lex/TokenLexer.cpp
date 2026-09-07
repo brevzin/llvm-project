@@ -1011,8 +1011,9 @@ void TokenLexer::HandleMicrosoftCommentPaste(Token &Tok, SourceLocation OpLoc) {
 
 /// If \arg loc is a file ID and points inside the current macro
 /// definition, returns the appropriate source location pointing at the
-/// macro expansion source location entry, otherwise it returns an invalid
-/// SourceLocation.
+/// macro expansion source location entry; otherwise the location is
+/// returned unchanged (e.g. the scratch-space tokens a template string in a
+/// macro body carries for its synthesized name clause).
 SourceLocation
 TokenLexer::getExpansionLocForMacroDefLoc(SourceLocation loc) const {
   assert(ExpandLocStart.isValid() && MacroExpansionStart.isValid() &&
@@ -1020,11 +1021,10 @@ TokenLexer::getExpansionLocForMacroDefLoc(SourceLocation loc) const {
   assert(loc.isValid() && loc.isFileID());
 
   SourceManager &SM = PP.getSourceManager();
-  assert(SM.isInSLocAddrSpace(loc, MacroDefStart, MacroDefLength) &&
-         "Expected loc to come from the macro definition");
-
   SourceLocation::UIntTy relativeOffset = 0;
-  SM.isInSLocAddrSpace(loc, MacroDefStart, MacroDefLength, &relativeOffset);
+  if (!SM.isInSLocAddrSpace(loc, MacroDefStart, MacroDefLength,
+                            &relativeOffset))
+    return loc;
   return MacroExpansionStart.getLocWithOffset(relativeOffset);
 }
 

@@ -93,21 +93,24 @@ inline bool isAnyIdentifier(TokenKind K) {
 inline bool isStringLiteral(TokenKind K) {
   return K == tok::string_literal || K == tok::wide_string_literal ||
          K == tok::utf8_string_literal || K == tok::utf16_string_literal ||
-         K == tok::utf32_string_literal || K == tok::template_string_literal;
+         K == tok::utf32_string_literal;
 }
 
 /// Return true if this is a "literal" kind, like a numeric
 /// constant, string, etc.
 inline bool isLiteral(TokenKind K) {
   const bool isInLiteralRange =
-      K >= tok::numeric_constant && K <= tok::template_string_literal;
+      K >= tok::numeric_constant && K <= tok::template_string_end;
 
 #ifndef NDEBUG
   const bool isLiteralExplicit =
       K == tok::numeric_constant || K == tok::char_constant ||
       K == tok::wide_char_constant || K == tok::utf8_char_constant ||
       K == tok::utf16_char_constant || K == tok::utf32_char_constant ||
-      isStringLiteral(K) || K == tok::header_name || K == tok::binary_data;
+      isStringLiteral(K) || K == tok::template_string_literal ||
+      K == tok::template_string_begin || K == tok::template_string_middle ||
+      K == tok::template_string_end || K == tok::header_name ||
+      K == tok::binary_data;
   assert(isInLiteralRange == isLiteralExplicit &&
          "TokenKind literals should be contiguous");
 #endif

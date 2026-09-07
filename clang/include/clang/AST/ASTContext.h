@@ -1417,6 +1417,10 @@ public:
   // Implicitly-declared type 'struct _GUID'.
   mutable TagDecl *MSGuidTagDecl = nullptr;
 
+  // Implicitly-declared struct describing one template string interpolation;
+  // built on first use by getTemplateStringInterpolationDecl().
+  mutable CXXRecordDecl *TemplateStringInterpolationDecl = nullptr;
+
   // Implicitly-declared type 'struct type_info'.
   mutable TagDecl *MSTypeInfoTagDecl = nullptr;
 
@@ -2550,6 +2554,15 @@ public:
     assert(MSGuidTagDecl && "asked for GUID type but MS extensions disabled");
     return getCanonicalTagType(MSGuidTagDecl);
   }
+
+  /// Retrieve (building it on first use) the implicit struct that describes
+  /// one interpolation of a template string literal:
+  /// \code
+  ///   struct _Interpolation {
+  ///     const char *expression; const char *fmt; size_t index; size_t count;
+  ///   };
+  /// \endcode
+  CXXRecordDecl *getTemplateStringInterpolationDecl() const;
 
   /// Retrieve the implicitly-predeclared 'struct type_info' declaration.
   TagDecl *getMSTypeInfoTagDecl() const {

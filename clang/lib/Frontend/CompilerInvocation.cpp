@@ -612,11 +612,12 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
   }
 
   // -freflection implies parameter reflection (P3096), expansion statements
-  // (P1306), and annotation attributes (P3394).
+  // (P1306), annotation attributes (P3394), and template strings (P3951).
   if (LangOpts.Reflection) {
     LangOpts.ParameterReflection = true;
     LangOpts.ExpansionStatements = true;
     LangOpts.AnnotationAttributes = true;
+    LangOpts.TemplateStrings = LangOpts.CPlusPlus;
   } else if (LangOpts.EntityProxyReflection) {
     Diags.Report(diag::err_fe_entity_proxy_reflection_without_reflection);
   }

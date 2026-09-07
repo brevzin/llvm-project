@@ -1192,6 +1192,11 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
     return CT;
   }
 
+  case Expr::TemplateStringLiteralExprClass:
+    // The struct is aggregate-initialized directly from the interpolated
+    // expressions, so only those can throw.
+    return canSubStmtsThrow(*this, S);
+
   case Expr::CXXNewExprClass: {
     auto *NE = cast<CXXNewExpr>(S);
     CanThrowResult CT;

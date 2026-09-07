@@ -2116,9 +2116,10 @@ void ASTStmtReader::VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E)
   (void)NumExprs;
   assert(NumExprs == E->NumExprs);
   E->StringStruct = readDeclAs<CXXRecordDecl>();
-  E->Loc = readSourceLocation();
+  E->Range = readSourceRange();
 
   E->Data = new (Record.getContext()) TemplateStringLiteralData();
+  Record.getContext().addDestruction(E->Data);
   unsigned NumPieces = Record.readInt();
   E->Data->StringPieces.reserve(NumPieces);
   for (unsigned I = 0; I < NumPieces; ++I)

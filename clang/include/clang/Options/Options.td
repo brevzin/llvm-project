@@ -3960,7 +3960,7 @@ defm reflection : BoolFOption<"reflection",
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
           "Enable proposed C++26 reflection as described by P2996. This also "
           "enables parameter reflection (P3096), expansion statements (P1306), "
-          "and annotation attributes (P3394)">,
+          "annotation attributes (P3394), and template strings (P3951)">,
   NegFlag<SetFalse>>;
 defm entity_proxy_reflection : BoolFOption<"entity-proxy-reflection",
   LangOpts<"EntityProxyReflection">, DefaultFalse,

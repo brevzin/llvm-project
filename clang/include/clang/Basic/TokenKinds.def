@@ -205,8 +205,17 @@ TOK(utf8_string_literal) // u8"foo"
 TOK(utf16_string_literal)// u"foo"
 TOK(utf32_string_literal)// U"foo"
 
-// Template String Literals.
-TOK(template_string_literal)// t"foo"
+// Template String Literals (P3951). A literal without replacement fields is
+// a single template_string_literal token. One with fields is lexed as
+// template_string_begin (t"...{), ordinary tokens for each interpolated
+// expression, template_string_middle (}...{ or :...{) between expressions,
+// and template_string_end (}..." or :...", plus any ud-suffix). The
+// interpolated expressions are therefore macro-expanded in phase 4 like any
+// other tokens.
+TOK(template_string_literal) // t"foo"
+TOK(template_string_begin)   // t"foo{
+TOK(template_string_middle)  // }foo{ or :spec{
+TOK(template_string_end)     // }foo" or :spec"
 
 // C99 6.4.6: Punctuators.
 PUNCTUATOR(l_square,            "[")

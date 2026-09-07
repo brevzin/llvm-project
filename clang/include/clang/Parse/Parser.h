@@ -55,7 +55,7 @@ struct OMPTraitProperty;
 struct OMPTraitSelector;
 struct OMPTraitSet;
 class OMPTraitInfo;
-class TemplateStringAnnotation;
+struct TemplateStringParts;
 
 enum class AnnotatedNameKind {
   /// Annotation has failed and emitted an error.
@@ -3886,9 +3886,6 @@ public:
   ExprResult ParseStringLiteralExpression(bool AllowUserDefinedLiteral = false);
   ExprResult ParseUnevaluatedStringLiteralExpression();
 
-  /// ParseTemplateStringLiteral - Parse a template string literal like t"x={expr}"
-  ExprResult ParseTemplateStringLiteral();
-
 private:
   /// Whether the '>' token acts as an operator or not. This will be
   /// true except when we are parsing an expression within a C++
@@ -3934,7 +3931,58 @@ private:
   ExprResult ParseStringLiteralExpression(bool AllowUserDefinedLiteral,
                                           bool Unevaluated);
 
-  ExprResult ParseTemplateStringLiteralExpression(TemplateStringAnnotation const& Annot);
+  /// Parse a template string literal (t"..."), together with any ordinary
+  /// string literals and further template string literals concatenated with
+  /// it. \p PrecedingStrings are the already-consumed ordinary string-literal
+  /// tokens of the sequence, if any. The current token is the first template
+  /// string literal.
+  ExprResult
+  ParseTemplateStringLiteralExpression(ArrayRef<Token> PrecedingStrings,
+                                       bool AllowUserDefinedLiteral,
+                                       bool Unevaluated);
+
+  /// What follows a processed template string fragment.
+  enum class TemplateStringFragment {
+    /// An error was diagnosed.
+    Error,
+    /// The fragment ended by opening a replacement field: expression tokens
+    /// follow.
+    Expression,
+    /// The fragment closed the literal.
+    Done,
+  };
+
+  /// Process the literal text of one template_string_begin/middle/end (or
+  /// field-less template_string_literal) token: appends piece text and format
+  /// specifier text to \p Parts and reports what follows.
+  TemplateStringFragment
+  ProcessTemplateStringFragment(const Token &FragTok,
+                                TemplateStringParts &Parts);
+
+  /// Consume the remainder of the current template string sequence during
+  /// error recovery and return ExprError().
+  ExprResult SkipRestOfTemplateString();
+
+  /// Append an ordinary string literal concatenated with a template string
+  /// literal to the current piece of \p Parts.
+  bool AppendTemplateStringPlainPiece(const Token &StrTok,
+                                      TemplateStringParts &Parts);
+
+  /// Process the escape sequences of \p Text, the raw contents of part of a
+  /// template string literal beginning at \p Loc, appending the result to
+  /// \p Out.
+  bool ProcessTemplateStringText(StringRef Text, SourceLocation Loc,
+                                 std::string &Out);
+
+  /// Record the ud-suffix of one literal in a concatenated sequence,
+  /// diagnosing a mismatch with an earlier one.
+  bool NoteTemplateStringUDSuffix(TemplateStringParts &Parts, StringRef Suffix,
+                                  SourceLocation Loc);
+
+  /// Parse one interpolated expression from its raw tokens. \p ColonLoc is
+  /// the location of the ':' that ended the expression, if any.
+  ExprResult ParseTemplateStringExpression(SmallVectorImpl<Token> &Toks,
+                                           SourceLocation ColonLoc);
 
   /// This routine is called when the '@' is seen and consumed.
   /// Current token is an Identifier and is not a 'try'. This

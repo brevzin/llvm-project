@@ -1246,6 +1246,34 @@ RecordDecl *ASTContext::buildImplicitRecord(StringRef Name,
   return NewDecl;
 }
 
+CXXRecordDecl *ASTContext::getTemplateStringInterpolationDecl() const {
+  if (TemplateStringInterpolationDecl)
+    return TemplateStringInterpolationDecl;
+
+  auto *RD = cast<CXXRecordDecl>(buildImplicitRecord("_Interpolation"));
+  RD->startDefinition();
+
+  QualType CharConstPtrTy = getPointerType(CharTy.withConst());
+  const std::pair<QualType, const char *> Fields[] = {
+      {CharConstPtrTy, "expression"},
+      {CharConstPtrTy, "fmt"},
+      {getSizeType(), "index"},
+      {getSizeType(), "count"},
+  };
+  for (const auto &[Type, Name] : Fields) {
+    FieldDecl *Field = FieldDecl::Create(
+        *this, RD, SourceLocation(), SourceLocation(), &Idents.get(Name), Type,
+        getTrivialTypeSourceInfo(Type), /*BitWidth=*/nullptr,
+        /*Mutable=*/false, ICIS_NoInit);
+    Field->setAccess(AS_public);
+    RD->addDecl(Field);
+  }
+  RD->completeDefinition();
+
+  TemplateStringInterpolationDecl = RD;
+  return RD;
+}
+
 TypedefDecl *ASTContext::buildImplicitTypedef(QualType T,
                                               StringRef Name) const {
   TypeSourceInfo *TInfo = getTrivialTypeSourceInfo(T);

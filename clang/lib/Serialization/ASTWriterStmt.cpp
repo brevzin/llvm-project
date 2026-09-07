@@ -2150,7 +2150,7 @@ void ASTStmtWriter::VisitTemplateStringLiteralExpr(TemplateStringLiteralExpr *E)
   VisitExpr(E);
   Record.push_back(E->getNumExprs());
   Record.AddDeclRef(E->getStringStruct());
-  Record.AddSourceLocation(E->getBeginLoc());
+  Record.AddSourceRange(E->getSourceRange());
 
   TemplateStringLiteralData *Data = E->getData();
   Record.push_back(Data->StringPieces.size());

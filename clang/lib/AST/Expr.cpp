@@ -3997,6 +3997,10 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     return false;
   }
 
+  case TemplateStringLiteralExprClass:
+    // Only the interpolated expressions (the children) can have effects.
+    break;
+
   case PseudoObjectExprClass: {
     // Only look for side-effects in the semantic form, and look past
     // OpaqueValueExpr bindings in that form.

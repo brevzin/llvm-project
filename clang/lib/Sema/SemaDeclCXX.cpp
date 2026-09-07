@@ -17458,12 +17458,15 @@ bool Sema::CheckLiteralOperatorDeclaration(FunctionDecl *FnDecl) {
       // template <SomeClass T> operator""_x() etc.
       if (checkLiteralOperatorTemplateParameterList(*this, TpDecl))
         return true;
-    } else if (FnDecl->param_size() == 1 &&
+    } else if (getLangOpts().TemplateStrings && FnDecl->param_size() == 1 &&
                !FnDecl->getParamDecl(0)->isParameterPack()) {
-      // template<class S> operator""_x(S&&) or operator""_x(auto&&)
-      // — allowed for template string UDLs.
+      // template<class S> operator""_x(S&&) or operator""_x(auto&&), for
+      // template string literals.
     } else {
-      Diag(FnDecl->getLocation(), diag::err_literal_operator_bad_param_count);
+      Diag(FnDecl->getLocation(),
+           getLangOpts().TemplateStrings
+               ? diag::err_literal_operator_template_bad_params
+               : diag::err_literal_operator_template_with_params);
       return true;
     }
 

@@ -2180,6 +2180,13 @@ Token ASTReader::ReadToken(ModuleFile &M, const RecordDataImpl &Record,
     Tok.setLength(Record[Idx++]);
     if (IdentifierInfo *II = getLocalIdentifier(M, Record[Idx++]))
       Tok.setIdentifierInfo(II);
+    if (Record[Idx++]) {
+      // The spelling was stored out-of-line; park it in the preprocessor's
+      // allocator and point the literal data at it.
+      std::string Spelling = ReadString(Record, Idx);
+      Tok.setLiteralData(
+          StringRef(Spelling).copy(PP.getPreprocessorAllocator()).data());
+    }
   }
   return Tok;
 }
@@ -8551,6 +8558,10 @@ Decl *ASTReader::getPredefinedDecl(PredefinedDeclIDs ID) {
   case PREDEF_DECL_BUILTIN_MS_GUID_ID:
     // ASTContext::getMSGuidTagDecl won't create MSGuidTagDecl conditionally.
     return Context.getMSGuidTagDecl();
+
+  case PREDEF_DECL_TEMPLATE_STRING_INTERPOLATION_ID:
+    NewLoaded = Context.getTemplateStringInterpolationDecl();
+    break;
 
   case PREDEF_DECL_EXTERN_C_CONTEXT_ID:
     if (Context.ExternCContext)

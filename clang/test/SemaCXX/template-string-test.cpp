@@ -336,10 +336,9 @@ constexpr auto operator""_first(S&& s) -> int {
   return a;
 }
 
-// this is a bad diagnostic, but I don't want to add a new one
-auto operator""_wrong1(auto, auto) -> int; // expected-error {{non-template literal operator must have one or two parameters}}
-auto operator""_wrong2(auto...) -> int; // expected-error {{non-template literal operator must have one or two parameters}}
-auto operator""_wrong3(auto, auto...) -> int; // expected-error {{non-template literal operator must have one or two parameters}}
+auto operator""_wrong1(auto, auto) -> int; // expected-error {{literal operator template must have either no parameters or a single non-pack parameter}}
+auto operator""_wrong2(auto...) -> int; // expected-error {{literal operator template must have either no parameters or a single non-pack parameter}}
+auto operator""_wrong3(auto, auto...) -> int; // expected-error {{literal operator template must have either no parameters or a single non-pack parameter}}
 
 void test_udl() {
   static_assert(t"one"_one == 1);
@@ -356,4 +355,85 @@ void test_comma() {
   int y = 2;
   t"{x,y}";  // expected-error {{expected '}'}}
   t"{(x,y)}"; // expected-warning {{left operand}} // expected-warning {{unused}}
+}
+
+// A macro body containing a template string is expanded more than once.
+#define TWICE t"{x}"
+void test_macro_twice() {
+  int x = 1;
+  auto a = TWICE;
+  auto b = TWICE;
+  static_assert(__builtin_strcmp(decltype(a)::fmt(), "{}") == 0);
+  static_assert(__builtin_strcmp(decltype(b)::fmt(), "{}") == 0);
+  static_assert((^^decltype(b._0)) == (^^int&));
+}
+
+// Contexts that want a plain string literal do not accept a template string.
+static_assert(true, t"oops"); // expected-error {{the message object in this static assertion is missing 'data()' and 'size()' member functions}}
+extern t"C" void linkage(); // expected-error {{expected unqualified-id}}
+
+void test_bad_expressions() {
+  int a = 1, b = 2, c = 3;
+  auto s1 = t"{a ? b : c}"; // expected-error {{expected ':'}} expected-note {{to match this '?'}} expected-error {{expected expression}} expected-note {{':' ends the interpolated expression and begins the format specifier}}
+
+  auto s2 = t"{}";        // expected-error {{expected expression in template string replacement field}}
+  auto s3 = t"{ }";       // expected-error {{expected expression in template string replacement field}}
+  auto s4 = t"{a:{ }}";   // expected-error {{expected expression in template string replacement field}}
+  auto s5 = t"a}b{a}";    // expected-error {{'}' in a template string literal must be escaped as '}}'}}
+}
+
+void void_fn();
+void overloaded(int);    // expected-note {{possible target for call}}
+void overloaded(double); // expected-note {{possible target for call}}
+void test_bad_types() {
+  auto s1 = t"{void_fn()}"; // expected-error {{cannot interpolate an expression of type 'void'}}
+  auto s2 = t"{overloaded}"; // expected-error {{reference to overloaded function could not be resolved; did you mean to call it?}}
+}
+
+// A bit-field cannot be bound to a reference, so it is captured by value.
+void test_bitfield() {
+  struct B { int bf : 3; } b{};
+  auto s = t"{b.bf}";
+  static_assert((^^decltype(s._0)) == (^^int));
+}
+
+void test_bad_concat() {
+  int x = 1;
+  auto s1 = L"a" t"{x}";   // expected-error {{only ordinary string literals can be concatenated with a template string literal}}
+  auto s2 = u8"a" t"{x}";  // expected-error {{only ordinary string literals can be concatenated with a template string literal}}
+  auto s3 = "a"_one t"{x}"_first; // expected-error {{differing user-defined suffixes ('_one' and '_first') in string literal concatenation}}
+  static constexpr int two = 2;
+  static_assert("v=" t"{two}"_first == 2);
+}
+
+// A ud-suffix is part of the token; separated by whitespace it is just an identifier.
+void test_udl_whitespace() {
+  int x = 1;
+  (void)t"{x}" _one; // expected-error {{expected ';' after expression}} expected-error {{use of undeclared identifier '_one'}}
+}
+
+// The text printed for "{expr=}" is the source text, verbatim.
+void test_trailing_eq_text() {
+  struct P { int x, y; };
+  char c = 'a';
+  static_assert(__builtin_strcmp(decltype(t"{P{1,2}.x=}")::fmt(), "P{{1,2}}.x={}") == 0);
+  static_assert(__builtin_strcmp(decltype(t"{c == '\n' = }")::fmt(), "c == '\\n' = {}") == 0);
+  static_assert(__builtin_strcmp(decltype(t"{c == '\n' = }")::interpolation(0).expression, "c == '\\n'") == 0);
+}
+
+// A template string inside an interpolation.
+void test_nested_template_string() {
+  int x = 1;
+  auto s = t"outer {t"inner {x}"._0} {x}";
+  static_assert(__builtin_strcmp(decltype(s)::fmt(), "outer {} {}") == 0);
+  static_assert(__builtin_strcmp(decltype(s)::interpolation(0).expression, "t\"inner {x}\"._0") == 0);
+  static_assert((^^decltype(s._0)) == (^^int&));
+}
+
+// Indexing out of range is a constant evaluation failure, not garbage.
+void test_out_of_range() {
+  int x = 1;
+  using S = decltype(t"{x}"); // expected-note {{control reached end of constexpr function}}
+  static_assert(S::string(1) != nullptr);
+  constexpr auto bad = S::string(2); // expected-error {{constexpr variable 'bad' must be initialized by a constant expression}} expected-note {{in call to 'string(2)'}}
 }
