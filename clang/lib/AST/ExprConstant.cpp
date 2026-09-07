@@ -48,6 +48,7 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/InferAlloc.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/OSLog.h"
 #include "clang/AST/OptionalDiagnostic.h"
 #include "clang/AST/RecordLayout.h"
@@ -11974,6 +11975,7 @@ namespace {
       return VisitCXXConstructExpr(E, E->getType());
     }
     bool VisitLambdaExpr(const LambdaExpr *E);
+    bool VisitTemplateStringLiteralExpr(const TemplateStringLiteralExpr *E);
     bool VisitCXXInheritedCtorInitExpr(const CXXInheritedCtorInitExpr *E);
     bool VisitCXXConstructExpr(const CXXConstructExpr *E, QualType T);
     bool VisitCXXStdInitializerListExpr(const CXXStdInitializerListExpr *E);
@@ -12467,6 +12469,47 @@ bool RecordExprEvaluator::VisitDesignatedInitUpdateExpr(
   return Visit(E->getUpdater());
 }
 
+bool RecordExprEvaluator::VisitTemplateStringLiteralExpr(
+    const TemplateStringLiteralExpr *E) {
+  const CXXRecordDecl *StringStruct = E->getStringStruct();
+  if (StringStruct->isInvalidDecl())
+    return false;
+
+  const size_t NumFields =
+      std::distance(StringStruct->field_begin(), StringStruct->field_end());
+
+  assert(NumFields == E->getNumExprs() &&
+         "The number of template string initializers should equal the number "
+         "of fields within the struct type");
+
+  Result = APValue(APValue::UninitStruct(), /*NumBases*/ 0, NumFields);
+
+  ArrayRef<Expr *> Exprs = E->getExprs();
+  bool Success = true;
+  const ASTRecordLayout &Layout = Info.Ctx.getASTRecordLayout(StringStruct);
+  unsigned ExprIdx = 0;
+  for (const auto *Field : StringStruct->fields()) {
+    if (ExprIdx >= Exprs.size())
+      break;
+
+    Expr *const CurFieldInit = Exprs[ExprIdx++];
+    if (!CurFieldInit || CurFieldInit->containsErrors())
+      return Error(E);
+
+    LValue Subobject = This;
+    if (!HandleLValueMember(Info, E, Subobject, Field, &Layout))
+      return false;
+
+    APValue &FieldVal = Result.getStructField(Field->getFieldIndex());
+    if (!EvaluateInPlace(FieldVal, Info, Subobject, CurFieldInit)) {
+      if (!Info.keepEvaluatingAfterFailure())
+        return false;
+      Success = false;
+    }
+  }
+  return Success;
+}
+
 static bool EvaluateRecord(const Expr *E, const LValue &This,
                            APValue &Result, EvalInfo &Info) {
   assert(!E->isValueDependent());
@@ -12518,6 +12561,9 @@ public:
     return VisitConstructExpr(E);
   }
   bool VisitLambdaExpr(const LambdaExpr *E) {
+    return VisitConstructExpr(E);
+  }
+  bool VisitTemplateStringLiteralExpr(const TemplateStringLiteralExpr *E) {
     return VisitConstructExpr(E);
   }
 };

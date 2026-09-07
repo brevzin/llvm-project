@@ -27,6 +27,7 @@
 #include "clang/Lex/MultipleIncludeOpt.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/PreprocessorOptions.h"
+#include "clang/Lex/TemplateStringAnnotation.h"
 #include "clang/Lex/Token.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
@@ -2323,6 +2324,218 @@ bool Lexer::LexStringLiteral(Token &Result, const char *CurPtr,
   return true;
 }
 
+/// LexTemplateStringLiteral - Lex the remainder of a template string literal,
+/// after having lexed t". This extracts expressions from {expr} fields and
+/// tokenizes them for later parsing.
+bool Lexer::LexTemplateStringLiteral(Token &Result, const char *CurPtr) {
+  // Create the annotation that will hold our data
+  std::unique_ptr<TemplateStringAnnotation> Annotation(new TemplateStringAnnotation);
+  Annotation->Loc = getSourceLocation(BufferPtr);
+
+  while (true) {
+    // 1. String Literal part: we parse the literal piece up until the next {
+    // which starts a new replacement-field or the close quote which ends the
+    // whole thing
+    const char *Start = CurPtr;
+    const char *NulCharacter = nullptr;
+
+    char C;
+    while (true) {
+      C = getAndAdvanceChar(CurPtr, Result);
+      char Escaped = C;
+      if (C == '\\')
+        Escaped = getAndAdvanceChar(CurPtr, Result);
+
+      // Same failure cases as LexStringLiteral()
+      if (Escaped == '\n' || Escaped == '\r' ||       // Newline.
+          (Escaped == 0 && CurPtr-1 == BufferEnd)) {  // End of file.
+        if (!isLexingRawMode() && !LangOpts.AsmPreprocessor)
+          Diag(BufferPtr, diag::ext_unterminated_char_or_string) << 1;
+        FormTokenWithChars(Result, CurPtr-1, tok::unknown);
+        return true;
+      }
+      else if (Escaped == 0) {
+        NulCharacter = CurPtr - 1;
+      }
+      else if (C == '"') {
+        // end of the template string
+        break;
+      }
+      else if (C == '{' or C == '}') {
+        unsigned int SizeTmp;
+        char NextC = getCharAndSize(CurPtr, SizeTmp);
+        if (NextC == C) {
+          // escaped brace
+          CurPtr += SizeTmp;
+          continue;
+        } else if (C == '{') {
+          // beginning of expression
+          break;
+        } else {
+          // unescaped } is an error, TODO diagnose here
+        }
+      }
+    }
+
+    if (NulCharacter && !isLexingRawMode())
+      Diag(NulCharacter, diag::null_in_char_or_string) << 1;
+
+    std::vector<char>& Piece = Annotation->FormatStringData.emplace_back();
+    Piece.reserve(CurPtr - Start + 1);
+    Piece.push_back('"');
+    Piece.insert(Piece.end(), Start, CurPtr - 1);
+    Piece.push_back('"');
+
+    if (C == '"') {
+      // all done now
+      break;
+    }
+
+    // 2. Expression part: now we're at {, we've started a new expression.
+    // We just keep lexing tokens.
+    // Save the start of the expression text for the trailing-equals
+    // feature (e.g. {x=} produces "x={}" in the format string).
+    const char *ExprStart = CurPtr;
+
+    auto LexExpression = [&]() -> auto& {
+      BufferPtr = CurPtr;
+      llvm::SmallVector<Token, 8>& CurExpr = Annotation->ExpressionTokens.emplace_back();
+      llvm::SmallVector<tok::TokenKind, 4> ExpectedBraces;
+
+      while (true) {
+        Token NextToken;
+        // We need to invoke the Preprocessor here to ensure that macro
+        // expansion works, but we might not have a Preprocessor.
+        if (PP) {
+          PP->Lex(NextToken);
+        } else {
+          Lex(NextToken);
+        }
+        tok::TokenKind Kind = NextToken.getKind();
+
+        // check to see if we've reached the end of our expression — looking
+        // for either a : or a }, noting that multiple tokens start with :
+        bool AtEnd = [&]{
+          if (!ExpectedBraces.empty()) {
+            return false;
+          }
+
+          if (NextToken.getLocation().isMacroID()) {
+            // can never end within a macro expansion
+            return false;
+          }
+
+          switch (Kind) {
+          case tok::r_brace:
+          case tok::colon:
+            // single-character token, stop here
+            CurPtr = BufferPtr - 1;
+            return true;
+          case tok::coloncolon:
+          case tok::r_splice:
+            // double-character token, first of which is a :
+            CurPtr = BufferPtr - 2;
+            return true;
+          case tok::r_square:
+            // if digraphs are supported, :> is a ]
+            if (LangOpts.Digraphs && BufferPtr[-2] == ':') {
+              CurPtr = BufferPtr - 2;
+              return true;
+            } else {
+              return false;
+            }
+          default:
+            return false;
+          }
+        }();
+
+        if (AtEnd) {
+          return CurExpr;
+        }
+
+        CurExpr.push_back(NextToken);
+
+        // Keep track of all the braces
+        if (Kind == tok::l_paren) {
+          ExpectedBraces.push_back(tok::r_paren);
+        } else if (Kind == tok::l_brace) {
+          ExpectedBraces.push_back(tok::r_brace);
+        } else if (Kind == tok::l_square) {
+          ExpectedBraces.push_back(tok::r_square);
+        } else if (!ExpectedBraces.empty() && Kind == ExpectedBraces.back()) {
+          ExpectedBraces.pop_back();
+        }
+      }
+    };
+
+    Annotation->Interpolations.push_back(Annotation->ExpressionTokens.size());
+    auto& CurExpr = LexExpression();
+
+    if (!CurExpr.empty() && CurExpr.back().getKind() == tok::equal) {
+      // if the expression ends with a trailing equals, e.g. {x=}, add the
+      // full expression to the format string. We know the last piece right
+      // now ends with ", so can stick this in front of the ".
+      CurExpr.pop_back();
+      auto& LastLit = Annotation->FormatStringData.back();
+      LastLit.insert(LastLit.end() - 1, ExprStart, CurPtr);
+    }
+
+    // Done with the expression. Skip the format-specifiers (if any)
+    // Start a new string literal, including the colon or close brace
+    std::vector<char>& InterpFmt = Annotation->FormatStringData.emplace_back();
+    InterpFmt.push_back('"');
+    InterpFmt.push_back('{');
+
+    // CurPtr is now either : or }. If :, there are format specifiers,
+    // skip ahead to the closing }.
+    if (*CurPtr == ':') {
+      ++CurPtr;
+      InterpFmt.push_back(':');
+      int BraceDepth = 1;
+      while (BraceDepth > 0) {
+        char C = getAndAdvanceChar(CurPtr, Result);
+
+        if (C == '\n' || C == '\r' ||
+            (C == 0 && CurPtr - 1 == BufferEnd)) {
+          if (!isLexingRawMode() && !LangOpts.AsmPreprocessor)
+            Diag(BufferPtr, diag::ext_unterminated_char_or_string) << 1;
+          FormTokenWithChars(Result, CurPtr - 1, tok::unknown);
+          return true;
+        }
+
+        InterpFmt.push_back(C);
+        if (C == '{') {
+          BraceDepth++;
+
+          unsigned SizeTmp;
+          char NextC = getCharAndSize(CurPtr, SizeTmp);
+          if (NextC != '}' && NextC != ':') {
+            // We have a nested expression here that we need to lex.
+            LexExpression();
+          }
+
+        } else if (C == '}') {
+          BraceDepth--;
+        }
+      }
+    } else {
+      ++CurPtr;
+      InterpFmt.push_back('}');
+    }
+
+    InterpFmt.push_back('"');
+  }
+
+  // Create the token
+  FormTokenWithChars(Result, CurPtr, tok::template_string_literal);
+
+  // Store the annotation pointer as literal data
+  // We're abusing setLiteralData to store our annotation pointer
+  Result.setLiteralData(reinterpret_cast<const char*>(Annotation.release()));
+
+  return true;
+}
+
 /// LexRawStringLiteral - Lex the remainder of a raw string literal, after
 /// having lexed R", LR", u8R", uR", or UR".
 bool Lexer::LexRawStringLiteral(Token &Result, const char *CurPtr,
@@ -4079,12 +4292,25 @@ LexStart:
   case 'V': case 'W': case 'X': case 'Y': case 'Z':
   case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g':
   case 'h': case 'i': case 'j': case 'k': case 'l': case 'm': case 'n':
-  case 'o': case 'p': case 'q': case 'r': case 's': case 't':    /*'u'*/
+  case 'o': case 'p': case 'q': case 'r': case 's':               /*'t' 'u'*/
   case 'v': case 'w': case 'x': case 'y': case 'z':
   case '_':
     // Notify MIOpt that we read a non-whitespace/non-comment token.
     MIOpt.ReadToken();
     return LexIdentifierContinue(Result, CurPtr);
+
+  case 't':   // Identifier or template string literal
+    // Notify MIOpt that we read a non-whitespace/non-comment token.
+    MIOpt.ReadToken();
+
+    // Check for template string literal t"..."
+    Char = getCharAndSize(CurPtr, SizeTmp);
+    if (Char == '"')
+      return LexTemplateStringLiteral(Result, ConsumeChar(CurPtr, SizeTmp, Result));
+
+    // Otherwise, treat t like the start of an identifier.
+    return LexIdentifierContinue(Result, CurPtr);
+
   case '$':   // $ in identifiers.
     if (LangOpts.DollarIdents) {
       if (!isLexingRawMode())

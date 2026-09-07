@@ -81,6 +81,7 @@ class CXXTemporaryObjectExpr;
 class CXXDefaultInitExpr;
 class CXXDefaultArgExpr;
 class LambdaExpr;
+class TemplateStringLiteralExpr;
 class CXXUnresolvedConstructExpr;
 class CXXDependentScopeMemberExpr;
 class MaterializeTemporaryExpr;
@@ -191,6 +192,7 @@ ExprDependence computeDependence(CXXDefaultInitExpr *E);
 ExprDependence computeDependence(CXXDefaultArgExpr *E);
 ExprDependence computeDependence(LambdaExpr *E,
                                  bool ContainsUnexpandedParameterPack);
+ExprDependence computeDependence(TemplateStringLiteralExpr *E);
 ExprDependence computeDependence(CXXUnresolvedConstructExpr *E);
 ExprDependence computeDependence(CXXDependentScopeMemberExpr *E);
 ExprDependence computeDependence(MaterializeTemporaryExpr *E);

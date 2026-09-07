@@ -2217,6 +2217,16 @@ StmtProfiler::VisitLambdaExpr(const LambdaExpr *S) {
 }
 
 
+void StmtProfiler::VisitTemplateStringLiteralExpr(
+    const TemplateStringLiteralExpr *S) {
+  VisitExpr(S);
+  VisitDecl(S->getStringStruct());
+  TemplateStringLiteralData *Data = S->getData();
+  for (const auto &Piece : Data->StringPieces)
+    ID.AddString(Piece);
+  ID.AddString(Data->FormatString);
+}
+
 void
 StmtProfiler::VisitCXXScalarValueInitExpr(const CXXScalarValueInitExpr *S) {
   VisitExpr(S);

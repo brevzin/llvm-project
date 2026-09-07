@@ -192,6 +192,8 @@ class TemplateArgumentLoc;
 class TemplateInstantiationCallback;
 class TemplatePartialOrderingContext;
 class TemplateSpecCandidateSet;
+class TemplateStringAnnotation;
+struct TemplateStringLiteralData;
 class Token;
 struct TokenSequenceData;
 class TypeConstraint;
@@ -7579,6 +7581,24 @@ public:
                                 Scope *UDLScope = nullptr);
 
   ExprResult ActOnUnevaluatedStringLiteral(ArrayRef<Token> StringToks);
+
+  /// ActOnTemplateStringLiteral - Create a template string literal expression
+  ExprResult ActOnTemplateStringLiteral(SourceLocation Loc,
+                                        const TemplateStringAnnotation& Annotation,
+                                        ArrayRef<Expr*> Exprs);
+
+  /// ActOnTemplateStringUDL - Handle a user-defined literal suffix on a
+  /// template string literal, e.g. t"x={x}"_udl.
+  ExprResult ActOnTemplateStringUDL(Expr *TemplateStringExpr,
+                                     IdentifierInfo *UDSuffix,
+                                     SourceLocation UDSuffixLoc,
+                                     Scope *S);
+
+  /// BuildTemplateStringStruct - Build the anonymous struct type for a
+  /// template string literal with the given processed data and expressions.
+  CXXRecordDecl *BuildTemplateStringStruct(SourceLocation Loc,
+                                           TemplateStringLiteralData *Data,
+                                           ArrayRef<Expr *> Exprs);
 
   /// ControllingExprOrType is either an opaque pointer coming out of a
   /// ParsedType or an Expr *. FIXME: it'd be better to split this interface

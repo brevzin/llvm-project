@@ -224,6 +224,7 @@ namespace std {
 #    include <__format/range_default_formatter.h>
 #    include <__format/range_formatter.h>
 #    include <__format/unicode.h>
+#    include <__format/template_string.h>
 #    include <__fwd/format.h>
 #  endif
 

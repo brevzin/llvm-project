@@ -2968,6 +2968,8 @@ DEF_TRAVERSE_STMT(LambdaExpr, {
   ShouldVisitChildren = false;
 })
 
+DEF_TRAVERSE_STMT(TemplateStringLiteralExpr, {})
+
 DEF_TRAVERSE_STMT(CXXUnresolvedConstructExpr, {
   // This is called for code like 'T()', where T is a template argument.
   TRY_TO(TraverseTypeLoc(S->getTypeSourceInfo()->getTypeLoc()));

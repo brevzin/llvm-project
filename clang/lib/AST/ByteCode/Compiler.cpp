@@ -17,6 +17,7 @@
 #include "Program.h"
 #include "clang/AST/Attr.h"
 #include "llvm/Support/SaveAndRestore.h"
+#include "clang/AST/ExprCXX.h"
 
 using namespace clang;
 using namespace clang::interp;
@@ -3476,6 +3477,45 @@ bool Compiler<Emitter>::VisitLambdaExpr(const LambdaExpr *E) {
         return false;
 
       if (!this->visitInitializerPop(Init))
+        return false;
+    }
+  }
+
+  return true;
+}
+
+template <class Emitter>
+bool Compiler<Emitter>::VisitTemplateStringLiteralExpr(
+    const TemplateStringLiteralExpr *E) {
+  if (DiscardResult)
+    return true;
+
+  assert(Initializing);
+  const Record *R = P.getOrCreateRecord(E->getStringStruct());
+  if (!R)
+    return false;
+
+  ArrayRef<Expr *> Exprs = E->getExprs();
+  unsigned ExprIdx = 0;
+  for (const Record::Field &F : R->fields()) {
+    if (ExprIdx >= Exprs.size())
+      break;
+    const Expr *Init = Exprs[ExprIdx++];
+
+    if (OptPrimType T = classify(Init)) {
+      if (!this->visit(Init))
+        return false;
+
+      if (!this->emitInitField(*T, F.Offset, E))
+        return false;
+    } else {
+      if (!this->emitGetPtrField(F.Offset, E))
+        return false;
+
+      if (!this->visitInitializer(Init))
+        return false;
+
+      if (!this->emitPopPtr(E))
         return false;
     }
   }

@@ -180,6 +180,7 @@ def SubstNonTypeTemplateParmPackExpr : StmtNode<Expr>;
 def FunctionParmPackExpr : StmtNode<Expr>;
 def MaterializeTemporaryExpr : StmtNode<Expr>;
 def LambdaExpr : StmtNode<Expr>;
+def TemplateStringLiteralExpr : StmtNode<Expr>;
 def CXXFoldExpr : StmtNode<Expr>;
 def CXXParenListInitExpr: StmtNode<Expr>;
 
