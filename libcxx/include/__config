@@ -250,6 +250,17 @@ typedef __char32_t char32_t;
 #    define _LIBCPP_EXPLICIT_SINCE_CXX23
 #  endif
 
+// P3951: template string literals. Gated on both the language feature
+// (t"...", enabled by -freflection in C++ modes, any standard) and C++26,
+// whose library machinery the facilities rely on (std::dynamic_format,
+// pack structured bindings). Use this for every P3951 library declaration
+// rather than checking either condition alone.
+#  if __has_feature(template_strings) && _LIBCPP_STD_VER >= 26
+#    define _LIBCPP_HAS_TEMPLATE_STRINGS 1
+#  else
+#    define _LIBCPP_HAS_TEMPLATE_STRINGS 0
+#  endif
+
 // P4340 ext (reflect-constant.md): defaulted reflect_constant customization
 // points, allowing library types with private members to be used as constant
 // template parameters. Expands to nothing unless reflection is enabled and

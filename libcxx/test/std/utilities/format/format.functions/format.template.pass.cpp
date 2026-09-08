@@ -70,11 +70,7 @@ int main(int, char**) {
     std::println(sstr, t"Got {x}");
     check_eq(sstr.str(), "Got 42\n");
 
-    // weak template
-    struct W {
-        auto fmt() const { return std::dynamic_format("Got {}"); }
-        auto exprs() const -> W const& { return *this; }
-        int x;
-    };
-    check_eq(std::format(W{.x=42}), "Got 42");
+    // A rebound pattern formats through the same machinery, runtime-checked.
+    check_eq(std::format(std::rebind_format("Got {0}", t"ignored {x}")),
+             "Got 42");
 }

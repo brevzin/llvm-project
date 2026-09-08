@@ -164,21 +164,21 @@ _LIBCPP_HIDE_FROM_ABI inline void println(ostream& __os) {
   std::print(__os, "\n");
 }
 
-#  if _LIBCPP_STD_VER >= 26
+#  if _LIBCPP_HAS_TEMPLATE_STRINGS
 
-template <weak_template_string _S>
+template <__deferred_format _S>
 _LIBCPP_HIDE_FROM_ABI void print(ostream& __os, _S&& __s) {
   auto& [...__parts] = __s.exprs();
   return std::print(__os, __s.fmt(), __parts...);
 }
 
-template <weak_template_string _S>
+template <__deferred_format _S>
 _LIBCPP_HIDE_FROM_ABI void println(ostream& __os, _S&& __s) {
   auto& [...__parts] = __s.exprs();
   return std::println(__os, __s.fmt(), __parts...);
 }
 
-#  endif // _LIBCPP_STD_VER >= 26
+#  endif // _LIBCPP_HAS_TEMPLATE_STRINGS
 
 #  endif // _LIBCPP_STD_VER >= 23
 
