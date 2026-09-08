@@ -9,6 +9,21 @@
 #ifndef HEADER
 #define HEADER
 
+// Template string literals return std::interpolation from their generated
+// interpolation() members; the compiler looks the type up in the library
+// (this test provides a minimal definition, like tests do for
+// std::initializer_list or the comparison categories).
+namespace std {
+using size_t = decltype(sizeof(0));
+struct interpolation {
+  const char* expression;
+  const char* fmt;
+  size_t index;
+  size_t count;
+};
+} // namespace std
+
+
 int x = 1;
 
 constexpr auto g = t"x={x:>{4}}";

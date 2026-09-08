@@ -11,7 +11,7 @@
 //
 //   static consteval char const *fmt();
 //   static consteval char const *string(size_t n);
-//   static consteval _Interpolation interpolation(size_t n);
+//   static consteval std::interpolation interpolation(size_t n);
 //   static consteval size_t num_interpolations();
 //   constexpr auto exprs() const -> S const &;
 //   /* one data member _N per interpolated expression */
@@ -155,10 +155,9 @@ public:
     addIndexedLookup("string", CharConstPtrTy, Values);
   }
 
-  /// static consteval _Interpolation interpolation(size_t n);
-  void addInterpolation(const TemplateStringLiteralData &Data) {
-    QualType InterpTy = Context.getCanonicalTagType(
-        Context.getTemplateStringInterpolationDecl());
+  /// static consteval std::interpolation interpolation(size_t n);
+  void addInterpolation(const TemplateStringLiteralData &Data,
+                        QualType InterpTy) {
     SmallVector<Expr *, 8> Values;
     for (const auto &Interp : Data.Interpolations) {
       Expr *Inits[] = {makeCString(Interp.ExpressionText),
@@ -215,10 +214,62 @@ public:
 
 } // namespace
 
+QualType Sema::CheckStdInterpolation(SourceLocation Loc) {
+  if (!StdInterpolation) {
+    NamespaceDecl *Std = getStdNamespace();
+    if (!Std) {
+      Diag(Loc, diag::err_implied_std_interpolation_not_found);
+      return QualType();
+    }
+    LookupResult Result(*this, &Context.Idents.get("interpolation"), Loc,
+                        LookupOrdinaryName);
+    if (!LookupQualifiedName(Result, Std)) {
+      Diag(Loc, diag::err_implied_std_interpolation_not_found);
+      return QualType();
+    }
+    auto *RD = Result.getAsSingle<CXXRecordDecl>();
+    if (!RD) {
+      Diag(Loc, diag::err_malformed_std_interpolation);
+      return QualType();
+    }
+    if (!RD->hasDefinition()) {
+      Diag(Loc, diag::err_malformed_std_interpolation);
+      return QualType();
+    }
+    RD = RD->getDefinition();
+
+    // The generated interpolation() members aggregate-initialize this type
+    // positionally, so its shape is part of the contract.
+    QualType CharConstPtrTy = Context.getPointerType(Context.CharTy.withConst());
+    QualType Expected[] = {CharConstPtrTy, CharConstPtrTy,
+                           Context.getSizeType(), Context.getSizeType()};
+    unsigned I = 0;
+    bool Valid = RD->getNumBases() == 0;
+    for (FieldDecl *Field : RD->fields()) {
+      if (I == 4 || Field->isBitField() ||
+          !Context.hasSameUnqualifiedType(Field->getType(), Expected[I])) {
+        Valid = false;
+        break;
+      }
+      ++I;
+    }
+    if (!Valid || I != 4) {
+      Diag(Loc, diag::err_malformed_std_interpolation);
+      return QualType();
+    }
+    StdInterpolation = RD;
+  }
+  return Context.getCanonicalTagType(StdInterpolation);
+}
+
 ExprResult Sema::BuildTemplateStringLiteral(SourceRange Range,
                                             TemplateStringLiteralData *Data,
                                             ArrayRef<Expr *> Exprs) {
   SourceLocation Loc = Range.getBegin();
+
+  QualType InterpTy = CheckStdInterpolation(Loc);
+  if (InterpTy.isNull())
+    return ExprError();
 
   // Resolve placeholders and settle on what each member holds. A bit-field
   // cannot be bound to a reference, so it is captured by value, as it would
@@ -255,7 +306,7 @@ ExprResult Sema::BuildTemplateStringLiteral(SourceRange Range,
   TemplateStringStructBuilder Builder(Context, Struct, Loc);
   Builder.addFmt(*Data);
   Builder.addString(*Data);
-  Builder.addInterpolation(*Data);
+  Builder.addInterpolation(*Data, InterpTy);
   Builder.addNumInterpolations(*Data);
   Builder.addExprs();
 

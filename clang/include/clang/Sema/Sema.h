@@ -7594,6 +7594,15 @@ public:
                                         TemplateStringLiteralData *Data,
                                         ArrayRef<Expr *> Exprs);
 
+  /// The C++ "std::interpolation" class, which template string literals'
+  /// generated interpolation() members return. Looked up in the library
+  /// (like std::type_info or the comparison categories), not invented.
+  CXXRecordDecl *StdInterpolation = nullptr;
+
+  /// Look up (and cache) std::interpolation, diagnosing a missing or
+  /// malformed definition. Returns a null type on error.
+  QualType CheckStdInterpolation(SourceLocation Loc);
+
   /// ActOnTemplateStringUDL - Handle a user-defined literal suffix on a
   /// template string literal, e.g. t"x={x}"_udl.
   ExprResult ActOnTemplateStringUDL(Expr *TemplateStringExpr,

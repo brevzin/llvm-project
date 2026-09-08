@@ -8559,9 +8559,6 @@ Decl *ASTReader::getPredefinedDecl(PredefinedDeclIDs ID) {
     // ASTContext::getMSGuidTagDecl won't create MSGuidTagDecl conditionally.
     return Context.getMSGuidTagDecl();
 
-  case PREDEF_DECL_TEMPLATE_STRING_INTERPOLATION_ID:
-    NewLoaded = Context.getTemplateStringInterpolationDecl();
-    break;
 
   case PREDEF_DECL_EXTERN_C_CONTEXT_ID:
     if (Context.ExternCContext)

@@ -10545,6 +10545,13 @@ def err_literal_operator_template_bad_params : Error<
   "non-pack parameter">;
 def err_template_string_void_expr : Error<
   "cannot interpolate an expression of type 'void' in a template string">;
+def err_implied_std_interpolation_not_found : Error<
+  "'std::interpolation' was not found; include <format> before using a "
+  "template string literal">;
+def err_malformed_std_interpolation : Error<
+  "standard library implementation of 'std::interpolation' is not supported: "
+  "expected a class with the base-less members 'const char* expression; "
+  "const char* fmt; size_t index; size_t count'">;
 def err_literal_operator_template : Error<
   "template parameter list for literal operator must be either 'char...' or 'typename T, T...'">;
 def err_literal_operator_extern_c : Error<

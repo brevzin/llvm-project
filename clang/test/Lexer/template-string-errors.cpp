@@ -3,6 +3,21 @@
 // RUN: %clang_cc1 -std=c++26 -freflection -fsyntax-only -verify=c3 -DCASE3 %s
 // RUN: %clang_cc1 -std=c++26 -freflection -fsyntax-only -verify=c4 -DCASE4 %s
 
+// Template string literals return std::interpolation from their generated
+// interpolation() members; the compiler looks the type up in the library
+// (this test provides a minimal definition, like tests do for
+// std::initializer_list or the comparison categories).
+namespace std {
+using size_t = decltype(sizeof(0));
+struct interpolation {
+  const char* expression;
+  const char* fmt;
+  size_t index;
+  size_t count;
+};
+} // namespace std
+
+
 // A template string literal is a single logical line; a terminator on
 // another line means the literal was never closed, and recovery stays local
 // to the statement (the rest of the offending line is consumed with the

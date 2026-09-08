@@ -8,6 +8,21 @@
 // RUN: %clang_cc1 -std=c++26 -freflection -E -P -x c++ %t.ii -o %t2.ii
 // RUN: diff %t.ii %t2.ii
 
+// Template string literals return std::interpolation from their generated
+// interpolation() members; the compiler looks the type up in the library
+// (this test provides a minimal definition, like tests do for
+// std::initializer_list or the comparison categories).
+namespace std {
+using size_t = decltype(sizeof(0));
+struct interpolation {
+  const char* expression;
+  const char* fmt;
+  size_t index;
+  size_t count;
+};
+} // namespace std
+
+
 #define ANSWER 42
 #define LOG_BODY t"answer={ANSWER=} width={w}"
 #define NAMED(x) t"{x;#x}"

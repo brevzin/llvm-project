@@ -32,6 +32,7 @@ export namespace std {
   using std::dynamic_format;
 #endif // _LIBCPP_STD_VER >= 26
 #if _LIBCPP_HAS_TEMPLATE_STRINGS
+  using std::interpolation;
   using std::rebind_format;
   using std::rebound_format;
   using std::template_string;
