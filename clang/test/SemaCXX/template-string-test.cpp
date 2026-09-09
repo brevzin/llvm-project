@@ -319,6 +319,21 @@ void test_macro_expansion() {
   static_assert(__builtin_strcmp(s26.interpolation(0).expression, "SINGLE") == 0);
   static_assert(__builtin_strcmp(s26.interpolation(1).expression, "MULTIPLE") == 0);
   static_assert(__builtin_strcmp(s26.interpolation(2).expression, "RES") == 0);
+
+  // Function-like macro invocations: the preprocessor peeks at the token
+  // after the macro name to look for '(', which must not perturb the
+  // lexer's bracket-depth tracking for the interpolated expression.
+  #define TS_ID(x) x
+  #define TS_CHOICE(c, a, b) c ? a : b
+  auto s27 = t"{TS_ID(42)}";
+  static_assert(__builtin_strcmp(s27.fmt(), "{}") == 0);
+  static_assert(__builtin_strcmp(s27.interpolation(0).expression, "TS_ID(42)") == 0);
+  auto s28 = t"{1 + TS_ID(2)} {TS_ID(3):x}";
+  static_assert(__builtin_strcmp(s28.fmt(), "{} {:x}") == 0);
+  // A ':' or '?' produced by macro expansion is not an expression terminator.
+  constexpr auto s29 = t"{TS_CHOICE(1, 20, 30)}";
+  static_assert(__builtin_strcmp(s29.fmt(), "{}") == 0);
+  static_assert(s29._0 == 20);
 }
 
 namespace N {

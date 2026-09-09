@@ -3483,6 +3483,9 @@ std::optional<Token> Lexer::peekNextPPToken() {
   bool atPhysicalStartOfLine = IsAtPhysicalStartOfLine;
   bool leadingSpace = HasLeadingSpace;
   MultipleIncludeOpt MIOptState = MIOpt;
+  // Within a template string, Lex updates interpolation state (bracket depth,
+  // phase, the stack itself); the peeked token is lexed again for real.
+  auto TSStack = TemplateStringStack;
 
   Token Tok;
   Lex(Tok);
@@ -3494,6 +3497,7 @@ std::optional<Token> Lexer::peekNextPPToken() {
   IsAtStartOfLine = atStartOfLine;
   IsAtPhysicalStartOfLine = atPhysicalStartOfLine;
   MIOpt = MIOptState;
+  TemplateStringStack = std::move(TSStack);
   // Restore the lexer back to non-skipping mode.
   LexingRawMode = false;
 
