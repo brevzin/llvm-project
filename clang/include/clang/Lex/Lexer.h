@@ -338,6 +338,13 @@ public:
     bool SawSemi = false;
     /// Number of tokens lexed for the current expression.
     unsigned NumToks = 0;
+    /// Open parentheses within the expression, and which of them directly
+    /// follow 'decltype' (a bitstack, innermost in bit 0): '::' after the
+    /// ')' of a decltype-specifier is scope resolution, not a specifier.
+    unsigned ParenDepth = 0;
+    uint64_t DecltypeParens = 0;
+    /// Whether the most recently closed paren was a decltype's.
+    bool LastParenWasDecltype = false;
     /// Whether the expression so far is a single clean token that exactly
     /// spans the expression text and cannot be a macro invocation.
     bool SimpleToken = false;

@@ -113,18 +113,47 @@ void test_fmt_specifiers() {
   static_assert(__builtin_strcmp(s7.interpolation(0).fmt, "{:#x}") == 0);
 }
 
-// Test parentheses
+// '::' is scope resolution and stays part of the expression (even under
+// shadowing: qualified lookup ignores the non-namespace N). After a ')' it
+// cannot be scope resolution, so it terminates the expression and begins a
+// specifier -- the range element-specifier spelling. decltype's ')' is the
+// one exception, since decltype(x)::member is real scope resolution.
 namespace N {
   int C = 42;
 }
+int G = 9;
+struct D { static constexpr int s = 7; };
 void test_balanced_tokens() {
   double N = 0.0;
   auto s8 = t"{N::C}";
+  auto s8b = t"{(N)::C}";
   auto s9 = t"{(N::C)}";
-  static_assert(__builtin_strcmp(s8.fmt(), "{::C}") == 0);
-  static_assert((^^decltype(s8._0)) == (^^double&));
+  static_assert(__builtin_strcmp(s8.fmt(), "{}") == 0);
+  static_assert((^^decltype(s8._0)) == (^^int&));
+  static_assert(__builtin_strcmp(s8b.fmt(), "{::C}") == 0);
+  static_assert((^^decltype(s8b._0)) == (^^double&));
   static_assert(__builtin_strcmp(s9.fmt(), "{}") == 0);
   static_assert((^^decltype(s9._0)) == (^^int&));
+
+  auto s9b = t"{::G}";
+  static_assert(__builtin_strcmp(s9b.fmt(), "{}") == 0);
+  static_assert((^^decltype(s9b._0)) == (^^int&));
+
+  D d;
+  auto s9c = t"{decltype(d)::s}";
+  static_assert(__builtin_strcmp(s9c.fmt(), "{}") == 0);
+  static_assert((^^decltype(s9c._0)) == (^^const int&));
+
+  // Scoping works in nested fields of a specifier too.
+  auto s9d = t"{N:>{N::C}}";
+  static_assert(__builtin_strcmp(s9d.fmt(), "{:>{}}") == 0);
+  static_assert((^^decltype(s9d._0)) == (^^double&));
+  static_assert((^^decltype(s9d._1)) == (^^int&));
+
+  // A splice's ':]' does not terminate the expression.
+  auto s9e = t"{[:^^G:] + 1}";
+  static_assert(__builtin_strcmp(s9e.fmt(), "{}") == 0);
+  static_assert((^^decltype(s9e._0)) == (^^int));
 }
 
 

@@ -3432,7 +3432,10 @@ ExprResult Parser::ParseTemplateStringExpression(SmallVectorImpl<Token> &Toks,
     Diag(Tok, diag::err_expected) << tok::r_brace;
     Res = ExprError();
   }
-  if (Res.isInvalid() && ColonLoc.isValid())
+  // With recovery enabled a failed parse may yield an error-containing
+  // expression rather than ExprError; hint at the ':' rule either way.
+  if (ColonLoc.isValid() &&
+      (Res.isInvalid() || (Res.isUsable() && Res.get()->containsErrors())))
     Diag(ColonLoc, diag::note_template_string_colon);
 
   // Skip whatever is left (after an error) up to and including our eof.

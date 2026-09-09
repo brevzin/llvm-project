@@ -4023,13 +4023,32 @@ bool Lexer::Lex(Token &Result) {
       } else {
         switch (Result.getKind()) {
         case tok::l_paren:
-        case tok::l_square:
-        case tok::l_brace:
+          if (TS.ParenDepth < 64)
+            TS.DecltypeParens = (TS.DecltypeParens << 1) |
+                                (TS.LastTokKind == tok::kw_decltype ||
+                                 TS.LastTokKind == tok::kw_typeof ||
+                                 TS.LastTokKind == tok::kw_typeof_unqual);
+          ++TS.ParenDepth;
           ++TS.BracketDepth;
           break;
         case tok::r_paren:
+          if (TS.ParenDepth > 0) {
+            --TS.ParenDepth;
+            TS.LastParenWasDecltype =
+                TS.ParenDepth < 64 && (TS.DecltypeParens & 1);
+            TS.DecltypeParens >>= 1;
+          }
+          if (TS.BracketDepth > 0)
+            --TS.BracketDepth;
+          break;
+        case tok::l_square:
+        case tok::l_brace:
+        case tok::l_splice:
+          ++TS.BracketDepth;
+          break;
         case tok::r_square:
         case tok::r_brace:
+        case tok::r_splice:
           if (TS.BracketDepth > 0)
             --TS.BracketDepth;
           break;
@@ -4756,9 +4775,12 @@ LexStart:
     }
     break;
   case ':':
-    // In a template string, any ':' at bracket depth zero terminates the
-    // interpolated expression and begins the format specifier (even the
-    // first ':' of '::' -- parenthesize to use '::' at the top level).
+    // In a template string, a single ':' at bracket depth zero terminates
+    // the interpolated expression and begins the format specifier. '::' is
+    // scope resolution and stays part of the expression -- except after a
+    // non-decltype ')', where it cannot be ('(expr)::name' is not C++), so
+    // it terminates too: that is how a range's element specifier is
+    // written, e.g. {(vec)::x}.
     if (!TemplateStringStack.empty() &&
         TemplateStringStack.back().Phase == TemplateStringState::Expr &&
         TemplateStringStack.back().BracketDepth == 0) {
@@ -4769,7 +4791,12 @@ LexStart:
         FormTokenWithChars(Result, CurPtr, tok::unknown);
         return true;
       }
-      return LexTemplateStringTerminator(Result, BufferPtr);
+      TemplateStringState &TS = TemplateStringStack.back();
+      bool IsColonColon = getCharAndSize(CurPtr, SizeTmp) == ':';
+      if (!IsColonColon || (TS.LastTokKind == tok::r_paren &&
+                            !TS.LastParenWasDecltype))
+        return LexTemplateStringTerminator(Result, BufferPtr);
+      // Fall through: lex the '::' as an ordinary token of the expression.
     }
     Char = getCharAndSize(CurPtr, SizeTmp);
     if (LangOpts.Digraphs && Char == '>') {
