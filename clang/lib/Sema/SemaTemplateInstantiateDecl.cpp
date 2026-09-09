@@ -7315,15 +7315,25 @@ NamedDecl *Sema::FindInstantiatedDecl(SourceLocation Loc, NamedDecl *D,
   if (isa<ParmVarDecl>(D) || isa<NonTypeTemplateParmDecl>(D) ||
       isa<TemplateTypeParmDecl>(D) || isa<TemplateTemplateParmDecl>(D) ||
       (ParentDependsOnArgs && (ParentDC->isFunctionOrMethod() ||
+                               isa<ExpansionStmtDecl>(ParentDC) ||
                                isa<OMPDeclareReductionDecl>(ParentDC) ||
                                isa<OMPDeclareMapperDecl>(ParentDC))) ||
       (isa<CXXRecordDecl>(D) && cast<CXXRecordDecl>(D)->isLambda() &&
        cast<CXXRecordDecl>(D)->getTemplateDepth() >
            TemplateArgs.getNumRetainedOuterLevels())) {
+    // A declaration in an expansion statement's body is substituted once per
+    // iteration, so it is reached here both as the pattern -- which does have
+    // an instantiation recorded -- and, because a statement re-substitutes a
+    // body it has already transformed, in its instantiated form, which has no
+    // entry of its own and is its own instantiation.
+    bool InExpansionStmt = isa<ExpansionStmtDecl>(ParentDC);
+
     // D is a local of some kind. Look into the map of local
     // declarations to their instantiations.
     if (CurrentInstantiationScope) {
-      if (auto Found = CurrentInstantiationScope->findInstantiationOf(D)) {
+      if (auto Found = InExpansionStmt
+                           ? CurrentInstantiationScope->getInstantiationOfIfExists(D)
+                           : CurrentInstantiationScope->findInstantiationOf(D)) {
         if (Decl *FD = Found->dyn_cast<Decl *>()) {
           if (auto *BD = dyn_cast<BindingDecl>(FD);
               BD && BD->isParameterPack() && ArgPackSubstIndex) {
@@ -7338,6 +7348,8 @@ NamedDecl *Sema::FindInstantiatedDecl(SourceLocation Loc, NamedDecl *D,
         return cast<NamedDecl>(
             (*cast<DeclArgumentPack *>(*Found))[*ArgPackSubstIndex]);
       }
+      if (InExpansionStmt)
+        return D;
     }
 
     // If we're performing a partial substitution during template argument

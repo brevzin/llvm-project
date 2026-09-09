@@ -915,9 +915,13 @@ bool Sema::CheckParameterPacksForExpansion(
         IsVarDeclPack = true;
       else if (isa<BindingDecl>(ND)) {
         // Find the instantiated BindingDecl and check it for a resolved pack.
+        // An expansion statement substitutes its already-instantiated body
+        // once per iteration, so a binding declared outside the statement is
+        // reached here in its instantiated form, with no entry of its own in
+        // the instantiation scope. Such a binding is its own instantiation.
         llvm::PointerUnion<Decl *, DeclArgumentPack *> *Instantiation =
-            CurrentInstantiationScope->findInstantiationOf(ND);
-        Decl *B = cast<Decl *>(*Instantiation);
+            CurrentInstantiationScope->getInstantiationOfIfExists(ND);
+        Decl *B = Instantiation ? cast<Decl *>(*Instantiation) : ND;
         Expr *BindingExpr = cast<BindingDecl>(B)->getBinding();
         BindingPack = cast_if_present<FunctionParmPackExpr>(BindingExpr);
         if (!BindingPack) {

@@ -463,3 +463,85 @@ void degenerate_form() {
   template for (;;) { } // expected-error {{expansion statement must be a range-based 'for' statement}}
 }
 }  // namespace not_range_for
+
+// A structured binding pack declared inside the body of an expansion
+// statement is re-instantiated once per iteration, and references to it must
+// resolve to that iteration's bindings. Declarations in an expansion
+// statement's body live in an ExpansionStmtDecl rather than in the enclosing
+// function, so they used to be missed by the search for local instantiations
+// and left dependent, which then reached CodeGen.
+namespace binding_pack_in_expansion {
+struct triple { int a, b, c; };
+
+constexpr int sum(auto... vs) { return (0 + ... + vs); }
+
+// Non-template function: nothing outside the expansion statement is dependent.
+constexpr int non_template() {
+  int total = 0;
+  template for (constexpr int I : {0, 1, 2}) {
+    auto [...xs] = triple{I, I + 1, I + 2};
+    total += sum(xs...);
+  }
+  return total;
+}
+static_assert(non_template() == 18);
+
+// A pack declared outside the statement and indexed inside it, alongside one
+// declared inside it: both the enclosing instantiation and the per-iteration
+// one have to be resolved.
+template <class T>
+constexpr int outer_and_inner(T t) {
+  auto &[...outer] = t;
+  int total = 0;
+  template for (constexpr int I : {0, 1}) {
+    auto [...inner] = triple{I, I + 1, I + 2};
+    total += outer...[I] * sum(inner...);
+  }
+  return total;
+}
+static_assert(outer_and_inner(triple{4, 7, 9}) == 54);
+
+}  // namespace binding_pack_in_expansion
+
+// A constexpr binding pack declared inside an expansion statement, used as the
+// index of a pack declared outside it. This is the shape that reaches the pack
+// expansion machinery with a binding whose size is only known per-iteration.
+using size_t = decltype(sizeof(0));
+
+namespace indexed_by_inner_pack {
+template <size_t... Is> struct indices {};
+
+template <size_t I, size_t... Is>
+constexpr size_t get(indices<Is...>) { return Is...[I]; }
+}  // namespace indexed_by_inner_pack
+
+namespace std {
+template <class> struct tuple_size;
+template <size_t, class> struct tuple_element;
+
+template <size_t... Is>
+struct tuple_size<::indexed_by_inner_pack::indices<Is...>> {
+  static constexpr size_t value = sizeof...(Is);
+};
+template <class T> struct tuple_size<const T> : tuple_size<T> {};
+template <size_t I, size_t... Is>
+struct tuple_element<I, ::indexed_by_inner_pack::indices<Is...>> {
+  using type = size_t;
+};
+template <size_t I, class T>
+struct tuple_element<I, const T> : tuple_element<I, T> {};
+}  // namespace std
+
+namespace indexed_by_inner_pack {
+template <class T>
+constexpr int by_inner_pack(T t) {
+  auto &[...outer] = t;
+  int total = 0;
+  template for (constexpr int I : {0, 1}) {
+    constexpr auto [...js] = indices<0, 1>{};
+    total += binding_pack_in_expansion::sum(outer...[I + js]...);
+  }
+  return total;
+}
+static_assert(by_inner_pack(binding_pack_in_expansion::triple{4, 7, 9}) == 27);
+}  // namespace indexed_by_inner_pack
