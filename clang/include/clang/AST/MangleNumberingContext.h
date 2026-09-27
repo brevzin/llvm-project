@@ -49,6 +49,16 @@ public:
   virtual unsigned getManglingNumber(const VarDecl *VD,
                                      unsigned MSLocalManglingNumber) = 0;
 
+  /// Retrieve the most recent mangling number handed out by
+  /// getManglingNumber(const VarDecl *, unsigned) for variables that would
+  /// be numbered alongside \p VD, without allocating a new one. Returns 0 if
+  /// no such number has been allocated (or the ABI doesn't number variables
+  /// this way).
+  virtual unsigned getLastManglingNumber(const VarDecl *VD) const { return 0; }
+
+  /// Likewise, for getManglingNumber(const TagDecl *, unsigned).
+  virtual unsigned getLastManglingNumber(const TagDecl *TD) const { return 0; }
+
   /// Retrieve the mangling number of a static local variable within
   /// this context.
   virtual unsigned getManglingNumber(const TagDecl *TD,

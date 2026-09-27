@@ -2664,7 +2664,9 @@ Decl *TemplateDeclInstantiator::VisitEnumDecl(EnumDecl *D) {
   Enum->setInstantiationOfMemberEnum(D, TSK_ImplicitInstantiation);
   Enum->setAccess(D->getAccess());
   // Forward the mangling number from the template to the instantiated decl.
-  SemaRef.Context.setManglingNumber(Enum, SemaRef.Context.getManglingNumber(D));
+  if (!SemaRef.assignExpansionLocalManglingNumber(Enum))
+    SemaRef.Context.setManglingNumber(Enum,
+                                      SemaRef.Context.getManglingNumber(D));
   // See if the old tag was defined along with a declarator.
   // If it did, mark the new tag as being associated with that declarator.
   if (DeclaratorDecl *DD = SemaRef.Context.getDeclaratorForUnnamedTagDecl(D))
@@ -3146,8 +3148,9 @@ Decl *TemplateDeclInstantiator::VisitCXXRecordDecl(CXXRecordDecl *D) {
     SemaRef.CurrentInstantiationScope->InstantiatedLocal(D, Record);
 
   // Forward the mangling number from the template to the instantiated decl.
-  SemaRef.Context.setManglingNumber(Record,
-                                    SemaRef.Context.getManglingNumber(D));
+  if (!SemaRef.assignExpansionLocalManglingNumber(Record))
+    SemaRef.Context.setManglingNumber(Record,
+                                      SemaRef.Context.getManglingNumber(D));
 
   // See if the old tag was defined along with a declarator.
   // If it did, mark the new tag as being associated with that declarator.
@@ -6731,8 +6734,12 @@ void Sema::BuildVariableInstantiation(
   }
 
   // Forward the mangling number from the template to the instantiated decl.
-  Context.setManglingNumber(NewVar, Context.getManglingNumber(OldVar));
-  Context.setStaticLocalNumber(NewVar, Context.getStaticLocalNumber(OldVar));
+  // Static locals synthesized by an expansion statement are the exception:
+  // each expansion is a distinct entity, so each needs its own number.
+  if (!assignExpansionLocalManglingNumber(NewVar)) {
+    Context.setManglingNumber(NewVar, Context.getManglingNumber(OldVar));
+    Context.setStaticLocalNumber(NewVar, Context.getStaticLocalNumber(OldVar));
+  }
 
   // Figure out whether to eagerly instantiate the initializer.
   if (InstantiatingVarTemplate || InstantiatingVarTemplatePartialSpec) {

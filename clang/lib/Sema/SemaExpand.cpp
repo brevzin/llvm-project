@@ -13,8 +13,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/Decl.h"
+#include "clang/AST/MangleNumberingContext.h"
 #include "clang/AST/DynamicRecursiveASTVisitor.h"
 #include "clang/Basic/DiagnosticSema.h"
+#include "clang/Basic/TargetInfo.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Initialization.h"
@@ -566,6 +568,12 @@ StmtResult Sema::FinishCXXExpansionStmt(Stmt *Heading, Stmt *Body) {
 
     ContextRAII CtxGuard(*this, DC, /*NewThis=*/false);
     ExpansionStmtSynthesisRAII ExpansionGuard(*this, !DC->isDependentContext());
+    // Only number local entities for expansions that will actually be emitted:
+    // not those of an expansion statement nested within (the still-dependent
+    // pattern of) another expansion statement or template.
+    llvm::SaveAndRestore<const DeclContext *> SynthesisCtxGuard(
+        ExpansionStmtSynthesisContext,
+        StmtDecl->getParent()->isDependentContext() ? nullptr : DC);
 
     TemplateArgument TArgs[] = {
         { Context, Context.MakeIntValue(Instantiations.size(),
@@ -595,6 +603,56 @@ StmtResult Sema::FinishCXXExpansionStmt(Stmt *Heading, Stmt *Body) {
   // Attach Stmt buffer to the CXXExpansionStmt, and return.
   Expansion->setInstantiations(StmtStorage);
   return Expansion;
+}
+
+bool Sema::assignExpansionLocalManglingNumber(NamedDecl *D) {
+  // Only declarations synthesized directly into the function containing the
+  // expansion statement need this; anything nested more deeply (e.g., inside a
+  // local class or lambda) is already distinguished by its enclosing entity.
+  const DeclContext *DC = D->getDeclContext();
+  while (auto *CD = dyn_cast<CapturedDecl>(DC))
+    DC = CD->getParent();
+  if (!getLangOpts().CPlusPlus || !ExpansionStmtSynthesisContext ||
+      DC != ExpansionStmtSynthesisContext ||
+      Context.getTargetInfo().getCXXABI().isMicrosoft())
+    return false;
+
+  auto *VD = dyn_cast<VarDecl>(D);
+  auto *TD = dyn_cast<TagDecl>(D);
+  if (!(VD && VD->isStaticLocal()) && !TD)
+    return false;
+
+  // Every expansion of the statement shares the same pattern declaration, so
+  // forwarding the pattern's mangling number would give every expansion the
+  // same mangled name. Instead, number each expansion as it's synthesized
+  // (which happens in source order), in the context of the enclosing function.
+  auto [MCtx, ManglingContextDecl] = getCurrentMangleNumberContext(DC);
+  if (!MCtx)
+    // The entity doesn't need a stable mangling (e.g., it's in a non-inline
+    // function); the mangler will uniquify it.
+    return true;
+
+  // If the enclosing function is itself a template instantiation, the other
+  // local entities in it have forwarded the numbers of their patterns, which
+  // were allocated from the pattern function's numbering context. Start after
+  // the last of those, so we can't collide with them.
+  unsigned Offset = 0;
+  if (auto *FD = dyn_cast<FunctionDecl>(DC))
+    if (const FunctionDecl *Pattern = FD->getTemplateInstantiationPattern();
+        Pattern && Pattern != FD) {
+      MangleNumberingContext &PatternCtx =
+          Context.getManglingNumberContext(Pattern);
+      Offset = VD ? PatternCtx.getLastManglingNumber(VD)
+                  : PatternCtx.getLastManglingNumber(TD);
+    }
+
+  if (VD) {
+    Context.setManglingNumber(VD, Offset + MCtx->getManglingNumber(VD, 0));
+    Context.setStaticLocalNumber(VD, MCtx->getStaticLocalNumber(VD));
+  } else {
+    Context.setManglingNumber(TD, Offset + MCtx->getManglingNumber(TD, 0));
+  }
+  return true;
 }
 
 ExprResult Sema::ActOnCXXExpansionInitList(SourceLocation LBraceLoc,

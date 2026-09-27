@@ -16198,6 +16198,16 @@ private:
 public:
   bool isSynthesizingExpansionStmt() const { return IsSynthesizingExpansionStmt; }
 
+  /// The (non-dependent) function into whose body an expansion statement is
+  /// currently being expanded, if any.
+  const DeclContext *ExpansionStmtSynthesisContext = nullptr;
+
+  /// If \p D is a static local variable or a local class/enum being
+  /// synthesized as part of one expansion of an expansion statement, give it
+  /// a fresh mangling number (rather than the one of the pattern it was
+  /// instantiated from) and return true. Otherwise, return false.
+  bool assignExpansionLocalManglingNumber(NamedDecl *D);
+
   class ExpansionStmtSynthesisRAII {
     Sema &S;
     bool OldValue;

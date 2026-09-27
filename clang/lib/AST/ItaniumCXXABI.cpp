@@ -175,8 +175,24 @@ public:
     return ++VarManglingNumbers[Identifier];
   }
 
+  unsigned getLastManglingNumber(const VarDecl *VD) const override {
+    if (auto *DD = dyn_cast<DecompositionDecl>(VD)) {
+      DecompositionDeclName Name{DD->bindings()};
+      return DecompsitionDeclManglingNumbers.lookup(Name);
+    }
+
+    const IdentifierInfo *Identifier = VD->getIdentifier();
+    if (!Identifier)
+      Identifier = findAnonymousUnionVarDeclName(*VD);
+    return VarManglingNumbers.lookup(Identifier);
+  }
+
   unsigned getManglingNumber(const TagDecl *TD, unsigned) override {
     return ++TagManglingNumbers[TD->getIdentifier()];
+  }
+
+  unsigned getLastManglingNumber(const TagDecl *TD) const override {
+    return TagManglingNumbers.lookup(TD->getIdentifier());
   }
 };
 
