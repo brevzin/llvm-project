@@ -1307,7 +1307,8 @@ static QualType desugarType(QualType QT, bool UnwrapAliases, bool DropCV,
     else if (auto *TST = dyn_cast<TemplateSpecializationType>(QT);
              TST && UnwrapAliases && TST->isTypeAlias())
       QT = TST->getAliasedType();
-    else if (auto *AT = dyn_cast<AutoType>(QT))
+    // An undeduced 'auto' desugars to itself; stop there rather than loop.
+    else if (auto *AT = dyn_cast<AutoType>(QT); AT && AT->isDeduced())
       QT = AT->desugar();
     else if (auto *RT = dyn_cast<ReferenceType>(QT); RT && DropRefs)
       QT = RT->getPointeeType();
@@ -6912,6 +6913,9 @@ bool return_type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   switch (RV.getReflectionKind()) {
   case ReflectionKind::Type: {
     if (auto *FPT = dyn_cast<FunctionProtoType>(RV.getReflectedType())) {
+      if (FPT->getReturnType()->isUndeducedType())
+        return Diagnoser(Range.getBegin(), diag::metafn_undeduced_return_type)
+               << 1 << QualType(FPT, 0) << Range;
       QualType QT =
           desugarType(FPT->getReturnType(), /*UnwrapAliases=*/ true,
                       /*DropCV=*/false, /*DropRefs=*/false);
@@ -6924,6 +6928,11 @@ bool return_type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Declaration:
     if (auto *FD = dyn_cast<FunctionDecl>(RV.getReflectedDecl());
         FD && !isa<CXXConstructorDecl>(FD) && !isa<CXXDestructorDecl>(FD)) {
+      // E.g. the enclosing 'auto' function, asked from inside its own body
+      // (macro_expansion_context() in an expression macro).
+      if (FD->getReturnType()->isUndeducedType())
+        return Diagnoser(Range.getBegin(), diag::metafn_undeduced_return_type)
+               << 0 << FD << Range;
       QualType QT =
           desugarType(FD->getReturnType(), /*UnwrapAliases=*/ true,
                       /*DropCV=*/false, /*DropRefs=*/false);

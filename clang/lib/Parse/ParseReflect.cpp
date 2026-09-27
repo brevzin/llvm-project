@@ -460,9 +460,17 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
   if (T.consumeClose())
     return ExprError();
 
-  return Actions.ActOnMacroInvocation(getCurScope(), SS, II, NameLoc,
-                                      ExclaimLoc, T.getOpenLocation(), Args,
-                                      T.getCloseLocation(), ShapeUnknown);
+  ExprResult Result = Actions.ActOnMacroInvocation(
+      getCurScope(), SS, II, NameLoc, ExclaimLoc, T.getOpenLocation(), Args,
+      T.getCloseLocation(), ShapeUnknown);
+  // As for a failed call: keep an error-containing placeholder, so the
+  // failure (already diagnosed) does not cascade -- e.g. into deducing 'void'
+  // for the enclosing 'auto' function from 'return m!();'.
+  if (Result.isInvalid())
+    Result = Actions.CreateRecoveryExpr(SS.isEmpty() ? NameLoc
+                                                     : SS.getBeginLoc(),
+                                        T.getCloseLocation(), Args);
+  return Result;
 }
 
 /// Parse 'obj.name!(args)' / 'obj->name!(args)'. The member name has been
@@ -496,9 +504,15 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
   if (T.consumeClose())
     return ExprError();
 
-  return Actions.ActOnMemberMacroInvocation(
+  ExprResult Result = Actions.ActOnMemberMacroInvocation(
       getCurScope(), Base, OpLoc, OpKind, II, NameLoc, ExclaimLoc,
       T.getOpenLocation(), Args, T.getCloseLocation(), ShapeUnknown);
+  if (Result.isInvalid()) {
+    Args.insert(Args.begin(), Base);
+    Result = Actions.CreateRecoveryExpr(Base->getBeginLoc(),
+                                        T.getCloseLocation(), Args);
+  }
+  return Result;
 }
 
 /// Parse a declaration-position macro invocation, 'name!(args);', at
@@ -569,29 +583,32 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   ConsumeAnyToken();
 
   SmallVector<Decl *, 4> Decls;
-  if (Actions.CurContext->isRecord()) {
-    // Members of the class being parsed, under the current access specifier
-    // (the expansion may change it; the change does not leak out).
-    ParseTokensAsClassMembers(AS, TagDecl);
-  } else {
-    while (Tok.isNot(tok::eof)) {
-      SourceLocation Before = Tok.getLocation();
-      ParsedAttributes DeclAttrs(AttrFactory);
-      ParsedAttributes DeclSpecAttrs(AttrFactory);
-      DeclGroupPtrTy G = ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
-      if (G)
-        for (Decl *D : G.get())
-          Decls.push_back(D);
-      // Guarantee progress on malformed tokens. (Location equality alone is
-      // not proof: repeated evaluations of one token sequence share
-      // locations, so only a parse that also produced nothing counts.)
-      if (!G && Tok.isNot(tok::eof) && Tok.getLocation() == Before) {
-        Diag(Tok, diag::err_unexpected_token_in_injected_members)
-            << Tok.getKind();
-        ConsumeAnyToken();
+  Sema::MacroExpansionDepthRAII Depth(Actions);
+  Actions.runWithSufficientStackSpace(NameLoc, [&] {
+    if (Actions.CurContext->isRecord()) {
+      // Members of the class being parsed, under the current access specifier
+      // (the expansion may change it; the change does not leak out).
+      ParseTokensAsClassMembers(AS, TagDecl);
+    } else {
+      while (Tok.isNot(tok::eof)) {
+        SourceLocation Before = Tok.getLocation();
+        ParsedAttributes DeclAttrs(AttrFactory);
+        ParsedAttributes DeclSpecAttrs(AttrFactory);
+        DeclGroupPtrTy G = ParseExternalDeclaration(DeclAttrs, DeclSpecAttrs);
+        if (G)
+          for (Decl *D : G.get())
+            Decls.push_back(D);
+        // Guarantee progress on malformed tokens. (Location equality alone is
+        // not proof: repeated evaluations of one token sequence share
+        // locations, so only a parse that also produced nothing counts.)
+        if (!G && Tok.isNot(tok::eof) && Tok.getLocation() == Before) {
+          Diag(Tok, diag::err_unexpected_token_in_injected_members)
+              << Tok.getKind();
+          ConsumeAnyToken();
+        }
       }
     }
-  }
+  });
   Tok = SavedTok;
 
   if (Decls.empty())
@@ -955,14 +972,17 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
   ConsumeAnyToken();
 
   MacroExpansionLookupScope LookupScope(*this);
+  Sema::MacroExpansionDepthRAII Depth(Actions);
 
   // The expansion is delimited by its own eof, so it is parsed free of the
-  // enclosing context's bracket rules.
+  // enclosing context's bracket rules. It may itself invoke macros, so this
+  // is where macro recursion recurses: make sure there is stack for it.
   ExprResult Result;
   {
     GreaterThanIsOperatorScope G(GreaterThanIsOperator, true);
     ColonProtectionRAIIObject ColonProtection(*this, false);
-    Result = ParseExpression();
+    Actions.runWithSufficientStackSpace(Loc,
+                                        [&] { Result = ParseExpression(); });
   }
   if (!Result.isInvalid() && Tok.isNot(tok::eof)) {
     Diag(Tok, diag::err_macro_expansion_not_single_expression);
@@ -1150,10 +1170,13 @@ bool Parser::ParseMemInitMacroExpansion(
   bool Invalid;
   {
     MacroExpansionLookupScope LookupScope(*this);
+    Sema::MacroExpansionDepthRAII Depth(Actions);
     GreaterThanIsOperatorScope G(GreaterThanIsOperator, true);
     ColonProtectionRAIIObject ColonProtection(*this, false);
     PoisonSEHIdentifiersRAIIObject PoisonSEHIdentifiers(*this, true);
-    Invalid = ParseMemInitializersUntilEof(ConstructorDecl, Out);
+    Actions.runWithSufficientStackSpace(Invocation.getBegin(), [&] {
+      Invalid = ParseMemInitializersUntilEof(ConstructorDecl, Out);
+    });
   }
   // Drain what is left so the enclosing token stream resumes cleanly.
   while (Tok.isNot(tok::eof))

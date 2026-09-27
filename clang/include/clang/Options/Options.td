@@ -2172,6 +2172,10 @@ def fconstexpr_depth_EQ : Joined<["-"], "fconstexpr-depth=">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Set the maximum depth of recursive constexpr function calls">,
   MarshallingInfoInt<LangOpts<"ConstexprCallDepth">, "512">;
+def fmacro_expansion_depth_EQ : Joined<["-"], "fmacro-expansion-depth=">,
+  Group<f_Group>, Visibility<[ClangOption, CC1Option]>,
+  HelpText<"Set the maximum depth of nested expression macro expansions">,
+  MarshallingInfoInt<LangOpts<"MacroExpansionDepth">, "256">;
 def fconstexpr_steps_EQ : Joined<["-"], "fconstexpr-steps=">, Group<f_Group>,
   Visibility<[ClangOption, CC1Option]>,
   HelpText<"Set the maximum number of steps in constexpr function evaluation (0 = no limit)">,

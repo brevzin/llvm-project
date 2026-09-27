@@ -50,5 +50,6 @@ struct T {
   static constexpr int in_class = needs_function!();
   // expected-error@-1 {{expression macro 'needs_function' reported an error}}
   // expected-note@*:* {{this macro must be invoked inside a function}}
-  // expected-error@-3 {{constexpr variable 'in_class' must be initialized by a constant expression}}
+  // (The failed invocation recovers as an error expression, so the variable
+  // is not additionally diagnosed as lacking a constant initializer.)
 };

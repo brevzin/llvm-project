@@ -7990,10 +7990,16 @@ static bool stmtContains(const Stmt *Haystack, const Stmt *Needle) {
 /// argument's names never having been captured.
 static bool CheckMacroArgumentEvaluation(Sema &S, Expr *Expansion,
                                          ArrayRef<OpaqueValueExpr *> ArgOVEs) {
+  // Nothing interpolated, nothing to count. (Worth skipping: the expansion
+  // contains every nested expansion, so a recursive macro would otherwise
+  // walk a tree as deep as the recursion at every level.)
+  if (ArgOVEs.empty())
+    return false;
   llvm::SmallPtrSet<const OpaqueValueExpr *, 8> Tracked(ArgOVEs.begin(),
                                                         ArgOVEs.end());
   MacroArgumentUseCounter Counter(S.Context, Tracked);
-  Counter.Visit(Expansion);
+  S.runWithSufficientStackSpace(Expansion->getExprLoc(),
+                                [&] { Counter.Visit(Expansion); });
 
   for (const LambdaExpr *LE : Counter.Lambdas)
     for (OpaqueValueExpr *OVE : ArgOVEs)
@@ -8028,6 +8034,19 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
                                   SourceLocation RParenLoc,
                                   CallExpr::ADLCallKind UsesADL,
                                   TokenSequenceData &Expansion) {
+  // Every kind of macro invocation (expression, member, operator,
+  // declaration, mem-initializer) comes through here before its body runs,
+  // and its expansion is parsed inside a MacroExpansionDepthRAII. Checking
+  // here bounds recursion however it arises.
+  if (MacroExpansionDepth >= getLangOpts().MacroExpansionDepth) {
+    Diag(LParenLoc, diag::err_macro_expansion_depth_exceeded)
+        << Macro << getLangOpts().MacroExpansionDepth;
+    // No location: the error already shows the (elided) expansion stack.
+    Diag(SourceLocation(), diag::note_macro_expansion_depth);
+    MacroExpansionDepthExceeded = true;
+    return true;
+  }
+
   // The invocation never becomes a call to the (consteval) macro, so the
   // reference to it must not be reported as an escaped immediate function.
   if (auto *DRE = dyn_cast<DeclRefExpr>(Fn->IgnoreParenImpCasts()))
@@ -8136,14 +8155,18 @@ ExprResult Sema::BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
   // location for a qualified or member callee too.)
   ExprResult Parsed = ParseExpressionMacroExpansionFromParserBridge(
       Expansion, SourceRange(Fn->getExprLoc(), RParenLoc));
-  if (Parsed.isInvalid() || Parsed.get()->containsErrors()) {
+  // Once the depth limit has been hit inside this expansion, every enclosing
+  // level would attach this note to that (fatal) error as the recursion
+  // unwinds -- one per level. The error already shows the expansion stack.
+  if ((Parsed.isInvalid() || Parsed.get()->containsErrors()) &&
+      !MacroExpansionDepthExceeded) {
     Diag(LParenLoc, diag::note_macro_expanded_here) << Macro;
     // A parse error, reported by the parser, did not show the instantiation
     // context; the note (being a note) does not either.
     PrintContextStack();
-    if (Parsed.isInvalid())
-      return ExprError();
   }
+  if (Parsed.isInvalid())
+    return ExprError();
   if (CheckMacroArgumentEvaluation(*this, Parsed.get(), ArgOVEs))
     return ExprError();
   return Parsed;

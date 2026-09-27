@@ -347,6 +347,14 @@ about an *argument* points at the argument. (The lifetime analysis behind
 that warning also looks through interpolated arguments to the expressions
 behind them, so `fwd!(x)` never hides `x` from `-Wdangling`.)
 
+Expansions nest: an expansion may invoke macros, including (directly or
+indirectly) the macro being expanded. Legitimate recursion (a macro peeling
+one argument per level) is fine; the depth of nested expansions is bounded by
+`-fmacro-expansion-depth=N` (default 256), and exceeding it is a fatal error
+showing the elided expansion stack, as for `-ftemplate-depth`. A failed
+invocation recovers as an error expression, so it does not cascade (for
+instance into deducing `void` for the enclosing `auto` function).
+
 If any argument is type-, value-, or otherwise instantiation-dependent, the
 invocation is kept as a `CXXMacroInvocationExpr` (callee, arguments, and
 locations) and overload resolution and expansion are deferred to instantiation,

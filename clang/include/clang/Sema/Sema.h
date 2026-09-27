@@ -16549,6 +16549,30 @@ public:
                           SourceLocation RParenLoc, ExprResult &FnOut,
                           FunctionDecl *&MacroOut,
                           CallExpr::ADLCallKind &UsesADLOut);
+  /// The number of macro expansions currently being parsed, one inside
+  /// another. Checked against -fmacro-expansion-depth before a macro body is
+  /// evaluated, so a macro that (directly or indirectly) expands to itself is
+  /// diagnosed rather than overflowing the stack.
+  unsigned MacroExpansionDepth = 0;
+
+  /// Set once the depth limit has been diagnosed (a fatal error), so that the
+  /// levels of expansion unwinding from it do not each add a note.
+  bool MacroExpansionDepthExceeded = false;
+
+  /// Counts one level of macro expansion for the lifetime of the object.
+  class MacroExpansionDepthRAII {
+    Sema &S;
+
+  public:
+    explicit MacroExpansionDepthRAII(Sema &S) : S(S) {
+      ++S.MacroExpansionDepth;
+    }
+    ~MacroExpansionDepthRAII() { --S.MacroExpansionDepth; }
+    MacroExpansionDepthRAII(const MacroExpansionDepthRAII &) = delete;
+    MacroExpansionDepthRAII &operator=(const MacroExpansionDepthRAII &) =
+        delete;
+  };
+
   /// Bind the arguments, evaluate the macro's body, and produce the expansion
   /// token sequence. Returns true on (diagnosed) error.
   bool EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,

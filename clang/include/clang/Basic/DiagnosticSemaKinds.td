@@ -3293,6 +3293,12 @@ def err_builtin_constexpr_diag_arg : Error<
 def err_macro_argument_evaluated_twice : Error<
   "expansion of expression macro would evaluate this argument more than once">;
 def note_macro_expanded_here : Note<"in expansion of expression macro %0">;
+def err_macro_expansion_depth_exceeded : Error<
+  "recursive expansion of expression macro %0 exceeded maximum depth of %1">,
+  DefaultFatal, NoSFINAE;
+def note_macro_expansion_depth : Note<
+  "use -fmacro-expansion-depth=N to increase the maximum depth of nested "
+  "expression macro expansions">, NoSFINAE;
 def err_token_sequence_param_pack : Error<
   "template parameter pack %0 cannot be substituted into a token sequence">;
 def err_macro_member : Error<

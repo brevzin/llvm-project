@@ -54,6 +54,9 @@ def metafn_cannot_be_arg : Note<
 def metafn_undeduced_placeholder : Note<
   "cannot form a reflection of function %0 whose type %1 contains an undeduced "
   "placeholder">;
+def metafn_undeduced_return_type : Note<
+  "cannot query the return type of %select{function %1|function type %1}0, "
+  "which has not been deduced yet">;
 def metafn_cannot_invoke : Note<"cannot invoke %0">;
 def metafn_no_specialization_found : Note<
   "no specialization of the function template %0 matched the provided "
