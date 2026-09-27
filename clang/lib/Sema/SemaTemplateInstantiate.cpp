@@ -2114,6 +2114,54 @@ Decl *TemplateInstantiator::TransformDecl(SourceLocation Loc, Decl *D) {
   if (isa<TranslationUnitDecl>(D))
     return D;
 
+  // A non-dependent expression can bind a reference template parameter to a
+  // local static in a template. The resulting specialization still depends on
+  // the identity of that local, even though its enclosing context does not.
+  // Substitute its converted arguments, including deduced and defaulted ones,
+  // rather than retaining a specialization bound to the pattern declaration.
+  if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+    const auto *Args = FD->getTemplateSpecializationArgs();
+    if (Args && llvm::any_of(Args->asArray(), [](const TemplateArgument &Arg) {
+          return Arg.isInstantiationDependent();
+        })) {
+      auto TransformArg = [&](auto &&Self,
+                              const TemplateArgument &Arg) -> TemplateArgument {
+        if (Arg.getKind() == TemplateArgument::Pack) {
+          SmallVector<TemplateArgument, 4> Pack;
+          for (const auto &Element : Arg.pack_elements()) {
+            TemplateArgument New = Self(Self, Element);
+            if (New.isNull())
+              return {};
+            Pack.push_back(New);
+          }
+          return TemplateArgument::CreatePackCopy(SemaRef.Context, Pack);
+        }
+        TemplateArgumentLoc Input, Output;
+        InventTemplateArgumentLoc(Arg, Input);
+        if (TransformTemplateArgument(Input, Output))
+          return {};
+        return Output.getArgument();
+      };
+      SmallVector<TemplateArgument, 4> NewArgs;
+      bool Changed = false;
+      for (const auto &Arg : Args->asArray()) {
+        TemplateArgument New = TransformArg(TransformArg, Arg);
+        if (New.isNull())
+          return nullptr;
+        Changed |= !New.structurallyEquals(Arg);
+        NewArgs.push_back(New);
+      }
+      if (Changed) {
+        auto *FTD = cast_or_null<FunctionTemplateDecl>(
+            TransformDecl(Loc, FD->getPrimaryTemplate()));
+        if (!FTD)
+          return nullptr;
+        return SemaRef.InstantiateFunctionDeclaration(
+            FTD, TemplateArgumentList::CreateCopy(SemaRef.Context, NewArgs), Loc);
+      }
+    }
+  }
+
   if (TemplateTemplateParmDecl *TTP = dyn_cast<TemplateTemplateParmDecl>(D)) {
     if (TTP->getDepth() < TemplateArgs.getNumLevels()) {
       // If the corresponding template argument is NULL or non-existent, it's
