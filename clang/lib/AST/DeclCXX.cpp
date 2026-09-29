@@ -3727,6 +3727,10 @@ ConstevalBlockDecl *ConstevalBlockDecl::CreateDeserialized(ASTContext &C,
   return new (C, ID) ConstevalBlockDecl(nullptr, SourceLocation(), nullptr);
 }
 
+CXXMacroInvocationExpr *ConstevalBlockDecl::getDeclMacroInvocation() const {
+  return dyn_cast_or_null<CXXMacroInvocationExpr>(EvaluatingExpr);
+}
+
 VarDecl *ValueDecl::getPotentiallyDecomposedVarDecl() {
   assert((isa<VarDecl, BindingDecl>(this)) &&
          "expected a VarDecl or a BindingDecl");

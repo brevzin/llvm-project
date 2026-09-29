@@ -2543,12 +2543,41 @@ Decl *TemplateDeclInstantiator::VisitExplicitInstantiationDecl(
   llvm_unreachable("ExplicitInstantiationDecl should not be instantiated");
 }
 
+void Sema::InstantiateDeclMacroInvocation(
+    ConstevalBlockDecl *D, const MultiLevelTemplateArgumentList &TemplateArgs) {
+  CXXMacroInvocationExpr *E = D->getDeclMacroInvocation();
+  assert(E && "not a declaration macro invocation");
+  TokenSequenceData Expansion;
+  if (SubstAndEvaluateMacroInvocation(E, TemplateArgs, Expansion) ||
+      Expansion.empty())
+    return;
+
+  SourceLocation NameLoc = E->isMemberInvocation()
+                               ? E->getMemberNameInfo().getLoc()
+                               : E->getCallee()->getNameLoc();
+  Expr::EvalStatus::TokenInjection Inj;
+  Inj.Loc = E->getRParenLoc();
+  Inj.TSD = Expansion;
+  Inj.AS = D->getAccess();
+  Inj.Invocation = SourceRange(NameLoc, E->getRParenLoc());
+  PendingInjections.push_back(Inj);
+  MacroExpansionDepthRAII Depth(*this);
+  ProcessPendingTokenInjections();
+}
+
 Decl *TemplateDeclInstantiator::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
   Expr *EvaluatingExpr = D->getEvaluatingExpr();
 
   // The expression in a consteval block is a constant expression.
   EnterExpressionEvaluationContext ConstantEvaluated(
       SemaRef, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+
+  // A declaration macro invocation expands in place; nothing of it remains
+  // in the specialization but its expansion.
+  if (D->getDeclMacroInvocation()) {
+    SemaRef.InstantiateDeclMacroInvocation(D, TemplateArgs);
+    return nullptr;
+  }
 
   ExprResult InstantiatedEvaluatingExpr = SemaRef.SubstExpr(EvaluatingExpr,
                                                             TemplateArgs);
@@ -7095,6 +7124,90 @@ void Sema::InstantiateVariableDefinition(SourceLocation PointOfInstantiation,
   GlobalInstantiations.perform();
 }
 
+bool Sema::SubstAndEvaluateMacroInvocation(
+    CXXMacroInvocationExpr *E, const MultiLevelTemplateArgumentList &TemplateArgs,
+    TokenSequenceData &Expansion) {
+  // Locals of an enclosing expansion are not visible here.
+  SmallVector<SmallVector<NamedDecl *, 4>, 4> SavedScopes;
+  SavedScopes.swap(MacroExpansionLocalScopes);
+  auto RestoreScopes = llvm::make_scope_exit(
+      [&] { SavedScopes.swap(MacroExpansionLocalScopes); });
+
+  // A raw (token sequence) argument is consumed by the macro's evaluation
+  // and never reaches the enclosing declaration, so it is not a
+  // consteval-only value escaping into it.
+  auto ForgetRawArgs = [&](ArrayRef<Expr *> Args) {
+    for (Expr *Arg : Args)
+      if (Arg->getType()->isTokenSequenceType())
+        ExprEvalContexts.back().ConstevalOnly.erase(Arg);
+  };
+
+  SmallVector<Expr *, 4> Args;
+  if (E->isMemberInvocation()) {
+    // An implicit member access, 'this->name!(...)'.
+    ExprResult Base = SubstExpr(E->getBase(), TemplateArgs);
+    if (Base.isInvalid() ||
+        SubstExprs(E->getArgs(), /*IsCall=*/true, TemplateArgs, Args))
+      return true;
+    ForgetRawArgs(Args);
+    return EvaluateMemberMacroInvocation(
+        Base.get(), E->isArrow(), E->getOperatorLoc(), E->getMemberNameInfo(),
+        E->getLParenLoc(), Args, E->getRParenLoc(), Expansion);
+  }
+
+  UnresolvedLookupExpr *Old = E->getCallee();
+  ExprResult Callee;
+  if (E->areArgsUnparsed()) {
+    // A dependent qualifier: look the macros up now, then parse the
+    // arguments (captured as tokens) according to their shape.
+    NestedNameSpecifierLoc QualifierLoc =
+        SubstNestedNameSpecifierLoc(Old->getQualifierLoc(), TemplateArgs);
+    if (!QualifierLoc)
+      return true;
+    UnresolvedLookupExpr *Found = nullptr;
+    SmallVector<bool, 4> RawParams;
+    bool StillDependent = false;
+    if (LookupDeferredQualifiedMacro(QualifierLoc, Old->getNameInfo(), Found,
+                                     RawParams, StillDependent))
+      return true;
+    assert(!StillDependent && "instantiated context still dependent");
+    // The arguments are parsed as part of the template, then substituted
+    // into.
+    SmallVector<Expr *, 4> PatternArgs;
+    if (ParseDeferredMacroArguments(RawParams, E, PatternArgs) ||
+        SubstExprs(PatternArgs, /*IsCall=*/true, TemplateArgs, Args))
+      return true;
+    Callee = Found;
+  } else {
+    UnresolvedSet<8> Macros;
+    for (auto I = Old->decls_begin(), End = Old->decls_end(); I != End; ++I) {
+      auto *D = cast_or_null<NamedDecl>(
+          FindInstantiatedDecl(Old->getNameLoc(), *I, TemplateArgs));
+      if (!D)
+        return true;
+      Macros.addDecl(D, I.getAccess());
+    }
+    NestedNameSpecifierLoc QualifierLoc = Old->getQualifierLoc();
+    if (QualifierLoc) {
+      QualifierLoc = SubstNestedNameSpecifierLoc(QualifierLoc, TemplateArgs);
+      if (!QualifierLoc)
+        return true;
+    }
+    Callee = CreateUnresolvedLookupExpr(
+        /*NamingClass=*/nullptr, QualifierLoc, Old->getNameInfo(), Macros,
+        /*PerformADL=*/false);
+    if (Callee.isInvalid())
+      return true;
+
+    if (SubstExprs(E->getArgs(), /*IsCall=*/true, TemplateArgs, Args))
+      return true;
+  }
+  ForgetRawArgs(Args);
+  return EvaluateMacroInvocation(
+      /*S=*/nullptr, cast<UnresolvedLookupExpr>(Callee.get()),
+      E->getLParenLoc(), Args, E->getRParenLoc(), Expansion);
+}
+
 /// Expand a mem-initializer macro invocation deferred from the constructor
 /// template: substitute into the callee and arguments, evaluate the macro
 /// (its macro_expansion_context() is now the instantiated constructor, of a
@@ -7104,97 +7217,15 @@ expandDeferredMemInitMacro(Sema &S, CXXConstructorDecl *New,
                            CXXMacroInvocationExpr *E,
                            const MultiLevelTemplateArgumentList &TemplateArgs,
                            SmallVectorImpl<CXXCtorInitializer *> &Out) {
-  // Locals of an enclosing expansion are not visible here.
-  SmallVector<SmallVector<NamedDecl *, 4>, 4> SavedScopes;
-  SavedScopes.swap(S.MacroExpansionLocalScopes);
-  auto RestoreScopes = llvm::make_scope_exit(
-      [&] { SavedScopes.swap(S.MacroExpansionLocalScopes); });
-
-  // A raw (token sequence) argument is consumed by the macro's evaluation
-  // and never reaches the constructor, so it is not a consteval-only value
-  // escaping into it.
-  auto ForgetRawArgs = [&](ArrayRef<Expr *> Args) {
-    for (Expr *Arg : Args)
-      if (Arg->getType()->isTokenSequenceType())
-        S.ExprEvalContexts.back().ConstevalOnly.erase(Arg);
-  };
-
   TokenSequenceData Expansion;
-  auto ParseExpansion = [&](SourceLocation NameLoc) {
-    assert(S.CanParseMemInitMacroExpansion() && "no parser to expand into");
-    return S.ParseMemInitMacroExpansionFromParserBridge(
-        New, Expansion, SourceRange(NameLoc, E->getRParenLoc()), Out);
-  };
-
-  SmallVector<Expr *, 4> Args;
-  if (E->isMemberInvocation()) {
-    // An implicit member access, 'this->name!(...)'.
-    ExprResult Base = S.SubstExpr(E->getBase(), TemplateArgs);
-    if (Base.isInvalid() ||
-        S.SubstExprs(E->getArgs(), /*IsCall=*/true, TemplateArgs, Args))
-      return true;
-    ForgetRawArgs(Args);
-    if (S.EvaluateMemberMacroInvocation(
-            Base.get(), E->isArrow(), E->getOperatorLoc(),
-            E->getMemberNameInfo(), E->getLParenLoc(), Args, E->getRParenLoc(),
-            Expansion))
-      return true;
-    return ParseExpansion(E->getMemberNameInfo().getLoc());
-  }
-
-  UnresolvedLookupExpr *Old = E->getCallee();
-  ExprResult Callee;
-  if (E->areArgsUnparsed()) {
-    // A dependent qualifier: look the macros up now, then parse the
-    // arguments (captured as tokens) according to their shape.
-    NestedNameSpecifierLoc QualifierLoc =
-        S.SubstNestedNameSpecifierLoc(Old->getQualifierLoc(), TemplateArgs);
-    if (!QualifierLoc)
-      return true;
-    UnresolvedLookupExpr *Found = nullptr;
-    SmallVector<bool, 4> RawParams;
-    bool StillDependent = false;
-    if (S.LookupDeferredQualifiedMacro(QualifierLoc, Old->getNameInfo(), Found,
-                                       RawParams, StillDependent))
-      return true;
-    assert(!StillDependent && "constructor definition still dependent");
-    // The arguments are parsed as part of the constructor template, then
-    // substituted into.
-    SmallVector<Expr *, 4> PatternArgs;
-    if (S.ParseDeferredMacroArguments(RawParams, E, PatternArgs) ||
-        S.SubstExprs(PatternArgs, /*IsCall=*/true, TemplateArgs, Args))
-      return true;
-    Callee = Found;
-  } else {
-    UnresolvedSet<8> Macros;
-    for (auto I = Old->decls_begin(), End = Old->decls_end(); I != End; ++I) {
-      auto *D = cast_or_null<NamedDecl>(
-          S.FindInstantiatedDecl(Old->getNameLoc(), *I, TemplateArgs));
-      if (!D)
-        return true;
-      Macros.addDecl(D, I.getAccess());
-    }
-    NestedNameSpecifierLoc QualifierLoc = Old->getQualifierLoc();
-    if (QualifierLoc) {
-      QualifierLoc = S.SubstNestedNameSpecifierLoc(QualifierLoc, TemplateArgs);
-      if (!QualifierLoc)
-        return true;
-    }
-    Callee = S.CreateUnresolvedLookupExpr(
-        /*NamingClass=*/nullptr, QualifierLoc, Old->getNameInfo(), Macros,
-        /*PerformADL=*/false);
-    if (Callee.isInvalid())
-      return true;
-
-    if (S.SubstExprs(E->getArgs(), /*IsCall=*/true, TemplateArgs, Args))
-      return true;
-  }
-  ForgetRawArgs(Args);
-  if (S.EvaluateMacroInvocation(
-          /*S=*/nullptr, cast<UnresolvedLookupExpr>(Callee.get()),
-          E->getLParenLoc(), Args, E->getRParenLoc(), Expansion))
+  if (S.SubstAndEvaluateMacroInvocation(E, TemplateArgs, Expansion))
     return true;
-  return ParseExpansion(Old->getNameLoc());
+  SourceLocation NameLoc = E->isMemberInvocation()
+                               ? E->getMemberNameInfo().getLoc()
+                               : E->getCallee()->getNameLoc();
+  assert(S.CanParseMemInitMacroExpansion() && "no parser to expand into");
+  return S.ParseMemInitMacroExpansionFromParserBridge(
+      New, Expansion, SourceRange(NameLoc, E->getRParenLoc()), Out);
 }
 
 void

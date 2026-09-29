@@ -631,12 +631,64 @@ class C {
   members!();  // injected under the class's default 'private'
 };
 
-// A dependent context cannot form declarations from a macro; that is what
-// consteval blocks with queue_injection are for.
+// In a class template the expansion waits for instantiation, as a
+// 'consteval { queue_injection(...); }' would: the arguments may be
+// dependent, and each specialization gets its own expansion, in place among
+// its members, under the access in effect at the invocation.
+__macro gen_static(token_sequence decl, int init) {
+  return ^^{ static constexpr \(decl) = \(init); };
+}
+__macro gen_field(token_sequence decl) { return ^^{ \(decl); }; }
+
 template <class T>
 struct DT {
-  gen_var!(x, 1);  // expected-error {{macro 'gen_var' cannot form declarations in a dependent context; use 'consteval { queue_injection(...); }' to defer the injection to instantiation}}
+  char before;
+  gen_field!(T mid);
+  gen_static!(int size, sizeof(T));
+ private:
+  gen_static!(int hidden, 1);  // expected-note {{declared private here}}
+ public:
+  char after;
 };
+static_assert(DT<int>::size == sizeof(int) && DT<double>::size == 8);
+static_assert(__is_same(decltype(DT<long>::mid), long));
+static_assert(__builtin_offsetof(DT<int>, mid) == sizeof(int));
+static_assert(__builtin_offsetof(DT<int>, after) == 2 * sizeof(int));
+static_assert(DT<int>{'a', 4, 'b'}.mid == 4);
+constexpr int use_hidden = DT<int>::hidden;  // expected-error {{'hidden' is a private member of 'N17::DT<int>'}}
+
+// The expansion's own access specifiers do not leak past the invocation.
+template <class T>
+struct DM {
+  members!();
+  int after = 3;
+};
+static_assert(DM<int>{}.f() == 3 && DM<int>{}.after == 3);
+
+// A dependent class that is never instantiated never expands.
+__macro fails() { return ^^{ 1 + 2 }; }
+template <class T> struct Unused { fails!(); };
+
+// Nested templates, and expansions that themselves invoke declaration
+// macros (now in a non-dependent class).
+template <class T>
+struct Outer {
+  template <int N>
+  struct Inner {
+    gen_static!(int n, N + sizeof(T));
+    gen_field!(gen_static!(int nested, N));
+  };
+};
+static_assert(Outer<short>::Inner<3>::n == 5);
+static_assert(Outer<short>::Inner<3>::nested == 3);
+
+// An error in the expansion is reported with the instantiation it came from.
+template <class T>
+struct Bad {
+  gen_field!(T x y);  // expected-error {{expected ';' at end of declaration list}} \
+                      // expected-note {{in member declarations injected into 'Bad<int>'}}
+};
+Bad<int> bad;  // expected-note {{in instantiation of template class 'N17::Bad<int>' requested here}}
 
 // The expansion must consist of declarations.
 __macro not_decls() { return ^^{ 1 + 2 }; }

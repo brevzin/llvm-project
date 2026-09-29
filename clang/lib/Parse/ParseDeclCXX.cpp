@@ -1305,6 +1305,7 @@ void Parser::ProcessTokenInjections(
     // Build a token stream with an eof sentinel at the end.
     SmallVector<Token, 16> Toks;
     Toks.append(TSD.begin(), TSD.end());
+    relocateExpansionTokens(PP.getSourceManager(), Toks, Inj.Invocation);
     Token Eof;
     Eof.startToken();
     Eof.setKind(tok::eof);

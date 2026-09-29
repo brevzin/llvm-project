@@ -16582,13 +16582,30 @@ public:
                               TokenSequenceData &Expansion);
   /// A declaration-position macro invocation ('name!(args);' at namespace or
   /// class scope): resolve and evaluate; the parser parses \p Expansion as
-  /// declarations in place. Returns true on (diagnosed) error.
+  /// declarations in place. In a dependent class the invocation is instead
+  /// recorded as a member (starting access \p AS) that expands per
+  /// specialization, and \p Expansion is left empty. Returns true on
+  /// (diagnosed) error.
   bool ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
                                 SourceLocation NameLoc,
                                 SourceLocation ExclaimLoc,
                                 SourceLocation LParenLoc, MultiExprArg Args,
-                                SourceLocation RParenLoc,
+                                SourceLocation RParenLoc, AccessSpecifier AS,
                                 TokenSequenceData &Expansion);
+
+  /// Substitute into the callee and arguments of a macro invocation deferred
+  /// from a template, then evaluate the macro. Returns true on (diagnosed)
+  /// error.
+  bool SubstAndEvaluateMacroInvocation(
+      CXXMacroInvocationExpr *E,
+      const MultiLevelTemplateArgumentList &TemplateArgs,
+      TokenSequenceData &Expansion);
+
+  /// Expand a declaration macro invocation deferred from a class template
+  /// (recorded as \p D) into the class being instantiated.
+  void InstantiateDeclMacroInvocation(
+      ConstevalBlockDecl *D,
+      const MultiLevelTemplateArgumentList &TemplateArgs);
 
   /// A macro invocation as an entry of a ctor-initializer. In a dependent
   /// constructor the invocation is recorded (at \p Position among the

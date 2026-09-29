@@ -62,6 +62,7 @@ class CXXConstructorDecl;
 class CXXDestructorDecl;
 class CXXFinalOverriderMap;
 class CXXIndirectPrimaryBaseSet;
+class CXXMacroInvocationExpr;
 class CXXMethodDecl;
 class CXXRecordDecl;
 class DecompositionDecl;
@@ -4669,6 +4670,12 @@ public:
   static ConstevalBlockDecl *CreateDeserialized(ASTContext &C, GlobalDeclID ID);
 
   Expr *getEvaluatingExpr() const { return EvaluatingExpr; }
+
+  /// A declaration macro invocation in a class template ('name!(args);') is
+  /// recorded as a consteval block whose expression is the invocation: at
+  /// instantiation the macro expands into the specialization, as a
+  /// 'consteval { queue_injection(...); }' would.
+  CXXMacroInvocationExpr *getDeclMacroInvocation() const;
 
   SourceRange getSourceRange() const override LLVM_READONLY {
     return SourceRange(getLocation(), EvaluatingExpr->getEndLoc());

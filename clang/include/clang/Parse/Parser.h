@@ -8634,6 +8634,12 @@ private:
   /// added to the current class (with access \p AS); at namespace scope the
   /// parsed declarations are returned.
   DeclGroupPtrTy ParseDeclMacroInvocation(AccessSpecifier AS, Decl *TagDecl);
+  /// Relocate the tokens of a macro's expansion into a macro-expansion
+  /// SourceLocation of the invocation \p Invocation (from the macro name to
+  /// the closing bracket), so diagnostics read "expanded from macro".
+  static void relocateExpansionTokens(SourceManager &SM,
+                                      SmallVectorImpl<Token> &Toks,
+                                      SourceRange Invocation);
   /// Parse an interpolated declaration description (annot_decl_spec) in
   /// member-declaration position: declares the described clone in the
   /// current class and caches a following body for late parsing.

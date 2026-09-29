@@ -3367,7 +3367,11 @@ void Sema::ProcessPendingTokenInjections() {
   SmallVector<Expr::EvalStatus::TokenInjection, 4>
       Injections = std::move(PendingInjections);
   PendingInjections.clear();
+  DiagnosticErrorTrap Trap(Diags);
   ProcessTokenInjectionsFromParserBridge(Injections);
+  // The parser's diagnostics do not show the instantiation context.
+  if (Trap.hasErrorOccurred())
+    PrintContextStack();
 }
 
 bool Sema::EvaluateInjectMembersAnnotation(Decl *TagDecl, unsigned Index,

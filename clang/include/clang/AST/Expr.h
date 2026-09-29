@@ -654,6 +654,9 @@ public:
       TokenSequenceData TSD;
       /// Starting access for members injected into a class.
       AccessSpecifier AS = AS_public;
+      /// For the expansion of a declaration macro deferred to instantiation:
+      /// the invocation, so the tokens read as expanded from it.
+      SourceRange Invocation = SourceRange();
     };
 
     /// Token sequences pending injection from std::meta::queue_injection calls

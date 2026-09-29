@@ -7578,20 +7578,26 @@ bool Sema::ResolveMacroCallee(Scope *S, UnresolvedLookupExpr *Callee,
 
 /// A declaration-position macro invocation, 'name!(args);' at namespace or
 /// class scope: resolve and evaluate the macro; the caller parses the
-/// resulting tokens as declarations in place. Never deferred: a dependent
-/// context uses 'consteval { queue_injection(...) }' instead.
+/// resulting tokens as declarations in place. In a class template the
+/// expansion waits for instantiation, as the injection of
+/// 'consteval { queue_injection(...); }' would: the class the macro sees is
+/// only the pattern until then, and its arguments may be dependent.
 bool Sema::ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
                                     SourceLocation NameLoc,
                                     SourceLocation ExclaimLoc,
                                     SourceLocation LParenLoc,
                                     MultiExprArg Args,
                                     SourceLocation RParenLoc,
+                                    AccessSpecifier AS,
                                     TokenSequenceData &Expansion) {
   bool Dependent = CurContext->isDependentContext();
   for (Expr *Arg : Args)
     Dependent |= Arg->isInstantiationDependent() ||
                  Arg->containsUnexpandedParameterPack();
-  if (Dependent) {
+  // Outside a class there is nothing to instantiate later. (Declaration
+  // macros appear only at namespace and class scope, so this is not reached
+  // today; keep the diagnostic for the day block scope is allowed.)
+  if (Dependent && !CurContext->isRecord()) {
     Diag(NameLoc, diag::err_decl_macro_dependent) << II;
     return true;
   }
@@ -7610,9 +7616,21 @@ bool Sema::ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
       R.getLookupNameInfo(), Macros, /*PerformADL=*/false);
   if (Callee.isInvalid())
     return true;
+  auto *ULE = cast<UnresolvedLookupExpr>(Callee.get());
 
-  return EvaluateMacroInvocation(S, cast<UnresolvedLookupExpr>(Callee.get()),
-                                 LParenLoc, Args, RParenLoc, Expansion);
+  if (Dependent) {
+    // Record the invocation as a member of the pattern; each specialization
+    // expands it in place, among the members that precede it.
+    auto *E = CXXMacroInvocationExpr::Create(Context, ULE, Args, ExclaimLoc,
+                                             LParenLoc, RParenLoc);
+    auto *D = ConstevalBlockDecl::Create(Context, CurContext, NameLoc, E);
+    D->setAccess(AS);
+    CurContext->addDecl(D);
+    return false;
+  }
+
+  return EvaluateMacroInvocation(S, ULE, LParenLoc, Args, RParenLoc,
+                                 Expansion);
 }
 
 bool Sema::EvaluateMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,

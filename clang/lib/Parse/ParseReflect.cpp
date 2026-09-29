@@ -425,9 +425,6 @@ DeclResult Parser::ParseCXXSpliceAsNamespace() {
 // Expression macros: name!(args), name!{args}, name![args]
 //===----------------------------------------------------------------------===//
 
-static void relocateExpansionTokens(SourceManager &SM,
-                                    SmallVectorImpl<Token> &Toks,
-                                    SourceRange Invocation);
 
 /// Parse the argument list of an expression-macro invocation and hand it to
 /// Sema. The macro name has already been consumed; the current token is '!',
@@ -517,9 +514,9 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
 
 /// Parse a declaration-position macro invocation, 'name!(args);', at
 /// namespace or class scope, then parse the macro's expansion as a sequence
-/// of declarations in place. There is no deferral: the invocation context
-/// must not be dependent (a dependent context uses a consteval block with
-/// queue_injection).
+/// of declarations in place. In a class template, Sema records the
+/// invocation instead and the expansion happens per specialization (the
+/// expansion parsed here is then empty).
 Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
                                                         Decl *TagDecl) {
   assert(isStartOfDeclMacroInvocation());
@@ -563,7 +560,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   TokenSequenceData Expansion;
   if (Actions.ActOnDeclMacroInvocation(getCurScope(), II, NameLoc, ExclaimLoc,
                                        T.getOpenLocation(), Args,
-                                       T.getCloseLocation(), Expansion))
+                                       T.getCloseLocation(), AS, Expansion))
     return nullptr;
 
   // Parse the expansion as declarations at the current position, delimited
@@ -866,9 +863,9 @@ ExprResult Parser::SpeculativeExpressionCallback(void *P,
 /// token, which is why the range starts at the name). Tokens that already
 /// lie within the invocation -- a raw token argument's -- and interpolated
 /// argument expressions (located at the argument) are left where they are.
-static void relocateExpansionTokens(SourceManager &SM,
-                                    SmallVectorImpl<Token> &Toks,
-                                    SourceRange Invocation) {
+void Parser::relocateExpansionTokens(SourceManager &SM,
+                                     SmallVectorImpl<Token> &Toks,
+                                     SourceRange Invocation) {
   if (Invocation.isInvalid())
     return;
   SourceLocation Begin = Invocation.getBegin(), End = Invocation.getEnd();
