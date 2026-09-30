@@ -47,11 +47,13 @@ enum class LogLevel { debug, info, error };
 struct Log {
   std::vector<std::pair<LogLevel, std::string>> entries;
 
+private:
   void do_log(LogLevel level, std::string_view fmt, auto&&... args) {
     entries.emplace_back(level,
                          std::vformat(fmt, std::make_format_args(args...)));
   }
 
+public:
   consteval {
     for (std::meta::info e : enumerators_of(^^LogLevel)) {
       auto name = std::meta::id(identifier_of(e));
@@ -68,7 +70,7 @@ struct Log {
           return ^^{
             do {
               constexpr std::string_view fmt = \(fs)(\(raw)).get();
-              \(self).do_log(::LogLevel::\\(name), \(call_args));
+              \(self).\(^^do_log)(::LogLevel::\\(name), \(call_args));
             }
           };
         }

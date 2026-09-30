@@ -1153,3 +1153,63 @@ template <class T, class... Ts> constexpr int bad() { return T::keep!(sizeof...(
 int b = bad<H, int>();  // expected-note {{in instantiation of function template specialization 'N26::bad<N26::H, int>' requested here}}
 
 }  // namespace N26
+
+namespace N27 {
+
+// An interpolated member after '.' or '->' names that member, as its
+// identifier would: data members, member functions, static members, and
+// member templates -- which, like a template named by an identifier, need no
+// 'template' keyword and may take a template argument list.
+struct S {
+  int v = 3;
+  constexpr int f(int x) const { return x; }
+  constexpr int g(auto x) const { return x * 2; }
+  template <class T> constexpr int h(T x) const { return sizeof(T) + x; }
+  static constexpr int st(int x) { return x + 100; }
+  static constexpr int sv = 7;
+};
+
+__macro field(S const& s) { return ^^{ \(s).\(^^S::v) }; }
+__macro fn(S const& s) { return ^^{ \(s).\(^^S::f)(1) }; }
+__macro abbreviated(S const& s) { return ^^{ \(s).\(^^S::g)(1) }; }
+__macro tmpl(S const& s) { return ^^{ \(s).\(^^S::h)(1) }; }
+__macro tmpl_args(S const& s) { return ^^{ \(s).\(^^S::h)<short>(1) }; }
+__macro arrow(S const* p) { return ^^{ \(p)->\(^^S::g)(2) }; }
+__macro static_fn(S const& s) { return ^^{ \(s).\(^^S::st)(1) }; }
+__macro static_var(S const& s) { return ^^{ \(s).\(^^S::sv) }; }
+
+constexpr S s;
+static_assert(field!(s) == 3);
+static_assert(fn!(s) == 1);
+static_assert(abbreviated!(s) == 2);
+static_assert(tmpl!(s) == sizeof(int) + 1);
+static_assert(tmpl_args!(s) == sizeof(short) + 1);
+static_assert(arrow!(&s) == 4);
+static_assert(static_fn!(s) == 101);
+static_assert(static_var!(s) == 7);
+
+// The member is named exactly, not looked up by name: a hiding member of a
+// derived class does not interfere.
+struct D : S {
+  constexpr int f(int) const { return -1; }
+};
+constexpr D d;
+static_assert(fn!(d) == 1);
+
+// The expansion is parsed where the macro is invoked, and a name in it is
+// looked up -- and access checked -- there. An interpolated reflection is
+// not looked up: a macro with access to a private member can name it in
+// its expansion that way, even where the expansion lands.
+class P {
+  constexpr int priv(auto x) const { return x; }  // expected-note {{declared private here}}
+public:
+  __macro by_name(this P const& self) { return ^^{ \(self).priv(1) }; }
+  __macro by_reflection(this P const& self) {
+    return ^^{ \(self).\(^^priv)(2) };
+  }
+};
+constexpr P pv;
+static_assert(pv.by_reflection!() == 2);
+constexpr int by_name = pv.by_name!();  // expected-error {{'priv' is a private member of 'N27::P'}}
+
+}  // namespace N27

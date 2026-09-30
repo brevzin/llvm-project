@@ -15207,7 +15207,8 @@ ExprResult Sema::BuildMacroCandidateExpansion(const OverloadCandidate &Best,
                                               SourceLocation Loc,
                                               SourceLocation RParenLoc,
                                               bool HadMultipleCandidates,
-                                              const Stmt *InstantiationPattern) {
+                                              const Stmt *InstantiationPattern,
+                                              SourceLocation NameLoc) {
   FunctionDecl *Macro = Best.Function;
   if (Macro->isInvalidDecl())
     return ExprError();
@@ -15215,8 +15216,11 @@ ExprResult Sema::BuildMacroCandidateExpansion(const OverloadCandidate &Best,
   const Expr *Base = nullptr;
   if (const auto *MD = dyn_cast<CXXMethodDecl>(Macro); MD && !MD->isStatic())
     Base = Args[0];
+  // The expansion is located as expanded at the invocation from Fn's
+  // location on, so Fn is located at the macro's name.
   ExprResult Fn = CreateFunctionRefExpr(*this, Macro, Best.FoundDecl, Base,
-                                        HadMultipleCandidates, Loc);
+                                        HadMultipleCandidates,
+                                        NameLoc.isValid() ? NameLoc : Loc);
   if (Fn.isInvalid())
     return ExprError();
 

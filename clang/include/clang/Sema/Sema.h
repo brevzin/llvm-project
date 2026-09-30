@@ -16502,13 +16502,17 @@ public:
                               SourceLocation RParenLoc,
                               bool HadMultipleCandidates,
                               TokenSequenceData &Expansion);
+  /// \p NameLoc, if valid, is where the macro is named (a member macro's
+  /// name); otherwise \p Loc (an operator) is.
   ExprResult BuildMacroCandidateExpansion(const OverloadCandidate &Best,
                                           ArrayRef<Expr *> Args,
                                           SourceLocation Loc,
                                           SourceLocation RParenLoc,
                                           bool HadMultipleCandidates,
                                           const Stmt *InstantiationPattern =
-                                              nullptr);
+                                              nullptr,
+                                          SourceLocation NameLoc =
+                                              SourceLocation());
   /// The pattern expression currently being transformed by template
   /// instantiation. An operator or member-access rebuild that selects a macro
   /// has no deferred node of its own to name; this is what it uses to

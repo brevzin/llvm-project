@@ -195,6 +195,32 @@ static_assert(getMem(&instance, &[:rJ:]) == 1);
 class WithPrivateBase : S {} d;
 int dK = d.[:^^S::k:];
 
+// A splice names the member it reflects without looking up its name, so
+// it is not access checked -- member templates (resolved as overload sets)
+// included. Whoever formed the reflection had the access.
+class Private {
+  int v = 1;
+  constexpr int f(int x) const { return x; }
+  template <class T> constexpr int g(T x) const { return sizeof(T) + x; }
+  template <class T> static constexpr int sg(T x) { return x; }
+public:
+  static consteval info rv() { return ^^v; }
+  static consteval info rf() { return ^^f; }
+  static consteval info rg() { return ^^g; }
+  static consteval info rsg() { return ^^sg; }
+};
+constexpr Private p;
+static_assert(p.[:Private::rv():] == 1);
+static_assert(p.[:Private::rf():](2) == 2);
+static_assert(p.template [:Private::rg():](1) == sizeof(int) + 1);
+static_assert(p.template [:Private::rg():]<char>(1) == 2);
+static_assert((&p)->template [:Private::rg():](1) == sizeof(int) + 1);
+static_assert(template [:Private::rsg():](3) == 3);
+
+// '->' through an lvalue pointer to a member template.
+constexpr const Private *pp = &p;
+static_assert(pp->template [:Private::rg():](1) == sizeof(int) + 1);
+
 }  // namespace with_member_access
 
                              // ===================

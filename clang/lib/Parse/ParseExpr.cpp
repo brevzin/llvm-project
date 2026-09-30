@@ -2158,20 +2158,60 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
         IdentifierInfo *Id = Tok.getIdentifierInfo();
         SourceLocation Loc = ConsumeToken();
         Name.setIdentifier(Id, Loc);
-      } else if (Tok.is(tok::annot_splice) ||
-                 Tok.is(tok::annot_token_seq_expr)) {
+      } else if (Tok.isOneOf(tok::annot_splice, tok::annot_token_seq_expr,
+                             tok::annot_template_name)) {
         // For annot_splice, parse it directly as a splice expression.
-        // For annot_token_seq_expr (from token sequence interpolation \(r)
-        // where r is a reflection), treat it as an implicit splice so
-        // that e.g. a.\(r) works like a.[:r:].
+        // An interpolated member (\(r), for r a reflection) names that
+        // member, as its identifier would, but exactly: it is an implicit
+        // splice, so that a.\(r) works like a.[:r:].
         ExprResult Res;
         if (Tok.is(tok::annot_splice)) {
           Res = ParseCXXSpliceAsExpr(TemplateKWLoc,
                                      /*AllowMemberReference=*/true);
+        } else if (Tok.is(tok::annot_template_name)) {
+          // An interpolated template is a template-name, as if named by an
+          // identifier: no 'template' keyword is needed, and a following
+          // '<' begins its template argument list. That is
+          // a.template [:r:]<args>.
+          SourceLocation Loc = Tok.getLocation();
+          TemplateName Template =
+              TemplateName::getFromVoidPointer(Tok.getAnnotationValue());
+          ConsumeAnnotationToken();
+          ExprResult Operand = Actions.BuildCXXReflectExpr(Loc, Loc, Template);
+          SpliceResult SR = SpliceError();
+          if (Operand.isInvalid()) {
+            // Diagnosed.
+          } else if (Tok.is(tok::less)) {
+            TemplateArgList TArgs;
+            SourceLocation LAngleLoc, RAngleLoc;
+            if (!ParseTemplateIdAfterTemplateName(/*ConsumeLastToken=*/true,
+                                                  LAngleLoc, TArgs, RAngleLoc,
+                                                  /*Template=*/nullptr)) {
+              ASTTemplateArgsPtr TArgsPtr(TArgs.data(), TArgs.size());
+              SR = Actions.ActOnSpliceSpecifier(Loc, Operand.get(), Loc,
+                                                LAngleLoc, TArgsPtr,
+                                                RAngleLoc);
+            }
+          } else {
+            SR = Actions.ActOnSpliceSpecifier(Loc, Operand.get(), Loc);
+          }
+          Res = SR.isInvalid()
+                    ? ExprError()
+                    : Actions.ActOnCXXSpliceExpression(
+                          /*TemplateKWLoc=*/Loc, SR.get(),
+                          /*AllowMemberReference=*/true);
         } else {
           Res = getExprAnnotation(Tok);
           SourceLocation ExprLoc = Tok.getLocation();
           ConsumeAnnotationToken();
+          // A member function or static data member is interpolated as a
+          // reference to it (so that, e.g., \(r)(args) calls it); here, the
+          // member it refers to is what is named.
+          if (!Res.isInvalid())
+            if (auto *DRE = dyn_cast<DeclRefExpr>(Res.get());
+                DRE && !DRE->getType()->isReflectionType())
+              Res = Actions.BuildCXXReflectExpr(ExprLoc, ExprLoc,
+                                                DRE->getDecl());
           if (!Res.isInvalid()) {
             auto *Splice = SpliceSpecifier::Create(
                 Actions.Context, ExprLoc, Res.get(), ExprLoc, nullptr);

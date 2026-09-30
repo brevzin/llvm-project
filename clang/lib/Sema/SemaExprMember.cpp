@@ -1346,9 +1346,13 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
     }
   }
 
+  // A splice names the reflected member directly: there was no lookup of
+  // its name here, so there is no access check either. (Whoever formed the
+  // reflection had the access.) Record it as found with public access, so
+  // that no later check -- overload resolution over a member template, in
+  // particular -- rechecks it from this context.
   LookupResult LR(*this, NameInfo, LookupMemberName);
-  if (LR.empty())
-    LR.addDecl(ND);
+  LR.addDecl(ND, AS_public);
   LR.resolveKind();
 
   // Obnoxious translating of TemplateArgumentList to TemplateArgumentListInfo..
@@ -1360,6 +1364,15 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
             getTrivialTemplateArgumentLoc(TA, QualType(), OpLoc);
         TemplateArgs.addArgument(TAL);
       }
+  }
+
+  // As LookupMemberExpr does for a named member: '->' needs a pointer
+  // prvalue (a member template's reference is rebuilt from the base as-is).
+  if (IsArrow) {
+    ExprResult Converted = PerformMemberExprBaseConversion(Base, IsArrow);
+    if (Converted.isInvalid())
+      return ExprError();
+    Base = Converted.get();
   }
 
   ExprResult Res = BuildMemberReferenceExpr(
