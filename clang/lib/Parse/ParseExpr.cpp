@@ -856,6 +856,12 @@ Parser::ParseCastExpression(CastParseKind ParseKind, bool isAddressOfOperand,
     Res = getExprAnnotation(Tok);
     if (!Res.isInvalid() && Tok.getKind() == tok::annot_overload_set)
       Res = Actions.ActOnNameClassifiedAsOverloadSet(getCurScope(), Res.get());
+    // An interpolated reflection of a variable or function arrives as a
+    // reference built by the evaluator, outside Sema: it is used here, where
+    // it lands (so a function template specialization gets instantiated).
+    if (!Res.isInvalid() && Tok.getKind() == tok::annot_token_seq_expr)
+      if (auto *DRE = dyn_cast<DeclRefExpr>(Res.get()))
+        Actions.MarkDeclRefReferenced(DRE);
     ConsumeAnnotationToken();
     if (!Res.isInvalid() && Tok.is(tok::less))
       checkPotentialAngleBracket(Res);
