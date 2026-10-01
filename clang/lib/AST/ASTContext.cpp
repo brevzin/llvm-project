@@ -1517,6 +1517,9 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target,
   // meta::token_sequence type (C++2c token sequences)
   InitBuiltinType(TokenSequenceTy, BuiltinType::TokenSequence);
 
+  // std::noreturn_t (P3549)
+  InitBuiltinType(NoReturnTy, BuiltinType::NoReturn);
+
   // half type (OpenCL 6.1.1.1) / ARM NEON __fp16
   InitBuiltinType(HalfTy, BuiltinType::Half);
 
@@ -2365,6 +2368,12 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
     case BuiltinType::TokenSequence:
       Width = Target->getMetaInfoWidth();
       Align = Target->getMetaInfoAlign();
+      break;
+    case BuiltinType::NoReturn:
+      // An object type with no values; it occupies one byte, like an empty
+      // class.
+      Width = Target->getCharWidth();
+      Align = Target->getCharAlign();
       break;
     case BuiltinType::ObjCId:
     case BuiltinType::ObjCClass:
@@ -3556,6 +3565,10 @@ static void encodeTypeForFunctionPointerAuth(const ASTContext &Ctx,
 
     case BuiltinType::TokenSequence:
       OS << "t";
+      return;
+
+    case BuiltinType::NoReturn:
+      OS << "Dz";
       return;
 
     case BuiltinType::ObjCId:
@@ -9316,6 +9329,7 @@ static char getObjCEncodingForPrimitiveType(const ASTContext *C,
     case BuiltinType::SatULongFract:
     case BuiltinType::MetaInfo:
     case BuiltinType::TokenSequence:
+    case BuiltinType::NoReturn:
       // FIXME: potentially need @encodes for these!
       return ' ';
 

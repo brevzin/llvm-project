@@ -746,6 +746,10 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     // today and the value can be set once WG21 fixes it.
     Builder.defineMacro("__cpp_do_expressions", "1");
   }
+  if (LangOpts.DivergingExpressions) {
+    // P3549, likewise not adopted: 1 for now.
+    Builder.defineMacro("__cpp_diverging_expressions", "1");
+  }
 
   // We provide those C++23 features as extensions in earlier language modes, so
   // we also define their feature test macros.

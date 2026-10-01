@@ -340,6 +340,7 @@ TypeSpecifierType BuiltinTypeLoc::getWrittenTypeSpec() const {
     return TST_wchar;
   case BuiltinType::MetaInfo:
   case BuiltinType::TokenSequence:
+  case BuiltinType::NoReturn:
   case BuiltinType::UChar:
   case BuiltinType::UShort:
   case BuiltinType::UInt:

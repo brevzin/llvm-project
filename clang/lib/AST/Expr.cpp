@@ -136,6 +136,44 @@ const Expr *Expr::skipRValueSubobjectAdjustments(
   return E;
 }
 
+bool Expr::isDiverging() const {
+  const Expr *E = this;
+  while (true) {
+    E = E->IgnoreParens();
+    if (const auto *FE = dyn_cast<FullExpr>(E))
+      E = FE->getSubExpr();
+    else if (const auto *BTE = dyn_cast<CXXBindTemporaryExpr>(E))
+      E = BTE->getSubExpr();
+    else if (const auto *MTE = dyn_cast<MaterializeTemporaryExpr>(E))
+      E = MTE->getSubExpr();
+    else if (const auto *CE = dyn_cast<CastExpr>(E);
+             CE && (CE->getCastKind() == CK_NoReturnToAny ||
+                    CE->getCastKind() == CK_ToVoid ||
+                    CE->getCastKind() == CK_NoOp))
+      E = CE->getSubExpr();
+    else
+      break;
+  }
+
+  if (E->getType()->isNoReturnType() || isa<CXXThrowExpr>(E))
+    return true;
+
+  if (const auto *CE = dyn_cast<CallExpr>(E)) {
+    if (const auto *FD = dyn_cast_or_null<FunctionDecl>(CE->getCalleeDecl()))
+      if (FD->isNoReturn())
+        return true;
+    // An indirect call through a pointer to a noreturn function type.
+    QualType CalleeTy = CE->getCallee()->getType();
+    if (const auto *PT = CalleeTy->getAs<PointerType>())
+      CalleeTy = PT->getPointeeType();
+    else if (const auto *RT = CalleeTy->getAs<ReferenceType>())
+      CalleeTy = RT->getPointeeType();
+    if (const auto *FT = CalleeTy->getAs<FunctionType>())
+      return FT->getNoReturnAttr();
+  }
+  return false;
+}
+
 bool Expr::isKnownToHaveBooleanValue(bool Semantic) const {
   const Expr *E = IgnoreParens();
 
@@ -1946,6 +1984,7 @@ bool CastExpr::CastConsistency() const {
   case CK_HLSLMatrixTruncation:
   case CK_HLSLElementwiseCast:
   case CK_HLSLAggregateSplatCast:
+  case CK_NoReturnToAny:
   CheckNoBasePath:
     assert(path_empty() && "Cast kind should not have a base path!");
     break;

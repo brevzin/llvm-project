@@ -175,6 +175,7 @@ ImplicitConversionRank clang::GetConversionRank(ImplicitConversionKind Kind) {
       ICR_Conversion,
       ICR_HLSL_Scalar_Widening,
       ICR_HLSL_Scalar_Widening,
+      ICR_Exact_Match,
   };
   static_assert(std::size(Rank) == (int)ICK_Num_Conversion_Kinds);
   return Rank[(int)Kind];
@@ -239,6 +240,7 @@ static const char *GetImplicitConversionName(ImplicitConversionKind Kind) {
       "Non-decaying array conversion",
       "HLSL vector splat",
       "HLSL matrix splat",
+      "Noreturn conversion",
   };
   static_assert(std::size(Name) == (int)ICK_Num_Conversion_Kinds);
   return Name[Kind];
@@ -1815,6 +1817,21 @@ TryImplicitConversion(Sema &S, Expr *From, QualType ToType,
                       bool AllowObjCWritebackConversion,
                       bool AllowObjCConversionOnExplicit) {
   ImplicitConversionSequence ICS;
+
+  // P3549: a std::noreturn_t converts to any type, directly -- never through
+  // a constructor or a conversion function of the destination -- with Exact
+  // Match rank.
+  if (S.getLangOpts().DivergingExpressions &&
+      From->getType()->isNoReturnType() &&
+      !S.Context.hasSameUnqualifiedType(From->getType(), ToType)) {
+    ICS.setStandard();
+    ICS.Standard.setAsIdentityConversion();
+    ICS.Standard.Second = ICK_NoReturn_Conversion;
+    ICS.Standard.setFromType(From->getType());
+    ICS.Standard.setAllToTypes(ToType);
+    return ICS;
+  }
+
   if (IsStandardConversion(S, From, ToType, InOverloadResolution,
                            ICS.Standard, CStyle, AllowObjCWritebackConversion)){
     ICS.setStandard();
@@ -1988,6 +2005,27 @@ bool Sema::IsFunctionConversion(QualType FromType, QualType ToType) const {
   // Drop 'noreturn' if not present in target type.
   if (FromEInfo.getNoReturn() && !ToEInfo.getNoReturn()) {
     FromFn = Context.adjustFunctionType(FromFn, FromEInfo.withNoReturn(false));
+    Changed = true;
+  }
+
+  // P3549: a function returning std::noreturn_t is a function returning
+  // void, as far as calling it is concerned (the two returns have the same
+  // ABI, and neither ever produces a value).
+  if (getLangOpts().DivergingExpressions &&
+      FromFn->getReturnType()->isNoReturnType() &&
+      ToFn->getReturnType()->isVoidType()) {
+    if (const auto *FPT = dyn_cast<FunctionProtoType>(FromFn))
+      FromFn = cast<FunctionType>(
+          Context
+              .getFunctionType(Context.VoidTy, FPT->getParamTypes(),
+                               FPT->getExtProtoInfo())
+              .getCanonicalType()
+              .getTypePtr());
+    else
+      FromFn = cast<FunctionType>(
+          Context.getFunctionNoProtoType(Context.VoidTy, FromFn->getExtInfo())
+              .getCanonicalType()
+              .getTypePtr());
     Changed = true;
   }
 
@@ -5481,6 +5519,24 @@ TryReferenceInit(Sema &S, Expr *Init, QualType DeclType,
   QualType T1 = DeclType->castAs<ReferenceType>()->getPointeeType();
   QualType T2 = Init->getType();
 
+  // P3549: a std::noreturn_t binds any reference, directly.
+  if (S.getLangOpts().DivergingExpressions && T2->isNoReturnType() &&
+      !S.Context.hasSameUnqualifiedType(T1, T2)) {
+    ICS.setStandard();
+    ICS.Standard.setAsIdentityConversion();
+    ICS.Standard.Second = ICK_NoReturn_Conversion;
+    ICS.Standard.setFromType(T2);
+    ICS.Standard.setAllToTypes(T1);
+    ICS.Standard.ReferenceBinding = true;
+    ICS.Standard.DirectBinding = true;
+    ICS.Standard.IsLvalueReference = !DeclType->isRValueReferenceType();
+    ICS.Standard.BindsToFunctionLvalue = false;
+    ICS.Standard.BindsToRvalue = false;
+    ICS.Standard.BindsImplicitObjectArgumentWithoutRefQualifier = false;
+    ICS.Standard.ObjCLifetimeConversionBinding = false;
+    return ICS;
+  }
+
   // If the initializer is the address of an overloaded function, try
   // to resolve the overloaded function. If all goes well, T2 is the
   // type of the resulting function.
@@ -6453,6 +6509,7 @@ static bool CheckConvertedConstantConversions(Sema &S,
   case ICK_Fixed_Point_Conversion:
   case ICK_HLSL_Vector_Truncation:
   case ICK_HLSL_Matrix_Truncation:
+  case ICK_NoReturn_Conversion:
     return false;
 
   case ICK_Lvalue_To_Rvalue:
@@ -15314,6 +15371,11 @@ ExprResult
 Sema::CreateOverloadedUnaryOp(SourceLocation OpLoc, UnaryOperatorKind Opc,
                               const UnresolvedSetImpl &Fns,
                               Expr *Input, bool PerformADL) {
+  // P3549 absorption (see BuildBinOp); this is also reached directly when
+  // instantiating a dependent operator expression.
+  if (absorbsUnaryOp(Input))
+    return BuildAbsorbedUnaryOp(OpLoc, Opc, Input);
+
   OverloadedOperatorKind Op = UnaryOperator::getOverloadedOperator(Opc);
   assert(Op != OO_None && "Invalid opcode for overloaded unary operator");
   DeclarationName OpName = Context.DeclarationNames.getCXXOperatorName(Op);
@@ -15590,6 +15652,11 @@ ExprResult Sema::CreateOverloadedBinOp(SourceLocation OpLoc,
                                        Expr *RHS, bool PerformADL,
                                        bool AllowRewrittenCandidates,
                                        FunctionDecl *DefaultedFn) {
+  // P3549 absorption (see BuildBinOp); this is also reached directly when
+  // instantiating a dependent operator expression.
+  if (!DefaultedFn && absorbsBinOp(Opc, LHS, RHS))
+    return BuildAbsorbedBinOp(OpLoc, Opc, LHS, RHS);
+
   Expr *Args[2] = { LHS, RHS };
   LHS=RHS=nullptr; // Please use only Args instead of LHS/RHS couple
 
@@ -16187,6 +16254,11 @@ ExprResult Sema::CreateOverloadedArraySubscriptExpr(SourceLocation LLoc,
                                                     SourceLocation RLoc,
                                                     Expr *Base,
                                                     MultiExprArg ArgExpr) {
+  // P3549 absorption (see BuildBinOp).
+  if (ArgExpr.size() == 1 &&
+      (absorbsUnaryOp(Base) || absorbsUnaryOp(ArgExpr[0])))
+    return BuildAbsorbedSubscript(Base, LLoc, ArgExpr[0], RLoc);
+
   SmallVector<Expr *, 2> Args;
   Args.push_back(Base);
   for (auto *e : ArgExpr) {

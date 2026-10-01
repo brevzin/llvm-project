@@ -1737,6 +1737,16 @@ defm do_expressions : BoolFOption<"do-expressions",
   BothFlags<[], [ClangOption, CC1Option], " support for P2806 do expressions">>,
   ShouldParseIf<cplusplus.KeyPath>;
 
+// P3549 diverging expressions: the bottom type std::noreturn_t, which a
+// throw-expression has instead of void. On by default in C++2d.
+defm diverging_expressions : BoolFOption<"diverging-expressions",
+  LangOpts<"DivergingExpressions">, Default<cpp29.KeyPath>,
+  PosFlag<SetTrue, [], [ClangOption], "Enable">,
+  NegFlag<SetFalse, [], [ClangOption], "Disable">,
+  BothFlags<[], [ClangOption, CC1Option],
+            " support for P3549 diverging expressions (std::noreturn_t)">>,
+  ShouldParseIf<cplusplus.KeyPath>;
+
 defm coro_aligned_allocation : BoolFOption<"coro-aligned-allocation",
   LangOpts<"CoroAlignedAllocation">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],

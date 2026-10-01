@@ -3469,6 +3469,11 @@ void CXXNameMangler::mangleType(const BuiltinType *T) {
     Out << "Dm";
     break;
   }
+  case BuiltinType::NoReturn: {
+    // A vendor extended type until the ABI assigns one.
+    Out << "u10noreturn_t";
+    break;
+  }
 
 #define BUILTIN_TYPE(Id, SingletonId)
 #define PLACEHOLDER_TYPE(Id, SingletonId) \

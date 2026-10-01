@@ -2960,6 +2960,11 @@ static bool isTriviallyCopyableTypeImpl(const QualType &type,
   if (CanonicalType->isMFloat8Type())
     return true;
 
+  // So is std::noreturn_t (P3549): there is never a value to copy, so copying
+  // can only be trivial. (Not that it makes it an implicit-lifetime type.)
+  if (CanonicalType->isNoReturnType())
+    return true;
+
   if (const auto *RD = CanonicalType->getAsRecordDecl()) {
     if (const auto *ClassDecl = dyn_cast<CXXRecordDecl>(RD)) {
       if (IsCopyConstructible)
@@ -3127,6 +3132,9 @@ bool Type::isLiteralType(const ASTContext &Ctx) const {
   //   A type is a literal type if it is:
   //   -- cv void; or
   if (Ctx.getLangOpts().CPlusPlus14 && isVoidType())
+    return true;
+  // So is std::noreturn_t (P3549), which a constexpr function may return.
+  if (isNoReturnType())
     return true;
 
   // C++11 [basic.types]p10:
@@ -3614,6 +3622,8 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
     return "meta::info";
   case TokenSequence:
     return "meta::token_sequence";
+  case NoReturn:
+    return "std::noreturn_t";
   case Overload:
     return "<overloaded function type>";
   case BoundMember:
@@ -5323,6 +5333,7 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
     case BuiltinType::NullPtr:
     case BuiltinType::MetaInfo:
     case BuiltinType::TokenSequence:
+    case BuiltinType::NoReturn:
     case BuiltinType::IncompleteMatrixIdx:
     case BuiltinType::ArraySection:
     case BuiltinType::OMPArrayShaping:

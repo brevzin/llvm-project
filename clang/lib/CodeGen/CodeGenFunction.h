@@ -3019,6 +3019,15 @@ public:
   /// result.
   void EmitIgnoredExpr(const Expr *E);
 
+  /// Emit \p E, a diverging expression (P3549), for its effects, then mark
+  /// the point after it unreachable. Leaves a fresh, unreachable insertion
+  /// point for whatever the caller emits next.
+  void EmitDivergingExpr(const Expr *E);
+
+  /// Mark the current point unreachable (as after a diverging expression)
+  /// and start a fresh, unreachable insertion point.
+  void EmitDivergencePoint();
+
   /// EmitAnyExpr - Emit code to compute the specified expression which can have
   /// any type.  The result is returned as an RValue struct.  If this is an
   /// aggregate expression, the aggloc/agglocvolatile arguments indicate where

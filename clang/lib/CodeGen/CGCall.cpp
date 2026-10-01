@@ -948,6 +948,16 @@ const CGFunctionInfo &CodeGenTypes::arrangeLLVMFunctionInfo(
     CGM.getABIInfo().computeInfo(*FI);
   }
 
+  // std::noreturn_t (P3549) has no values, so nothing is ever passed or
+  // returned: a noreturn_t return has the same ABI as a void return (which
+  // is what lets 'noreturn_t(*)()' convert to 'void(*)()'), and a noreturn_t
+  // parameter occupies no argument slot.
+  if (FI->getReturnType()->isNoReturnType())
+    FI->getReturnInfo() = ABIArgInfo::getIgnore();
+  for (auto &I : FI->arguments())
+    if (I.type->isNoReturnType())
+      I.info = ABIArgInfo::getIgnore();
+
   // Loop over all of the computed argument and return value info.  If any of
   // them are direct or extend without a specified coerce type, specify the
   // default now.
@@ -988,7 +998,7 @@ CGFunctionInfo *CGFunctionInfo::create(unsigned llvmCC, bool instanceMethod,
   FI->ChainCall = chainCall;
   FI->DelegateCall = delegateCall;
   FI->CmseNSCall = info.getCmseNSCall();
-  FI->NoReturn = info.getNoReturn();
+  FI->NoReturn = info.getNoReturn() || resultType->isNoReturnType();
   FI->ReturnsRetained = info.getProducesResult();
   FI->NoCallerSavedRegs = info.getNoCallerSavedRegs();
   FI->NoCfCheck = info.getNoCfCheck();

@@ -580,6 +580,14 @@ ComplexPairTy ComplexExprEmitter::EmitCast(CastKind CK, Expr *Op,
     return EmitLoadOfLValue(DestLV, Op->getExprLoc());
   }
 
+  case CK_NoReturnToAny: {
+    CGF.EmitDivergingExpr(Op);
+    llvm::Type *EltTy =
+        CGF.ConvertType(DestTy->castAs<ComplexType>()->getElementType());
+    return ComplexPairTy(llvm::PoisonValue::get(EltTy),
+                         llvm::PoisonValue::get(EltTy));
+  }
+
   case CK_BitCast:
   case CK_BaseToDerived:
   case CK_DerivedToBase:

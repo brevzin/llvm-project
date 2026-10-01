@@ -1319,6 +1319,7 @@ public:
     // evaluate them in the cases where they can be folded.
     case CK_BitCast:
     case CK_ToVoid:
+    case CK_NoReturnToAny:
     case CK_Dynamic:
     case CK_LValueBitCast:
     case CK_LValueToRValueBitCast:

@@ -17,6 +17,7 @@
 
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/Analysis/Analyses/ReachableCode.h"
 #include "clang/Analysis/CFG.h"
@@ -235,6 +236,115 @@ static bool doExprBodyMayFallThrough(Sema &S, CompoundStmt *Body,
   return false;
 }
 
+bool Sema::isDivergingStmt(const Stmt *S, bool InDoExpr) {
+  if (!S)
+    return false;
+  if (const auto *CS = dyn_cast<CompoundStmt>(S)) {
+    // The last statement, not counting trailing empty statements.
+    for (const Stmt *Sub : llvm::reverse(CS->body()))
+      if (!isa<NullStmt>(Sub))
+        return isDivergingStmt(Sub, InDoExpr);
+    return false;
+  }
+  if (const auto *AS = dyn_cast<AttributedStmt>(S))
+    return isDivergingStmt(AS->getSubStmt(), InDoExpr);
+  if (const auto *LS = dyn_cast<LabelStmt>(S))
+    return isDivergingStmt(LS->getSubStmt(), InDoExpr);
+  if (isa<BreakStmt, ContinueStmt, GotoStmt, IndirectGotoStmt>(S))
+    return true;
+  if (const auto *RS = dyn_cast<ReturnStmt>(S))
+    return InDoExpr || (RS->getRetValue() &&
+                        !RS->getRetValue()->isTypeDependent() &&
+                        RS->getRetValue()->isDiverging());
+  if (isa<CoreturnStmt>(S))
+    return InDoExpr;
+  if (const auto *DR = dyn_cast<DoReturnStmt>(S))
+    return InDoExpr && DR->getOperand() &&
+           !DR->getOperand()->isTypeDependent() &&
+           DR->getOperand()->isDiverging();
+  if (const auto *E = dyn_cast<Expr>(S))
+    return !E->isTypeDependent() && E->isDiverging();
+  if (const auto *DS = dyn_cast<DeclStmt>(S)) {
+    for (const Decl *D : DS->decls())
+      if (const auto *VD = dyn_cast<VarDecl>(D))
+        if (const Expr *Init = VD->getInit();
+            Init && !Init->isTypeDependent() && Init->isDiverging())
+          return true;
+    return false;
+  }
+  if (const auto *If = dyn_cast<IfStmt>(S)) {
+    if (If->isConstexpr()) {
+      if (std::optional<const Stmt *> Taken =
+              If->getNondiscardedCase(Context))
+        return isDivergingStmt(*Taken, InDoExpr);
+      return false;
+    }
+    return If->getElse() && isDivergingStmt(If->getThen(), InDoExpr) &&
+           isDivergingStmt(If->getElse(), InDoExpr);
+  }
+  return false;
+}
+
+namespace {
+/// Finds the `return` or `do_return` statements of one body: not those of a
+/// nested lambda, block, local class, or (for `do_return`) do-expression.
+class DivergingReturnFinder
+    : public RecursiveASTVisitor<DivergingReturnFinder> {
+public:
+  bool IsDoReturn;
+  SmallVector<Stmt *, 4> Found;
+  explicit DivergingReturnFinder(bool IsDoReturn) : IsDoReturn(IsDoReturn) {}
+
+  bool TraverseLambdaExpr(LambdaExpr *) { return true; }
+  bool TraverseBlockExpr(BlockExpr *) { return true; }
+  bool TraverseDecl(Decl *D) {
+    // Local classes and functions have bodies of their own; variables do not.
+    if (D && isa<TagDecl, FunctionDecl>(D))
+      return true;
+    return RecursiveASTVisitor::TraverseDecl(D);
+  }
+  bool TraverseDoExpr(DoExpr *E) {
+    // A nested do-expression's `do_return`s are its own; its `return`s are
+    // still the enclosing function's.
+    return IsDoReturn ? true : RecursiveASTVisitor::TraverseDoExpr(E);
+  }
+  bool VisitReturnStmt(ReturnStmt *S) {
+    if (!IsDoReturn)
+      Found.push_back(S);
+    return true;
+  }
+  bool VisitDoReturnStmt(DoReturnStmt *S) {
+    if (IsDoReturn)
+      Found.push_back(S);
+    return true;
+  }
+};
+} // namespace
+
+void Sema::convertDivergingReturnOperands(Stmt *Body, QualType ResultType,
+                                          bool IsDoReturn) {
+  DivergingReturnFinder Finder(IsDoReturn);
+  Finder.TraverseStmt(Body);
+  ExprValueKind VK = VK_PRValue;
+  if (const auto *RT = ResultType->getAs<ReferenceType>())
+    VK = isa<LValueReferenceType>(RT) ? VK_LValue : VK_XValue;
+  QualType T = ResultType.getNonReferenceType();
+  for (Stmt *S : Finder.Found) {
+    Expr *Op = IsDoReturn ? cast<DoReturnStmt>(S)->getOperand()
+                          : cast<ReturnStmt>(S)->getRetValue();
+    if (!Op || Op->isTypeDependent() || !Op->getType()->isNoReturnType() ||
+        Context.hasSameType(Op->getType(), T))
+      continue;
+    Expr *Converted = T->isVoidType()
+                          ? ImpCastExprToType(Op, T, CK_ToVoid).get()
+                          : BuildNoReturnConversion(Op, T, VK);
+    if (IsDoReturn)
+      cast<DoReturnStmt>(S)->setOperand(Converted);
+    else
+      cast<ReturnStmt>(S)->setRetValue(Converted);
+  }
+}
+
 void Sema::ActOnStartDoExpr(SourceLocation DoLoc, QualType ExplicitType,
                             unsigned TemplateDepth) {
   // The body forms a protected target for branch diagnostics: jumps may leave
@@ -430,6 +540,24 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
     // Inside a template, defer: no do_return yet seen with a non-dependent
     // operand. Use a dependent placeholder.
     ResultType = Context.DependentTy;
+  } else if (getLangOpts().DivergingExpressions &&
+             isDivergingStmt(Compound, /*InDoExpr=*/true)) {
+    // P3549: no `do_return` yields a value (any there are diverge), and the
+    // body diverges: the do-expression diverges, with type std::noreturn_t.
+    // With a placeholder type as written, deduce it from a std::noreturn_t.
+    ResultType = Context.NoReturnTy;
+    if (Entry.TypeIsExplicit) {
+      OpaqueValueExpr Diverging(DoLoc, Context.NoReturnTy, VK_PRValue);
+      sema::TemplateDeductionInfo Info(DoLoc);
+      if (DeduceAutoType(Entry.ExplicitTypeInfo->getTypeLoc(), &Diverging,
+                         Entry.DeducedType, Info) !=
+          TemplateDeductionResult::Success) {
+        Diag(DoLoc, diag::err_auto_fn_deduction_failure)
+            << Entry.ExplicitType << Context.NoReturnTy;
+        return ExprError();
+      }
+      ResultType = Entry.DeducedType;
+    }
   } else if (Entry.TypeIsExplicit &&
              Entry.ExplicitType->getContainedAutoType()) {
     // No do_return statements: deduce against void, as if the body ended in
@@ -486,6 +614,16 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
 
   if (InitStmt)
     Cleanup.setExprNeedsCleanups(true);
+
+  // The diverging `do_return`s took no part in deducing the type; convert
+  // their operands to it now.
+  if (Entry.HasDivergingDoReturn && !ResultType->isDependentType())
+    convertDivergingReturnOperands(
+        Compound,
+        VK == VK_LValue   ? Context.getLValueReferenceType(ResultType)
+        : VK == VK_XValue ? Context.getRValueReferenceType(ResultType)
+                          : ResultType,
+        /*IsDoReturn=*/true);
 
   auto *Result = new (Context)
       DoExpr(InitStmt, Compound, ResultType, VK, ExplicitType, DoLoc, LBraceLoc,
@@ -596,6 +734,29 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   if (Operand->isTypeDependent()) {
     Entry.HasDependentDoReturn = true;
     return new (Context) DoReturnStmt(DoReturnLoc, Operand);
+  }
+
+  // P3549: a diverging operand never yields a value. It takes no part in
+  // deducing the type (BuildDoExpr converts it once the type is known), and
+  // converts to any type as written. A [[noreturn]] call is treated as a
+  // std::noreturn_t for that, whatever its declared type.
+  if (getLangOpts().DivergingExpressions && Operand->isDiverging()) {
+    bool VoidResult = Entry.TypeIsExplicit &&
+                      !Entry.ExplicitType->getContainedAutoType() &&
+                      Entry.ExplicitType->isVoidType();
+    if (VoidResult) {
+      if (!Operand->getType()->isVoidType())
+        Operand = ImpCastExprToType(Operand, Context.VoidTy, CK_ToVoid).get();
+      return new (Context) DoReturnStmt(DoReturnLoc, Operand);
+    }
+    if (!Operand->getType()->isNoReturnType())
+      Operand =
+          BuildNoReturnConversion(Operand, Context.NoReturnTy, VK_PRValue);
+    if (doExprHasDeducedResultType(Entry)) {
+      Entry.HasDivergingDoReturn = true;
+      return new (Context) DoReturnStmt(DoReturnLoc, Operand);
+    }
+    // An explicit type: the ordinary initialization below converts it.
   }
 
   // Determine move-eligibility BEFORE applying any conversions, so that a

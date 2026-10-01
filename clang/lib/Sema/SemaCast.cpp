@@ -3397,6 +3397,13 @@ void CastOperation::CheckBuiltinBitCast() {
     SrcExpr = Self.CreateMaterializeTemporaryExpr(SrcType, SrcExpr.get(),
                                                   /*IsLValueReference=*/false);
 
+  // P3549: std::noreturn_t has no values, so no bits make one.
+  if (DestType->isNoReturnType()) {
+    Self.Diag(OpRange.getBegin(), diag::err_bit_cast_noreturn);
+    SrcExpr = ExprError();
+    return;
+  }
+
   CharUnits DestSize = Self.Context.getTypeSizeInChars(DestType);
   CharUnits SourceSize = Self.Context.getTypeSizeInChars(SrcType);
   if (DestSize != SourceSize) {

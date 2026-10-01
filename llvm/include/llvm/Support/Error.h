@@ -901,6 +901,33 @@ public:
   }
 };
 
+#ifdef __cpp_diverging_expressions
+namespace detail {
+// P3549's noreturn_t (the type of a diverging expression). Not spelled
+// decltype(throw 0): 'throw' is ill-formed with exceptions disabled, even
+// unevaluated. A function whose body cannot complete deduces noreturn_t.
+inline auto divergingResult() { __builtin_unreachable(); }
+using NoReturnT = decltype(divergingResult());
+} // namespace detail
+
+// Specialization for functions of the form 'noreturn_t (const ErrT&)': a
+// handler that cannot return (e.g. one ending in report_fatal_error) returns
+// noreturn_t, which converts to Error.
+template <typename ErrT>
+class ErrorHandlerTraits<detail::NoReturnT (&)(ErrT &)> {
+public:
+  static bool appliesTo(const ErrorInfoBase &E) {
+    return E.template isA<ErrT>();
+  }
+
+  template <typename HandlerT>
+  static Error apply(HandlerT &&H, std::unique_ptr<ErrorInfoBase> E) {
+    assert(appliesTo(*E) && "Applying incorrect handler");
+    return H(static_cast<ErrT &>(*E));
+  }
+};
+#endif
+
 /// Specialization for functions of the form 'Error (std::unique_ptr<ErrT>)'.
 template <typename ErrT>
 class ErrorHandlerTraits<Error (&)(std::unique_ptr<ErrT>)> {
@@ -933,6 +960,25 @@ public:
     return Error::success();
   }
 };
+
+#ifdef __cpp_diverging_expressions
+/// Specialization for functions of the form
+/// 'noreturn_t (std::unique_ptr<ErrT>)'.
+template <typename ErrT>
+class ErrorHandlerTraits<detail::NoReturnT (&)(std::unique_ptr<ErrT>)> {
+public:
+  static bool appliesTo(const ErrorInfoBase &E) {
+    return E.template isA<ErrT>();
+  }
+
+  template <typename HandlerT>
+  static Error apply(HandlerT &&H, std::unique_ptr<ErrorInfoBase> E) {
+    assert(appliesTo(*E) && "Applying incorrect handler");
+    std::unique_ptr<ErrT> SubE(static_cast<ErrT *>(E.release()));
+    return H(std::move(SubE));
+  }
+};
+#endif
 
 // Specialization for member functions of the form 'RetT (const ErrT&)'.
 template <typename C, typename RetT, typename ErrT>

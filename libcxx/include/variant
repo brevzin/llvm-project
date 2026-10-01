@@ -220,6 +220,7 @@ namespace std {
 #  include <__compare/ordering.h>
 #  include <__compare/three_way_comparable.h>
 #  include <__config>
+#  include <__cstddef/noreturn_t.h>
 #  include <__exception/exception.h>
 #  include <__functional/hash.h>
 #  include <__functional/operations.h>
@@ -234,6 +235,7 @@ namespace std {
 #  include <__type_traits/common_type.h>
 #  include <__type_traits/conditional.h>
 #  include <__type_traits/conjunction.h>
+#  include <__type_traits/copy_cvref.h>
 #  include <__type_traits/decay.h>
 #  include <__type_traits/dependent_type.h>
 #  include <__type_traits/enable_if.h>
@@ -246,6 +248,7 @@ namespace std {
 #  include <__type_traits/is_destructible.h>
 #  include <__type_traits/is_nothrow_assignable.h>
 #  include <__type_traits/is_nothrow_constructible.h>
+#  include <__type_traits/is_noreturn.h>
 #  include <__type_traits/is_reference.h>
 #  include <__type_traits/is_same.h>
 #  include <__type_traits/is_swappable.h>
@@ -258,6 +261,7 @@ namespace std {
 #  include <__type_traits/remove_cvref.h>
 #  include <__type_traits/remove_reference.h>
 #  include <__type_traits/type_identity.h>
+#  include <__type_traits/type_list.h>
 #  include <__type_traits/void_t.h>
 #  include <__utility/declval.h>
 #  include <__utility/forward.h>
@@ -607,6 +611,17 @@ struct __variant {
   }
 #    endif
 
+#    if defined(__cpp_diverging_expressions)
+  // std::visit with the result type computed under P3549. Not an overload of
+  // __visit_value: with no variants, its explicit template argument could be
+  // taken as _Visitor.
+  template <class _Rp, class _Visitor, class... _Vs>
+  _LIBCPP_HIDE_FROM_ABI static constexpr _Rp __visit_value_as(_Visitor&& __visitor, _Vs&&... __vs) {
+    return __visit_alt(
+        __value_visitor_return_type<_Rp, _Visitor>{std::forward<_Visitor>(__visitor)}, std::forward<_Vs>(__vs)...);
+  }
+#    endif
+
 private:
   template <class _Visitor, class... _Values>
   static _LIBCPP_HIDE_FROM_ABI constexpr void __std_visit_exhaustive_visitor_check() {
@@ -624,7 +639,7 @@ private:
     _Visitor&& __visitor;
   };
 
-#    if _LIBCPP_STD_VER >= 20
+#    if _LIBCPP_STD_VER >= 20 || defined(__cpp_diverging_expressions)
   template <class _Rp, class _Visitor>
   struct __value_visitor_return_type {
     template <class... _Alts>
@@ -1571,6 +1586,81 @@ _LIBCPP_HIDE_FROM_ABI constexpr bool operator>=(const variant<_Types...>& __lhs,
   return __variant::__visit_value_at(__lhs.index(), __convert_to_bool<greater_equal<>>{}, __lhs, __rhs);
 }
 
+#    if defined(__cpp_diverging_expressions)
+// P3549: arms of the visitor that return noreturn_t never produce a value, so
+// they don't take part in determining the result type. Like return type
+// deduction: the non-noreturn_t results must all be the same type, which is the
+// result; if every arm diverges, the result is noreturn_t.
+
+template <class _Acc, class _Rp>
+struct __visit_mismatch {};
+
+template <class _Tp>
+inline constexpr bool __is_visit_mismatch_v = false;
+
+template <class _Acc, class _Rp>
+inline constexpr bool __is_visit_mismatch_v<__visit_mismatch<_Acc, _Rp>> = true;
+
+// _Acc is the result so far (noreturn_t if there is no non-diverging arm yet).
+template <class _Acc, class _Rp>
+using __visit_unify_t _LIBCPP_NODEBUG =
+    conditional_t<is_noreturn_v<_Rp> || is_same_v<_Acc, _Rp>,
+                  _Acc,
+                  conditional_t<is_noreturn_v<_Acc>, _Rp, __visit_mismatch<_Acc, _Rp>>>;
+
+// An arm the visitor can't be called with is diagnosed by the exhaustiveness
+// check during dispatch; ignore it here.
+template <class _Fp, class... _Args>
+using __visit_arm_result_t _LIBCPP_NODEBUG =
+    typename conditional_t<__is_invocable_v<_Fp, _Args...>,
+                           __invoke_result<_Fp, _Args...>,
+                           __type_identity<noreturn_t>>::type;
+
+// The alternative _Ip of the variant _Vp, with _Vp's value category.
+template <size_t _Ip, class _Vp>
+using __visit_alt_t _LIBCPP_NODEBUG = __copy_cvref_t<_Vp, variant_alternative_t<_Ip, __remove_cvref_t<_Vp>>>;
+
+template <class _Acc, class _Fp, class _Bound, class... _Vs>
+struct __visit_fold;
+
+template <class _Acc, class _Fp, class _Bound, class _Vp, class _Is, class... _Vs>
+struct __visit_fold_alts;
+
+// Every variant is bound to an alternative: fold in that arm's result.
+template <class _Acc, class _Fp, class... _Bound>
+struct __visit_fold<_Acc, _Fp, __type_list<_Bound...>> {
+  using type _LIBCPP_NODEBUG = __visit_unify_t<_Acc, __visit_arm_result_t<_Fp, _Bound...>>;
+};
+
+// Bind the next variant to each of its alternatives in turn.
+template <class _Acc, class _Fp, class _Bound, class _Vp, class... _Vs>
+struct __visit_fold<_Acc, _Fp, _Bound, _Vp, _Vs...>
+    : __visit_fold_alts<_Acc, _Fp, _Bound, _Vp, make_index_sequence<variant_size_v<__remove_cvref_t<_Vp>>>, _Vs...> {
+};
+
+template <class _Acc, class _Fp, class _Bound, class _Vp, class... _Vs>
+struct __visit_fold_alts<_Acc, _Fp, _Bound, _Vp, index_sequence<>, _Vs...> {
+  using type _LIBCPP_NODEBUG = _Acc;
+};
+
+template <class _Acc, class _Fp, class... _Bound, class _Vp, size_t _Ip, size_t... _Is, class... _Vs>
+struct __visit_fold_alts<_Acc, _Fp, __type_list<_Bound...>, _Vp, index_sequence<_Ip, _Is...>, _Vs...>
+    : __visit_fold_alts<
+          typename __visit_fold<_Acc, _Fp, __type_list<_Bound..., __visit_alt_t<_Ip, _Vp>>, _Vs...>::type,
+          _Fp,
+          __type_list<_Bound...>,
+          _Vp,
+          index_sequence<_Is...>,
+          _Vs...> {};
+
+template <class _Visitor, class... _Vs>
+using __visit_result_t _LIBCPP_NODEBUG =
+    typename __visit_fold<noreturn_t,
+                          _Visitor&&,
+                          __type_list<>,
+                          decltype(std::__as_variant(std::declval<_Vs>()))...>::type;
+#    endif // defined(__cpp_diverging_expressions)
+
 template <class... _Vs>
 _LIBCPP_HIDE_FROM_ABI constexpr void __throw_if_valueless(_Vs&&... __vs) {
   const bool __valueless = (... || std::__as_variant(__vs).valueless_by_exception());
@@ -1583,7 +1673,18 @@ template < class _Visitor, class... _Vs, typename>
 _LIBCPP_HIDE_FROM_ABI constexpr decltype(auto) visit(_Visitor&& __visitor, _Vs&&... __vs) {
   using __variant_detail::__visitation::__variant;
   std::__throw_if_valueless(std::forward<_Vs>(__vs)...);
+#    if defined(__cpp_diverging_expressions)
+  using _Rp = __visit_result_t<_Visitor, _Vs...>;
+  if constexpr (__is_visit_mismatch_v<_Rp>) {
+    static_assert(!__is_visit_mismatch_v<_Rp>,
+                  "`std::visit` requires the visitor to have a single return type, "
+                  "ignoring arms that return noreturn_t.");
+  } else {
+    return __variant::__visit_value_as<_Rp>(std::forward<_Visitor>(__visitor), std::forward<_Vs>(__vs)...);
+  }
+#    else
   return __variant::__visit_value(std::forward<_Visitor>(__visitor), std::forward<_Vs>(__vs)...);
+#    endif
 }
 
 #    if _LIBCPP_STD_VER >= 20

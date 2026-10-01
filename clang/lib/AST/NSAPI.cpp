@@ -431,6 +431,7 @@ NSAPI::getNSNumberFactoryMethodKind(QualType T) const {
   case BuiltinType::NullPtr:
   case BuiltinType::MetaInfo:
   case BuiltinType::TokenSequence:
+  case BuiltinType::NoReturn:
   case BuiltinType::ObjCClass:
   case BuiltinType::ObjCId:
   case BuiltinType::ObjCSel:

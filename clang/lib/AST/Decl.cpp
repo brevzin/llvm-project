@@ -3670,7 +3670,9 @@ bool FunctionDecl::isNoReturn() const {
     return true;
 
   if (auto *FnTy = getType()->getAs<FunctionType>())
-    return FnTy->getNoReturnAttr();
+    // A function returning std::noreturn_t (P3549) cannot return: there is
+    // no value to return.
+    return FnTy->getNoReturnAttr() || FnTy->getReturnType()->isNoReturnType();
 
   return false;
 }

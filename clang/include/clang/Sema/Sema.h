@@ -7977,6 +7977,24 @@ public:
                         Expr *LHSExpr, Expr *RHSExpr,
                         bool ForFoldExpression = false);
 
+  /// P3549 absorption: an operator expression with an unconditionally
+  /// evaluated operand of type std::noreturn_t has that type itself, without
+  /// any operator being looked up. These test for it and build the
+  /// expression (whose operands are only evaluated, never operated on).
+  bool absorbsBinOp(BinaryOperatorKind Opc, const Expr *LHS, const Expr *RHS);
+
+  /// Convert \p E, a diverging expression, to a \p VK expression of type \p T
+  /// (P3549). No value is ever produced, so even a prvalue converts to a
+  /// glvalue.
+  Expr *BuildNoReturnConversion(Expr *E, QualType T, ExprValueKind VK);
+  bool absorbsUnaryOp(const Expr *Input);
+  ExprResult BuildAbsorbedBinOp(SourceLocation OpLoc, BinaryOperatorKind Opc,
+                                Expr *LHSExpr, Expr *RHSExpr);
+  ExprResult BuildAbsorbedUnaryOp(SourceLocation OpLoc, UnaryOperatorKind Opc,
+                                  Expr *Input);
+  ExprResult BuildAbsorbedSubscript(Expr *Base, SourceLocation LLoc, Expr *Idx,
+                                    SourceLocation RLoc);
+
   /// CreateBuiltinBinOp - Creates a new built-in binary operation with
   /// operator @p Opc at location @c TokLoc. This routine only supports
   /// built-in operations; ActOnBinOp handles overloaded operators.
@@ -8023,6 +8041,9 @@ public:
     bool HasDependentDoReturn = false; ///< True iff some yielded type is deferred.
     bool TypeIsExplicit;              ///< True iff ExplicitType was given.
     bool DeductionFailed = false;     ///< Tracks irrecoverable deduction error.
+    /// True if some `do_return` operand diverges (P3549); such a `do_return`
+    /// takes no part in deducing the type.
+    bool HasDivergingDoReturn = false;
     /// Function-scope depth at which the do-expression body began. Used to
     /// reject `do_return` that crosses a lambda/function-scope boundary.
     unsigned FunctionScopeDepth;
@@ -8096,6 +8117,27 @@ public:
   StmtResult ActOnDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand,
                                Scope *CurScope);
   StmtResult BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand);
+
+  /// Is \p S a diverging statement (P3549)? One of: a compound statement whose
+  /// last statement diverges; an escape statement (`break`, `continue`,
+  /// `goto`, and -- in a do-expression body, \p InDoExpr -- `return`); a
+  /// `return` or `do_return` whose operand diverges; an expression statement
+  /// whose expression diverges; a declaration statement with a diverging
+  /// initializer; an `if` with an `else`, both of whose substatements
+  /// diverge; or an `if constexpr` whose taken substatement diverges.
+  bool isDivergingStmt(const Stmt *S, bool InDoExpr);
+
+  /// Convert the operands of the `return` (\p IsDoReturn: `do_return`)
+  /// statements in \p Body whose operands diverge and so took no part in
+  /// deducing \p ResultType, now that it is known (P3549). Does not descend
+  /// into nested function bodies or do-expressions.
+  void convertDivergingReturnOperands(Stmt *Body, QualType ResultType,
+                                      bool IsDoReturn);
+
+  /// For a `return` in a function whose return type is deduced from \p AT:
+  /// if \p RetValExp diverges (P3549), prepare it and return true when it is
+  /// to take no part in the deduction (the type is not yet deduced).
+  bool deferDivergingReturn(Expr *&RetValExp, const AutoType *AT);
 
   // __builtin_offsetof(type, identifier(.identifier|[expr])*)
   struct OffsetOfComponent {

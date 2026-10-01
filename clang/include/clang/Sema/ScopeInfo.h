@@ -140,6 +140,11 @@ public:
   /// Whether this function uses constrained floating point intrinsics
   bool UsesFPIntrin : 1;
 
+  /// Whether a `return` statement with a diverging operand (P3549) was left
+  /// out of deducing the function's return type, and so still needs its
+  /// operand converted to the deduced type.
+  bool HasDivergingReturn : 1;
+
   /// Whether we make reference to a declaration that could be
   /// unavailable.
   bool HasPotentialAvailabilityViolations : 1;
@@ -398,6 +403,7 @@ public:
         HasBranchIntoScope(false), HasIndirectGoto(false), HasMustTail(false),
         HasDroppedStmt(false), HasOMPDeclareReductionCombiner(false),
         HasFallthroughStmt(false), UsesFPIntrin(false),
+        HasDivergingReturn(false),
         HasPotentialAvailabilityViolations(false), ObjCShouldCallSuper(false),
         ObjCIsDesignatedInit(false), ObjCWarnForNoDesignatedInitChain(false),
         ObjCIsSecondaryInit(false), ObjCWarnForNoInitDelegation(false),

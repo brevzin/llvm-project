@@ -10102,8 +10102,15 @@ QualType Sema::getDecltypeForExpr(Expr *E) {
 QualType Sema::BuildDecltypeType(Expr *E, bool AsUnevaluated) {
   assert(!E->hasPlaceholderType() && "unexpected placeholder");
 
+  if (getLangOpts().DivergingExpressions &&
+      isa<CXXThrowExpr>(E->IgnoreParens()))
+    Diag(E->getExprLoc(), diag::warn_diverging_compat_decltype);
+
+  // 'decltype(throw 0)' is how std::noreturn_t is named (P3549); a diverging
+  // operand is there for its type.
   if (AsUnevaluated && CodeSynthesisContexts.empty() &&
-      !E->isInstantiationDependent() && E->HasSideEffects(Context, false)) {
+      !E->isInstantiationDependent() && !E->getType()->isNoReturnType() &&
+      E->HasSideEffects(Context, false)) {
     // The expression operand for decltype is in an unevaluated expression
     // context, so side effects could result in unintended consequences.
     // Exclude instantiation-dependent expressions, because 'decltype' is often

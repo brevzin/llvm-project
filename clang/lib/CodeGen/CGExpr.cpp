@@ -272,6 +272,19 @@ void CodeGenFunction::EmitIgnoredExpr(const Expr *E) {
   EmitLValue(E);
 }
 
+void CodeGenFunction::EmitDivergingExpr(const Expr *E) {
+  EmitIgnoredExpr(E);
+  EmitDivergencePoint();
+}
+
+void CodeGenFunction::EmitDivergencePoint() {
+  if (HaveInsertPoint()) {
+    Builder.CreateUnreachable();
+    Builder.ClearInsertionPoint();
+  }
+  EnsureInsertPoint();
+}
+
 /// EmitAnyExpr - Emit code to compute the specified expression which
 /// can have any type.  The result is returned as an RValue struct.
 /// If this is an aggregate expression, AggSlot indicates where the
@@ -6041,6 +6054,18 @@ static std::optional<LValue> EmitLValueOrThrowExpression(CodeGenFunction &CGF,
     return std::nullopt;
   }
 
+  // Likewise any diverging operand (P3549), which Sema converted to the
+  // other operand's type: there is no lvalue to merge.
+  if (auto *CE = dyn_cast<CastExpr>(Operand->IgnoreParens());
+      CE && CE->getCastKind() == CK_NoReturnToAny) {
+    CGF.EmitIgnoredExpr(CE->getSubExpr());
+    if (CGF.HaveInsertPoint()) {
+      CGF.Builder.CreateUnreachable();
+      CGF.Builder.ClearInsertionPoint();
+    }
+    return std::nullopt;
+  }
+
   return CGF.EmitLValue(Operand);
 }
 
@@ -6193,6 +6218,17 @@ LValue CodeGenFunction::EmitCastLValue(const CastExpr *E) {
   llvm::scope_exit RestoreCurCast([this, Prev = CurCast] { CurCast = Prev; });
   CurCast = E;
   switch (E->getCastKind()) {
+  case CK_NoReturnToAny: {
+    // A reference bound to a diverging expression (P3549): the operand never
+    // completes, so there is no object to refer to.
+    EmitDivergingExpr(E->getSubExpr());
+    QualType T = E->getType();
+    return MakeAddrLValue(
+        Address(llvm::PoisonValue::get(
+                    llvm::PointerType::getUnqual(getLLVMContext())),
+                ConvertTypeForMem(T), getContext().getTypeAlignInChars(T)),
+        T);
+  }
   case CK_ToVoid:
   case CK_BitCast:
   case CK_LValueToRValueBitCast:

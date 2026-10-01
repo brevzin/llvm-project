@@ -559,6 +559,14 @@ public:
   /// semantically correspond to a bool.
   bool isKnownToHaveBooleanValue(bool Semantic = true) const;
 
+  /// Is this a diverging expression (P3549)? One whose evaluation never
+  /// completes: an expression of type std::noreturn_t (which includes a
+  /// throw-expression), or a call to a function declared [[noreturn]],
+  /// whatever its declared return type. Looks through parentheses, full-
+  /// expression wrappers, temporaries, and conversions of a diverging
+  /// operand (CK_NoReturnToAny, CK_ToVoid, CK_NoOp).
+  bool isDiverging() const;
+
   /// Check whether this array fits the idiom of a flexible array member,
   /// depending on the value of -fstrict-flex-array.
   /// When IgnoreTemplateOrMacroSubstitution is set, it doesn't consider sizes

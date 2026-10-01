@@ -9631,6 +9631,14 @@ public:
     default:
       break;
 
+    case CK_NoReturnToAny: {
+      // The operand diverges, so there is never a value to convert: evaluate
+      // it for its diagnostic.
+      if (!EvaluateIgnoredValue(Info, E->getSubExpr()))
+        return false;
+      return Error(E);
+    }
+
     case CK_AtomicToNonAtomic: {
       APValue AtomicVal;
       // This does not need to be done in place even for class/array types:
@@ -16961,6 +16969,7 @@ GCCTypeClass EvaluateBuiltinClassifyType(QualType T,
       return GCCTypeClass::None;
 
     case BuiltinType::NullPtr:
+    case BuiltinType::NoReturn:
 
     case BuiltinType::ObjCId:
     case BuiltinType::ObjCClass:
@@ -20595,6 +20604,7 @@ bool IntExprEvaluator::VisitCastExpr(const CastExpr *E) {
   case CK_NoOp:
   case CK_LValueToRValueBitCast:
   case CK_HLSLArrayRValue:
+  case CK_NoReturnToAny:
     return ExprEvaluatorBaseTy::VisitCastExpr(E);
 
   case CK_MemberPointerToBoolean:
@@ -21516,6 +21526,7 @@ bool ComplexExprEvaluator::VisitCastExpr(const CastExpr *E) {
   case CK_NoOp:
   case CK_LValueToRValueBitCast:
   case CK_HLSLArrayRValue:
+  case CK_NoReturnToAny:
     return ExprEvaluatorBaseTy::VisitCastExpr(E);
 
   case CK_Dependent:
@@ -23367,6 +23378,14 @@ static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E) {
         << E->getType();
     if (!EvaluateVoid(E, Info))
       return false;
+  } else if (T->isNoReturnType()) {
+    // A diverging expression (P3549): evaluating it never completes. Evaluate
+    // it for the diagnostic it produces (a throw, a call to a non-constexpr
+    // function, ...); if it somehow succeeds there is still no value.
+    if (!VoidExprEvaluator(Info).Visit(E))
+      return false;
+    Info.FFDiag(E, diag::note_invalid_subexpr_in_const_expr);
+    return false;
   } else if (T->isAtomicType()) {
     QualType Unqual = T.getAtomicUnqualifiedType();
     if (Unqual->isArrayType() || Unqual->isRecordType()) {

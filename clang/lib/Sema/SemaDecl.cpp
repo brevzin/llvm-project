@@ -17204,6 +17204,20 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body, bool IsInstantiation,
             Diag(dcl->getLocation(), diag::err_auto_fn_no_return_but_not_auto)
                 << FD->getReturnType();
             FD->setInvalidDecl();
+          } else if (getLangOpts().DivergingExpressions &&
+                     isDivergingStmt(Body, /*InDoExpr=*/false)) {
+            // P3549: no return statement yields a value (any there are
+            // diverge), and the body diverges: the function returns
+            // std::noreturn_t.
+            Diag(dcl->getLocation(), diag::warn_diverging_compat_deduction)
+                << isLambdaCallOperator(FD);
+            OpaqueValueExpr Diverging(dcl->getLocation(), Context.NoReturnTy,
+                                      VK_PRValue);
+            Expr *RetExpr = &Diverging;
+            if (DeduceFunctionTypeFromReturnExpr(
+                    FD, dcl->getLocation(), RetExpr,
+                    FD->getReturnType()->getAs<AutoType>()))
+              FD->setInvalidDecl();
           } else {
             // Falling off the end of the function is the same as 'return;'.
             Expr *Dummy = nullptr;
@@ -17213,6 +17227,13 @@ Decl *Sema::ActOnFinishFunctionBody(Decl *dcl, Stmt *Body, bool IsInstantiation,
               FD->setInvalidDecl();
           }
         }
+        // The diverging return statements took no part in the deduction;
+        // convert their operands to the deduced type now.
+        if (FSI->HasDivergingReturn && !FD->isInvalidDecl() && Body &&
+            !FD->isDependentContext() &&
+            !FD->getReturnType()->isUndeducedType())
+          convertDivergingReturnOperands(Body, FD->getReturnType(),
+                                         /*IsDoReturn=*/false);
       } else if (getLangOpts().CPlusPlus && isLambdaCallOperator(FD)) {
         // In C++11, we don't use 'auto' deduction rules for lambda call
         // operators because we don't support return type deduction.

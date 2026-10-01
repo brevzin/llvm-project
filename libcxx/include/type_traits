@@ -31,6 +31,7 @@ namespace std
     // Primary classification traits:
     template <class T> struct is_void;
     template <class T> struct is_null_pointer;                  // since C++14
+    template <class T> struct is_noreturn;                      // P3549, with __cpp_diverging_expressions
     template <class T> struct is_integral;
     template <class T> struct is_floating_point;
     template <class T> struct is_array;
@@ -536,6 +537,8 @@ namespace std
 #    include <__type_traits/is_final.h>
 #    include <__type_traits/is_null_pointer.h>
 #  endif
+
+#  include <__type_traits/is_noreturn.h>
 
 #  if _LIBCPP_STD_VER >= 17
 #    include <__type_traits/conjunction.h>

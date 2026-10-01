@@ -531,6 +531,8 @@ def CXX23Compat : DiagGroup<"c++23-compat", [CXXPre26Compat]>;
 def CXX26Compat : DiagGroup<"c++2c-compat", [DeleteIncomplete]>;
 
 def CXX29Compat : DiagGroup<"c++2d-compat">;
+// Places where P3549 diverging expressions give a different type than before.
+def DivergingCompat : DiagGroup<"diverging-compat">;
 
 def ExitTimeDestructors : DiagGroup<"exit-time-destructors">;
 def FlexibleArrayExtensions : DiagGroup<"flexible-array-extensions">;

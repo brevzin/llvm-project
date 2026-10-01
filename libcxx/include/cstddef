@@ -28,6 +28,7 @@ Types:
     max_align_t // C++11
     nullptr_t
     byte // C++17
+    noreturn_t // P3549, with __cpp_diverging_expressions
 
 }  // std
 
@@ -55,6 +56,7 @@ Types:
 
 #  include <__cstddef/byte.h>
 #  include <__cstddef/max_align_t.h>
+#  include <__cstddef/noreturn_t.h>
 #  include <__cstddef/nullptr_t.h>
 #  include <__cstddef/ptrdiff_t.h>
 #  include <__cstddef/size_t.h>

@@ -1635,8 +1635,10 @@ static bool EvaluateBinaryTypeTrait(Sema &Self, TypeTrait BTT,
   case BTT_IsConvertible:
   case BTT_IsConvertibleTo:
   case BTT_IsNothrowConvertible: {
+    // P3549: std::noreturn_t converts to any type, void included.
     if (RhsT->isVoidType())
-      return LhsT->isVoidType();
+      return LhsT->isVoidType() || (Self.getLangOpts().DivergingExpressions &&
+                                    LhsT->isNoReturnType());
     llvm::BumpPtrAllocator OpaqueExprAllocator;
     ExprResult Result = CheckConvertibilityForTypeTraits(Self, Lhs, Rhs, KeyLoc,
                                                          OpaqueExprAllocator);

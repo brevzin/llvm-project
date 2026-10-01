@@ -182,6 +182,13 @@ CAST_OPERATION(PointerToBoolean)
 ///    (void) malloc(2048)
 CAST_OPERATION(ToVoid)
 
+/// CK_NoReturnToAny - The conversion of a diverging expression (one of type
+/// std::noreturn_t, or a call to a [[noreturn]] function) to any type (P3549).
+/// The operand never completes, so no value is ever produced; the result may
+/// be a glvalue (binding a reference) or a prvalue of any type.
+///    int i = std::unreachable();
+CAST_OPERATION(NoReturnToAny)
+
 /// CK_MatrixCast - A cast between matrix types of the same dimensions.
 CAST_OPERATION(MatrixCast)
 

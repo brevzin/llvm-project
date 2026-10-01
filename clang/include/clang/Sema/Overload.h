@@ -210,6 +210,9 @@ class Sema;
     /// HLSL matrix splat from scalar or boolean type.
     ICK_HLSL_Matrix_Splat,
 
+    /// The conversion of a std::noreturn_t to any type (P3549).
+    ICK_NoReturn_Conversion,
+
     /// The number of conversion kinds
     ICK_Num_Conversion_Kinds,
   };

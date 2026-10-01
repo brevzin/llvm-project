@@ -2847,6 +2847,10 @@ void MicrosoftCXXNameMangler::mangleType(const BuiltinType *T, Qualifiers,
     Out << "$$M";
     break;
 
+  case BuiltinType::NoReturn:
+    mangleArtificialTagType(TagTypeKind::Struct, "noreturn_t", {"std"});
+    break;
+
   case BuiltinType::Float16:
     mangleArtificialTagType(TagTypeKind::Struct, "_Float16", {"__clang"});
     break;

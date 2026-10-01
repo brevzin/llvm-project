@@ -2652,6 +2652,7 @@ public:
   bool isVoidType() const;         // C99 6.2.5p19
   bool isReflectionType() const;     // C++2c reflection [P2996]
   bool isTokenSequenceType() const;  // C++2c token sequences
+  bool isNoReturnType() const;       // std::noreturn_t (P3549)
   bool isScalarType() const;         // C99 6.2.5p21 (arithmetic + pointers)
   bool isAggregateType() const;
   bool isFundamentalType() const;
@@ -8712,6 +8713,7 @@ inline bool Type::isFundamentalType() const {
   return isVoidType() ||
          isNullPtrType() ||
          isTokenSequenceType() ||
+         isNoReturnType() ||
          // FIXME: It's really annoying that we don't have an
          // 'isArithmeticType()' which agrees with the standard definition.
          (isArithmeticType() && !isEnumeralType());
@@ -9156,6 +9158,10 @@ inline bool Type::isMFloat8Type() const {
 
 inline bool Type::isFloat128Type() const {
   return isSpecificBuiltinType(BuiltinType::Float128);
+}
+
+inline bool Type::isNoReturnType() const {
+  return isSpecificBuiltinType(BuiltinType::NoReturn);
 }
 
 inline bool Type::isIbm128Type() const {

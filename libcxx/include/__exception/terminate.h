@@ -18,7 +18,13 @@
 _LIBCPP_BEGIN_UNVERSIONED_NAMESPACE_STD
 _LIBCPP_BEGIN_EXPLICIT_ABI_ANNOTATIONS
 
+#if defined(__cpp_diverging_expressions)
+// P3549: a function that cannot return returns the bottom type. (Same ABI as
+// void: the definition in the runtime library is still 'void terminate()'.)
+_LIBCPP_EXPORTED_FROM_ABI decltype(throw 0) terminate() _NOEXCEPT;
+#else
 [[__noreturn__]] _LIBCPP_EXPORTED_FROM_ABI void terminate() _NOEXCEPT;
+#endif
 
 _LIBCPP_END_EXPLICIT_ABI_ANNOTATIONS
 _LIBCPP_END_UNVERSIONED_NAMESPACE_STD

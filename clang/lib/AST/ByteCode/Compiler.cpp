@@ -841,6 +841,10 @@ bool Compiler<Emitter>::VisitCastExpr(const CastExpr *E) {
   case CK_ToVoid:
     return discard(SubExpr);
 
+  case CK_NoReturnToAny:
+    // The operand diverges (P3549); there is never a value.
+    return this->emitInvalid(E);
+
   case CK_Dynamic:
     // This initially goes through VisitCXXDynamicCastExpr, where we emit
     // a diagnostic if appropriate.

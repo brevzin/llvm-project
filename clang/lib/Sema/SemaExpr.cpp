@@ -5161,6 +5161,11 @@ ExprResult Sema::ActOnArraySubscriptExpr(Scope *S, Expr *base,
     base = result.get();
   }
 
+  // P3549: see BuildBinOp.
+  if (ArgExprs.size() == 1 &&
+      (absorbsUnaryOp(base) || absorbsUnaryOp(ArgExprs[0])))
+    return BuildAbsorbedSubscript(base, lbLoc, ArgExprs[0], rbLoc);
+
   // Check if base and idx form a MatrixSubscriptExpr.
   //
   // Helper to check for comma expressions, which are not allowed as indices for
@@ -17221,11 +17226,85 @@ static ExprResult BuildOverloadedBinOp(Sema &S, Scope *Sc, SourceLocation OpLoc,
   return S.CreateOverloadedBinOp(OpLoc, Opc, Functions, LHS, RHS);
 }
 
+/// Does \p E, an operand of an operator expression, make the expression
+/// diverge by absorption (P3549)? It does if it has type std::noreturn_t.
+static bool absorbsOperator(Sema &S, const Expr *E) {
+  return S.getLangOpts().DivergingExpressions && E &&
+         !E->isTypeDependent() && E->getType()->isNoReturnType();
+}
+
+ExprResult Sema::BuildAbsorbedBinOp(SourceLocation OpLoc,
+                                    BinaryOperatorKind Opc, Expr *LHSExpr,
+                                    Expr *RHSExpr) {
+  // The other operand is still evaluated (when it is evaluated before the
+  // diverging one), so resolve any placeholder it has.
+  for (Expr **Op : {&LHSExpr, &RHSExpr}) {
+    if ((*Op)->getType()->isNonOverloadPlaceholderType() ||
+        (*Op)->getType()->isSpecificPlaceholderType(BuiltinType::Overload)) {
+      ExprResult R = CheckPlaceholderExpr(*Op);
+      if (R.isInvalid())
+        return ExprError();
+      *Op = R.get();
+    }
+  }
+  // Before P3549, '(throw x, y)' had the type of 'y'.
+  if (Opc == BO_Comma && !RHSExpr->isTypeDependent() &&
+      !RHSExpr->getType()->isNoReturnType())
+    Diag(OpLoc, diag::warn_diverging_compat_comma) << RHSExpr->getType();
+  if (BinaryOperator::isCompoundAssignmentOp(Opc))
+    return CompoundAssignOperator::Create(
+        Context, LHSExpr, RHSExpr, Opc, Context.NoReturnTy, VK_PRValue,
+        OK_Ordinary, OpLoc, CurFPFeatureOverrides(), Context.NoReturnTy,
+        Context.NoReturnTy);
+  return BinaryOperator::Create(Context, LHSExpr, RHSExpr, Opc,
+                                Context.NoReturnTy, VK_PRValue, OK_Ordinary,
+                                OpLoc, CurFPFeatureOverrides());
+}
+
+bool Sema::absorbsBinOp(BinaryOperatorKind Opc, const Expr *LHS,
+                        const Expr *RHS) {
+  // The right operand of '&&' and '||' may not be evaluated at all, so it
+  // cannot make the expression diverge -- even if the operator turns out to
+  // be overloaded.
+  return absorbsOperator(*this, LHS) ||
+         (Opc != BO_LAnd && Opc != BO_LOr && absorbsOperator(*this, RHS));
+}
+
+Expr *Sema::BuildNoReturnConversion(Expr *E, QualType T, ExprValueKind VK) {
+  return ImplicitCastExpr::Create(Context, T, CK_NoReturnToAny, E,
+                                  /*BasePath=*/nullptr, VK,
+                                  CurFPFeatureOverrides());
+}
+
+bool Sema::absorbsUnaryOp(const Expr *Input) {
+  return absorbsOperator(*this, Input);
+}
+
+ExprResult Sema::BuildAbsorbedSubscript(Expr *Base, SourceLocation LLoc,
+                                        Expr *Idx, SourceLocation RLoc) {
+  return new (Context) ArraySubscriptExpr(Base, Idx, Context.NoReturnTy,
+                                          VK_PRValue, OK_Ordinary, RLoc);
+}
+
+ExprResult Sema::BuildAbsorbedUnaryOp(SourceLocation OpLoc,
+                                      UnaryOperatorKind Opc, Expr *Input) {
+  return UnaryOperator::Create(Context, Input, Opc, Context.NoReturnTy,
+                               VK_PRValue, OK_Ordinary, OpLoc,
+                               /*CanOverflow=*/false, CurFPFeatureOverrides());
+}
+
 ExprResult Sema::BuildBinOp(Scope *S, SourceLocation OpLoc,
                             BinaryOperatorKind Opc, Expr *LHSExpr,
                             Expr *RHSExpr, bool ForFoldExpression) {
   if (!LHSExpr || !RHSExpr)
     return ExprError();
+
+  // P3549: an operand of type std::noreturn_t that is evaluated
+  // unconditionally gives the whole expression that type, before any operator
+  // is looked up -- no operator function could ever be called, since its
+  // operands are evaluated before it is entered.
+  if (absorbsBinOp(Opc, LHSExpr, RHSExpr))
+    return BuildAbsorbedBinOp(OpLoc, Opc, LHSExpr, RHSExpr);
 
   // We want to end up calling one of SemaPseudoObject::checkAssignment
   // (if the LHS is a pseudo-object), BuildOverloadedBinOp (if
@@ -17678,6 +17757,10 @@ bool Sema::isQualifiedMemberAccess(Expr *E) {
 ExprResult Sema::BuildUnaryOp(Scope *S, SourceLocation OpLoc,
                               UnaryOperatorKind Opc, Expr *Input,
                               bool IsAfterAmp) {
+  // P3549: see BuildBinOp.
+  if (absorbsUnaryOp(Input))
+    return BuildAbsorbedUnaryOp(OpLoc, Opc, Input);
+
   // First things first: handle placeholders so that the
   // overloaded-operator check considers the right type.
   if (const BuiltinType *pty = Input->getType()->getAsPlaceholderType()) {

@@ -235,6 +235,10 @@ BUILTIN_TYPE(MetaInfo, MetaInfoTy)
 // This is the type for C++2c token sequences (^^{ tokens }).
 BUILTIN_TYPE(TokenSequence, TokenSequenceTy)
 
+// The bottom type, std::noreturn_t (P3549): the type of a diverging
+// expression, e.g. 'throw x'. It has no values.
+BUILTIN_TYPE(NoReturn, NoReturnTy)
+
 // The primitive Objective C 'id' type.  The user-visible 'id'
 // type is a typedef of an ObjCObjectPointerType to an
 // ObjCObjectType with this as its base.  In fact, this only ever

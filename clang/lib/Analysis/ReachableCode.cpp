@@ -493,8 +493,32 @@ static bool isInCoroutineStmt(const Stmt *DeadStmt, const CFGBlock *Block) {
   return checker.CoroutineSubStmt;
 }
 
+/// Is \p S what is left of a diverging expression (P3549) once its diverging
+/// operand has been evaluated -- a conversion of it to the type its context
+/// wants, an operator it absorbed, or the 'return' of it? That is dead by
+/// design, not dead code.
+static bool isRestOfDivergingExpr(const Stmt *S) {
+  if (const auto *RS = dyn_cast<ReturnStmt>(S))
+    return RS->getRetValue() && RS->getRetValue()->isDiverging();
+  if (const auto *DR = dyn_cast<DoReturnStmt>(S))
+    return DR->getOperand() && DR->getOperand()->isDiverging();
+  const auto *E = dyn_cast<Expr>(S);
+  if (!E)
+    return false;
+  E = E->IgnoreParens();
+  if (const auto *CE = dyn_cast<CastExpr>(E))
+    return (CE->getCastKind() == CK_NoReturnToAny ||
+            CE->getCastKind() == CK_ToVoid) &&
+           CE->getSubExpr()->isDiverging();
+  return E->getType()->isNoReturnType() &&
+         isa<BinaryOperator, UnaryOperator, ArraySubscriptExpr,
+             AbstractConditionalOperator>(E);
+}
+
 static bool isValidDeadStmt(const Stmt *S, const clang::CFGBlock *Block) {
   if (S->getBeginLoc().isInvalid())
+    return false;
+  if (isRestOfDivergingExpr(S))
     return false;
   if (const BinaryOperator *BO = dyn_cast<BinaryOperator>(S))
     return BO->getOpcode() != BO_Comma;

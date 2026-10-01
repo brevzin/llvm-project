@@ -13258,6 +13258,30 @@ def err_do_expr_falls_off_end : Error<
   "'throw', or a '[[noreturn]]' call">;
 } // end of do-expressions issue category
 
+let CategoryName = "Diverging Expressions Issue" in {
+def err_noreturn_object_init : Error<
+  "an object of type 'std::noreturn_t' can only be initialized by a diverging "
+  "expression of that type">;
+def warn_diverging_compat_deduction : Warning<
+  "%select{return type of function|return type of lambda}0 deduced as "
+  "'std::noreturn_t'; it was 'void' before P3549">,
+  InGroup<DivergingCompat>, DefaultIgnore;
+def warn_diverging_compat_comma : Warning<
+  "comma expression has type 'std::noreturn_t'; it had type %0 before P3549">,
+  InGroup<DivergingCompat>, DefaultIgnore;
+def warn_diverging_compat_conditional : Warning<
+  "conditional expression has type 'std::noreturn_t'; it had type 'void' "
+  "before P3549">,
+  InGroup<DivergingCompat>, DefaultIgnore;
+def warn_diverging_compat_decltype : Warning<
+  "'decltype' of a throw-expression is 'std::noreturn_t'; it was 'void' before "
+  "P3549">,
+  InGroup<DivergingCompat>, DefaultIgnore;
+def err_bit_cast_noreturn : Error<
+  "'__builtin_bit_cast' cannot produce a 'std::noreturn_t', which has no "
+  "values">;
+} // end of diverging expressions issue category
+
 let CategoryName = "Documentation Issue" in {
 def warn_not_a_doxygen_trailing_member_comment : Warning<
   "not a Doxygen trailing comment">, InGroup<Documentation>, DefaultIgnore;

@@ -1568,6 +1568,7 @@ bool CursorVisitor::VisitBuiltinTypeLoc(BuiltinTypeLoc TL) {
   case BuiltinType::Dependent:
   case BuiltinType::MetaInfo:
   case BuiltinType::TokenSequence:
+  case BuiltinType::NoReturn:
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
   case BuiltinType::Id:
 #include "clang/Basic/OpenCLImageTypes.def"

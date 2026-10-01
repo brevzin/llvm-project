@@ -25,7 +25,12 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 
 #if _LIBCPP_STD_VER >= 23
 
+#  if defined(__cpp_diverging_expressions)
+// P3549: a function that cannot return returns the bottom type.
+_LIBCPP_HIDE_FROM_ABI inline decltype(throw 0) unreachable() { __libcpp_unreachable(); }
+#  else
 [[noreturn]] _LIBCPP_HIDE_FROM_ABI inline void unreachable() { __libcpp_unreachable(); }
+#  endif
 
 #endif
 

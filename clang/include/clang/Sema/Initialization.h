@@ -1020,7 +1020,11 @@ public:
 
     /// Initialize an aggreagate with parenthesized list of values.
     /// This is a C++20 feature.
-    SK_ParenthesizedListInit
+    SK_ParenthesizedListInit,
+
+    /// Initialize an object or reference of any type from a diverging
+    /// expression of type std::noreturn_t (P3549).
+    SK_NoReturnConversion
   };
 
   /// A single step in the initialization sequence.
@@ -1206,6 +1210,10 @@ public:
 
     /// HLSL initialization list flattening failed.
     FK_HLSLInitListFlatteningFailed,
+
+    /// An object of type std::noreturn_t initialized by something other than
+    /// a std::noreturn_t (P3549).
+    FK_NoReturnObjectInit,
   };
 
 private:
@@ -1465,6 +1473,9 @@ public:
   void AddOCLZeroOpaqueTypeStep(QualType T);
 
   void AddParenthesizedListInitStep(QualType T);
+
+  /// Add a step converting a std::noreturn_t to \p T (P3549).
+  void AddNoReturnConversionStep(QualType T);
 
   /// Only used when initializing structured bindings from an array with
   /// direct-list-initialization. Unwrap the initializer list to get the array

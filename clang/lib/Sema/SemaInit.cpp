@@ -3982,6 +3982,7 @@ void InitializationSequence::Step::Destroy() {
   case SK_OCLSamplerInit:
   case SK_OCLZeroOpaqueType:
   case SK_ParenthesizedListInit:
+  case SK_NoReturnConversion:
     break;
 
   case SK_ConversionSequence:
@@ -4044,6 +4045,7 @@ bool InitializationSequence::isAmbiguous() const {
   case FK_ParenthesizedListInitFailed:
   case FK_DesignatedInitForNonAggregate:
   case FK_HLSLInitListFlatteningFailed:
+  case FK_NoReturnObjectInit:
     return false;
 
   case FK_ReferenceInitOverloadFailed:
@@ -4282,6 +4284,13 @@ void InitializationSequence::AddOCLZeroOpaqueTypeStep(QualType T) {
 void InitializationSequence::AddParenthesizedListInitStep(QualType T) {
   Step S;
   S.Kind = SK_ParenthesizedListInit;
+  S.Type = T;
+  Steps.push_back(S);
+}
+
+void InitializationSequence::AddNoReturnConversionStep(QualType T) {
+  Step S;
+  S.Kind = SK_NoReturnConversion;
   S.Type = T;
   Steps.push_back(S);
 }
@@ -6736,6 +6745,34 @@ void InitializationSequence::InitializeFrom(Sema &S,
       SourceType = Initializer->getType();
   }
 
+  if (S.getLangOpts().DivergingExpressions) {
+    // P3549: a std::noreturn_t initializes an object or reference of any
+    // type, directly.
+    if (!SourceType.isNull() && SourceType->isNoReturnType() &&
+        !S.Context.hasSameUnqualifiedType(SourceType,
+                                          DestType.getNonReferenceType()) &&
+        !DestType->isVoidType()) {
+      AddNoReturnConversionStep(DestType);
+      return;
+    }
+    // ... and nothing else initializes a std::noreturn_t: it has no values.
+    if (DestType->isNoReturnType()) {
+      Expr *Single = Args.size() == 1 ? Args[0] : nullptr;
+      auto *IL = dyn_cast_or_null<InitListExpr>(Single);
+      if (IL)
+        Single = IL->getNumInits() == 1 ? IL->getInit(0) : nullptr;
+      if (!Single || !Single->getType()->isNoReturnType()) {
+        SetFailed(FK_NoReturnObjectInit);
+        return;
+      }
+      // 'noreturn_t x{fail()};' is 'noreturn_t x = fail();'.
+      if (IL) {
+        AddUnwrapInitListInitStep(IL);
+        return;
+      }
+    }
+  }
+
   //     - If the initializer is a (non-parenthesized) braced-init-list, the
   //       object is list-initialized (8.5.4).
   if (Kind.getKind() != InitializationKind::IK_Direct) {
@@ -8083,7 +8120,8 @@ ExprResult InitializationSequence::Perform(Sema &S,
   case SK_ProduceObjCObject:
   case SK_StdInitializerList:
   case SK_OCLSamplerInit:
-  case SK_OCLZeroOpaqueType: {
+  case SK_OCLZeroOpaqueType:
+  case SK_NoReturnConversion: {
     assert(Args.size() == 1 || IsHLSLVectorOrMatrixInit);
     CurInit = Args[0];
     if (!CurInit.get()) return ExprError();
@@ -8870,6 +8908,22 @@ ExprResult InitializationSequence::Perform(Sema &S,
         CurInit = S.MaybeBindToTemporary(CurInit.get());
       break;
     }
+
+    case SK_NoReturnConversion: {
+      // The initializer diverges: there is no value, so no constructor,
+      // conversion, or temporary is involved -- for a reference, nothing is
+      // bound.
+      QualType T = Step->Type;
+      ExprValueKind VK = VK_PRValue;
+      if (const auto *RT = T->getAs<ReferenceType>())
+        VK = isa<LValueReferenceType>(RT) ||
+                     RT->getPointeeType()->isFunctionType()
+                 ? VK_LValue
+                 : VK_XValue;
+      CurInit = S.BuildNoReturnConversion(CurInit.get(),
+                                          T.getNonReferenceType(), VK);
+      break;
+    }
     }
   }
 
@@ -9523,6 +9577,11 @@ bool InitializationSequence::Diagnose(Sema &S,
                                       /*VerifyOnly=*/false);
     break;
 
+  case FK_NoReturnObjectInit:
+    S.Diag(Kind.getLocation(), diag::err_noreturn_object_init)
+        << SourceRange(Kind.getLocation(), Kind.getLocation());
+    break;
+
   case FK_DesignatedInitForNonAggregate:
     InitListExpr *InitList = cast<InitListExpr>(Args[0]);
     S.Diag(Kind.getLocation(), diag::err_designated_init_for_non_aggregate)
@@ -9697,6 +9756,10 @@ void InitializationSequence::dump(raw_ostream &OS) const {
 
     case FK_ParenthesizedListInitFailed:
       OS << "parenthesized list initialization failed";
+      break;
+
+    case FK_NoReturnObjectInit:
+      OS << "std::noreturn_t initialized by a non-diverging expression";
       break;
 
     case FK_DesignatedInitForNonAggregate:
@@ -9879,6 +9942,10 @@ void InitializationSequence::dump(raw_ostream &OS) const {
       break;
     case SK_ParenthesizedListInit:
       OS << "initialization from a parenthesized list of values";
+      break;
+
+    case SK_NoReturnConversion:
+      OS << "noreturn conversion";
       break;
     }
 
