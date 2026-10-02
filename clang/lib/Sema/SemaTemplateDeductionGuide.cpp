@@ -655,7 +655,11 @@ struct ConvertConstructorToDeductionGuideTransform {
     if (const AssociatedConstraint &RC = CD->getTrailingRequiresClause()) {
       MultiLevelTemplateArgumentList Args;
       Args.setKind(TemplateSubstitutionKind::Rewrite);
-      Args.addOuterTemplateArguments(Depth1Args);
+      // Only a constructor template has a level of parameters to fold into
+      // the guide's; otherwise, template parameters introduced within the
+      // constraint (e.g. by a return-type-requirement) keep their depth.
+      if (FTD)
+        Args.addOuterTemplateArguments(Depth1Args);
       Args.addOuterRetainedLevel();
       if (NestedPattern)
         Args.addOuterRetainedLevels(NestedPattern->getTemplateDepth());
