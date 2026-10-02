@@ -22794,14 +22794,14 @@ bool ReflectionEvaluator::VisitDeclRefExpr(const DeclRefExpr *E) {
   return Error(E);
 }
 
-/// Whether \p T is std::meta::operators, whose values interpolate as the
-/// operator's token.
-static bool isStdMetaOperatorsEnum(QualType T) {
+/// Whether \p T is the enumeration std::meta::<Name>. (std::meta::operators
+/// and std::meta::punctuator values interpolate as the token they name.)
+static bool isStdMetaEnum(QualType T, StringRef Name) {
   const auto *ET = T->getAs<EnumType>();
   if (!ET)
     return false;
   const EnumDecl *ED = ET->getDecl();
-  if (!ED->getIdentifier() || ED->getName() != "operators")
+  if (!ED->getIdentifier() || ED->getName() != Name)
     return false;
   auto SkipInline = [](const DeclContext *DC) {
     while (const auto *NS = dyn_cast<NamespaceDecl>(DC)) {
@@ -23051,8 +23051,28 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
             Expr *ResultExpr;
             QualType ExprType = SubExpr->getType();
 
+            // A std::meta::punctuator value is the punctuator's token.
+            if (Val.isInt() && isStdMetaEnum(ExprType, "punctuator")) {
+              tok::TokenKind Kind =
+                  getPunctuatorForMetaIndex(Val.getInt().getZExtValue());
+              if (Kind == tok::unknown) {
+                Info.FFDiag(SubExpr, diag::note_constexpr_invalid_punctuator)
+                    << toString(Val.getInt(), 10);
+                return false;
+              }
+              Token Tok;
+              Tok.startToken();
+              Tok.setKind(Kind);
+              Tok.setLocation(SrcTok.getLocation());
+              Tok.setLength(strlen(tok::getPunctuatorSpelling(Kind)));
+              if (SrcTok.hasLeadingSpace())
+                Tok.setFlag(Token::LeadingSpace);
+              NewTokens.push_back(Tok);
+              continue;
+            }
+
             // A std::meta::operators value spells the operator's token.
-            if (Val.isInt() && isStdMetaOperatorsEnum(ExprType)) {
+            if (Val.isInt() && isStdMetaEnum(ExprType, "operators")) {
               OverloadedOperatorKind OO = getOverloadedOperatorForMetaIndex(
                   Val.getInt().getZExtValue());
               tok::TokenKind Kind = tokenKindForOverloadedOperator(OO);

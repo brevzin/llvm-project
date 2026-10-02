@@ -150,6 +150,13 @@ struct TokenSequenceData : public ArrayRef<Token> {
 OverloadedOperatorKind getOverloadedOperatorForMetaIndex(unsigned Index);
 unsigned getMetaIndexForOverloadedOperator(OverloadedOperatorKind OO);
 
+/// std::meta::punctuator enumerates C++'s punctuators in a fixed order (see
+/// MetaPunctuators.def). These convert between that order and token kinds;
+/// a token kind that is not one of them has no index (~0u), and an index out
+/// of range has no token kind (tok::unknown).
+unsigned getMetaIndexForPunctuator(tok::TokenKind Kind);
+tok::TokenKind getPunctuatorForMetaIndex(unsigned Index);
+
 /// The overloadable operator a single token spells, or OO_None. Operators
 /// without a one-token spelling ('()', '[]', new, delete) never match.
 OverloadedOperatorKind getOverloadedOperatorForTokenKind(tok::TokenKind Kind);

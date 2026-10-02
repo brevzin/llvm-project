@@ -37,6 +37,8 @@ def note_constexpr_invalid_inhctor : Note<
   "constant expression; derived class cannot be implicitly initialized">;
 def note_constexpr_macro_operator_not_token : Note<
   "operator '%0' is not a single token and cannot be interpolated">;
+def note_constexpr_invalid_punctuator : Note<
+  "%0 is not a std::meta::punctuator enumerator">;
 // P2758: std::constexpr_print_str / constexpr_warning_str / constexpr_error_str
 // (via __builtin_constexpr_diag). The err/warn/note trio is emitted directly
 // by the constant evaluator when the call is manifestly constant-evaluated;

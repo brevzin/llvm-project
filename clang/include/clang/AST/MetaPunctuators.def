@@ -1,0 +1,82 @@
+//===--- MetaPunctuators.def - std::meta::punctuator ------------*- C++ -*-===//
+//
+// Copyright 2026 Jump Trading, LLC
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// The enumerators of std::meta::punctuator, in order, with the token each
+// names: C++'s punctuators (the operator-or-punctuator tokens that are not
+// keywords), plus '^^' and the splice brackets. A digraph or alternative
+// token is the same punctuator as its primary spelling.
+//
+// The order is the enumeration's: keep it in sync with <meta>.
+//
+// META_PUNCTUATOR(Name, TokenKind, Spelling)
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef META_PUNCTUATOR
+#define META_PUNCTUATOR(Name, TokenKind, Spelling)
+#endif
+
+META_PUNCTUATOR(left_brace, l_brace, "{")
+META_PUNCTUATOR(right_brace, r_brace, "}")
+META_PUNCTUATOR(left_square, l_square, "[")
+META_PUNCTUATOR(right_square, r_square, "]")
+META_PUNCTUATOR(left_paren, l_paren, "(")
+META_PUNCTUATOR(right_paren, r_paren, ")")
+META_PUNCTUATOR(left_splice, l_splice, "[:")
+META_PUNCTUATOR(right_splice, r_splice, ":]")
+META_PUNCTUATOR(semicolon, semi, ";")
+META_PUNCTUATOR(colon, colon, ":")
+META_PUNCTUATOR(ellipsis, ellipsis, "...")
+META_PUNCTUATOR(question, question, "?")
+META_PUNCTUATOR(colon_colon, coloncolon, "::")
+META_PUNCTUATOR(period, period, ".")
+META_PUNCTUATOR(period_star, periodstar, ".*")
+META_PUNCTUATOR(arrow, arrow, "->")
+META_PUNCTUATOR(arrow_star, arrowstar, "->*")
+META_PUNCTUATOR(tilde, tilde, "~")
+META_PUNCTUATOR(exclamation, exclaim, "!")
+META_PUNCTUATOR(plus, plus, "+")
+META_PUNCTUATOR(minus, minus, "-")
+META_PUNCTUATOR(star, star, "*")
+META_PUNCTUATOR(slash, slash, "/")
+META_PUNCTUATOR(percent, percent, "%")
+META_PUNCTUATOR(caret, caret, "^")
+META_PUNCTUATOR(ampersand, amp, "&")
+META_PUNCTUATOR(pipe, pipe, "|")
+META_PUNCTUATOR(equals, equal, "=")
+META_PUNCTUATOR(plus_equals, plusequal, "+=")
+META_PUNCTUATOR(minus_equals, minusequal, "-=")
+META_PUNCTUATOR(star_equals, starequal, "*=")
+META_PUNCTUATOR(slash_equals, slashequal, "/=")
+META_PUNCTUATOR(percent_equals, percentequal, "%=")
+META_PUNCTUATOR(caret_equals, caretequal, "^=")
+META_PUNCTUATOR(ampersand_equals, ampequal, "&=")
+META_PUNCTUATOR(pipe_equals, pipeequal, "|=")
+META_PUNCTUATOR(equals_equals, equalequal, "==")
+META_PUNCTUATOR(exclamation_equals, exclaimequal, "!=")
+META_PUNCTUATOR(less, less, "<")
+META_PUNCTUATOR(greater, greater, ">")
+META_PUNCTUATOR(less_equals, lessequal, "<=")
+META_PUNCTUATOR(greater_equals, greaterequal, ">=")
+META_PUNCTUATOR(spaceship, spaceship, "<=>")
+META_PUNCTUATOR(ampersand_ampersand, ampamp, "&&")
+META_PUNCTUATOR(pipe_pipe, pipepipe, "||")
+META_PUNCTUATOR(less_less, lessless, "<<")
+META_PUNCTUATOR(greater_greater, greatergreater, ">>")
+META_PUNCTUATOR(less_less_equals, lesslessequal, "<<=")
+META_PUNCTUATOR(greater_greater_equals, greatergreaterequal, ">>=")
+META_PUNCTUATOR(plus_plus, plusplus, "++")
+META_PUNCTUATOR(minus_minus, minusminus, "--")
+META_PUNCTUATOR(comma, comma, ",")
+META_PUNCTUATOR(hash, hash, "#")
+META_PUNCTUATOR(hash_hash, hashhash, "##")
+META_PUNCTUATOR(caret_caret, caretcaret, "^^")
+
+#undef META_PUNCTUATOR

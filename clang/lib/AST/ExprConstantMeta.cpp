@@ -833,6 +833,12 @@ static bool expand_at_instantiation(APValue &Result, ASTContext &C,
                                     ArrayRef<Expr *> Args,
                                     Decl *ContainingDecl);
 
+static bool punctuator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                          EvalFn Evaluator, DiagFn Diagnoser,
+                          bool AllowInjection, QualType ResultTy,
+                          SourceRange Range, ArrayRef<Expr *> Args,
+                          Decl *ContainingDecl);
+
 static bool is_declaration_spec(APValue &Result, ASTContext &C,
                                 MetaActions &Meta, EvalFn Evaluator,
                                 DiagFn Diagnoser, bool AllowInjection,
@@ -1026,6 +1032,7 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_tokenSequence, 2, 2, argument_list_for },
   { Metafunction::MFRK_bool, 0, 0, expand_at_instantiation,
     /*WantsMacroExpansionContext=*/true },
+  { Metafunction::MFRK_sizeT, 1, 1, punctuator_of },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -2508,6 +2515,21 @@ bool operator_of_token(APValue &Result, ASTContext &C, MetaActions &Meta,
   return SetAndSucceed(
       Result, APValue(C.MakeIntValue(getMetaIndexForOverloadedOperator(OO),
                                      C.getSizeType())));
+}
+
+bool punctuator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                   EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                   QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                   Decl *ContainingDecl) {
+  assert(ResultTy == C.getSizeType());
+  std::optional<Token> Tok;
+  if (!getSingleToken(Evaluator, Args[0], Tok))
+    return true;
+  unsigned Index = Tok ? getMetaIndexForPunctuator(Tok->getKind()) : ~0u;
+  if (Index == ~0u)
+    return DiagnoseReflectionKind(Diagnoser, Range, "a single punctuator token");
+  return SetAndSucceed(Result,
+                       APValue(C.MakeIntValue(Index, C.getSizeType())));
 }
 
 bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,

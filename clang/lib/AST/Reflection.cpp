@@ -114,6 +114,23 @@ OverloadedOperatorKind getOverloadedOperatorForTokenKind(tok::TokenKind Kind) {
   }
 }
 
+static constexpr tok::TokenKind MetaPunctuators[] = {
+#define META_PUNCTUATOR(Name, TokenKind, Spelling) tok::TokenKind,
+#include "clang/AST/MetaPunctuators.def"
+};
+
+unsigned getMetaIndexForPunctuator(tok::TokenKind Kind) {
+  for (unsigned I = 0; I != std::size(MetaPunctuators); ++I)
+    if (MetaPunctuators[I] == Kind)
+      return I;
+  return ~0u;
+}
+
+tok::TokenKind getPunctuatorForMetaIndex(unsigned Index) {
+  return Index < std::size(MetaPunctuators) ? MetaPunctuators[Index]
+                                            : tok::unknown;
+}
+
 unsigned getMetaIndexForOverloadedOperator(OverloadedOperatorKind OO) {
   const auto *It = llvm::find(MetaOperatorOrder, OO);
   return It == std::end(MetaOperatorOrder) ? 0 : It - MetaOperatorOrder;

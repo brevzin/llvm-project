@@ -584,6 +584,7 @@ enum : unsigned {
   __metafn_template_argument_list_for,
   __metafn_argument_list_for,
   __metafn_expand_at_instantiation,
+  __metafn_punctuator_of,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -887,9 +888,9 @@ consteval auto has_identifier(info r) -> bool {
 // Returns the string representation of the operator.
 consteval auto symbol_of(operators op) -> string_view {
   static constexpr string_view op_names[45] = {
-      {}, "new", "delete", "new[]", "delete[]", "coawait", "()", "[]", "->",
+      {}, "new", "delete", "new[]", "delete[]", "co_await", "()", "[]", "->",
       "->*", "~", "!", "+", "-", "*", "/", "%", "^", "&", "|", "=", "+=", "-=",
-      "*=", "/=", "%=", "^", "&=", "|=", "==", "!=", "<", ">", "<=", ">=",
+      "*=", "/=", "%=", "^=", "&=", "|=", "==", "!=", "<", ">", "<=", ">=",
       "<=>", "&&", "||", "<<", ">>", "<<=", ">>=", "++", "--", ","
   };
   return op_names[int(op)];
@@ -897,10 +898,10 @@ consteval auto symbol_of(operators op) -> string_view {
 
 consteval auto u8symbol_of(operators op) -> u8string_view {
   static constexpr u8string_view op_names[45] = {
-      {}, u8"new", u8"delete", u8"new[]", u8"delete[]", u8"coawait", u8"()",
+      {}, u8"new", u8"delete", u8"new[]", u8"delete[]", u8"co_await", u8"()",
       u8"[]", u8"->", u8"->*", u8"~", u8"!", u8"+", u8"-", u8"*", u8"/", u8"%",
       u8"^", u8"&", u8"|", u8"=", u8"+=", u8"-=", u8"*=", u8"/=", u8"%=",
-      u8"^", u8"&=", u8"|=", u8"==", u8"!=", u8"<", u8">", u8"<=", u8">=",
+      u8"^=", u8"&=", u8"|=", u8"==", u8"!=", u8"<", u8">", u8"<=", u8">=",
       u8"<=>", u8"&&", u8"||", u8"<<", u8">>", u8"<<=", u8">>=", u8"++",
       u8"--", u8","
   };
@@ -3238,6 +3239,58 @@ consteval auto token_kind_of(token_sequence tok) -> token_kind {
 
 consteval auto operator_of(token_sequence tok) -> operators {
   return operators(__metafunction(detail::__metafn_operator_of_token, tok));
+}
+
+// C++'s punctuators: the operator-or-punctuator tokens that are not keywords,
+// plus '^^' and the splice brackets. A digraph or alternative token is the
+// same punctuator as its primary spelling ('<%' is left_brace, 'and' is
+// ampersand_ampersand). Names follow those of std::meta::operators; every
+// operator with a one-token spelling has a punctuator of the same name.
+//
+// Like an operators value, a punctuator value interpolates as its token:
+// ^^{ \(punctuator::left_brace) } is a sequence of just '{', which a token
+// literal cannot spell.
+//
+// (The order is the compiler's: see clang/AST/MetaPunctuators.def.)
+enum class punctuator {
+  left_brace, right_brace, left_square, right_square, left_paren, right_paren,
+  left_splice, right_splice, semicolon, colon, ellipsis, question, colon_colon,
+  period, period_star, arrow, arrow_star, tilde, exclamation, plus, minus, star,
+  slash, percent, caret, ampersand, pipe, equals, plus_equals, minus_equals,
+  star_equals, slash_equals, percent_equals, caret_equals, ampersand_equals,
+  pipe_equals, equals_equals, exclamation_equals, less, greater, less_equals,
+  greater_equals, spaceship, ampersand_ampersand, pipe_pipe, less_less,
+  greater_greater, less_less_equals, greater_greater_equals, plus_plus,
+  minus_minus, comma, hash, hash_hash, caret_caret
+};
+
+// The punctuator a single token is.
+consteval auto punctuator_of(token_sequence tok) -> punctuator {
+  return punctuator(__metafunction(detail::__metafn_punctuator_of, tok));
+}
+
+// The punctuator's (primary) spelling.
+consteval auto symbol_of(punctuator p) -> string_view {
+  static constexpr string_view names[55] = {
+      "{", "}", "[", "]", "(", ")", "[:", ":]", ";", ":", "...", "?", "::", ".",
+      ".*", "->", "->*", "~", "!", "+", "-", "*", "/", "%", "^", "&", "|", "=",
+      "+=", "-=", "*=", "/=", "%=", "^=", "&=", "|=", "==", "!=", "<", ">",
+      "<=", ">=", "<=>", "&&", "||", "<<", ">>", "<<=", ">>=", "++", "--", ",",
+      "#", "##", "^^"
+  };
+  return names[int(p)];
+}
+
+consteval auto u8symbol_of(punctuator p) -> u8string_view {
+  static constexpr u8string_view names[55] = {
+      u8"{", u8"}", u8"[", u8"]", u8"(", u8")", u8"[:", u8":]", u8";", u8":",
+      u8"...", u8"?", u8"::", u8".", u8".*", u8"->", u8"->*", u8"~", u8"!",
+      u8"+", u8"-", u8"*", u8"/", u8"%", u8"^", u8"&", u8"|", u8"=", u8"+=",
+      u8"-=", u8"*=", u8"/=", u8"%=", u8"^=", u8"&=", u8"|=", u8"==", u8"!=",
+      u8"<", u8">", u8"<=", u8">=", u8"<=>", u8"&&", u8"||", u8"<<", u8">>",
+      u8"<<=", u8">>=", u8"++", u8"--", u8",", u8"#", u8"##", u8"^^"
+  };
+  return names[int(p)];
 }
 
 // Whether a reflected macro argument is a constant expression, i.e. whether

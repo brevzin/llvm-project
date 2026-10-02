@@ -209,12 +209,32 @@ classification: `tokens_of(ts)` returns each token of the sequence as its own
 `token_sequence`; `stringize` gives a token's spelling. A single token's
 lexical category is `token_kind_of(tok) -> token_kind`, where `token_kind` is
 `{ identifier, keyword, literal, punctuator, annotation, unknown }`. All
-operators and punctuators collapse into `punctuator` — to match a *specific*
-operator, compare the token directly (`tok == ^^{ + }`), since token sequences
-compare equal by content. `unknown` covers empty and multi-token sequences.
-Classify by `token_kind_of`, not by `stringize` string-sniffing. Note that
-alternative tokens keep their spelling, so `^^{ or } != ^^{ || }` even though
-both are `punctuator`; kind-based checks see through this, `==` does not.
+operators and punctuators collapse into `punctuator`; *which* one a token is
+comes from `punctuator_of(tok) -> punctuator`, an enumeration of C++'s
+punctuators (plus `^^` and the splice brackets) whose names follow
+`operators` — every operator with a one-token spelling has the punctuator of
+the same name without `op_` (`op_plus_equals` / `punctuator::plus_equals`).
+A digraph or alternative token is its primary spelling's punctuator (`<%` is
+`left_brace`, `and` is `ampersand_ampersand`), and `symbol_of(punctuator)`
+gives the primary spelling. As an `operators` value does, a `punctuator`
+value interpolates as its token, which is how a macro produces a lone brace
+— `^^{ \(punctuator::left_brace) }` — that a token literal, delimited by
+braces, cannot spell. Comparing tokens directly (`tok == ^^{ + }`) also
+works, since token sequences compare equal by content, but `==` sees
+spelling: `^^{ or } != ^^{ || }`, and there is no literal for a lone brace
+to compare against. So match with `punctuator_of`:
+
+```cpp
+switch (punctuator_of(tok)) {
+case punctuator::left_paren: case punctuator::left_square:
+case punctuator::left_brace:
+  ++depth; break;
+...
+}
+```
+
+`unknown` covers empty and multi-token sequences. Classify by
+`token_kind_of`, not by `stringize` string-sniffing.
 To match a specific identifier, compare against `id(...)` directly
 (`tok == id("name")` — `id` produces a single-identifier-token
 `token_sequence`, the identifier sibling of `str_lit`; it originally
