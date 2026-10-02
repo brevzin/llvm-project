@@ -826,6 +826,13 @@ static bool argument_list_for(APValue &Result, ASTContext &C,
                               QualType ResultTy, SourceRange Range,
                               ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
+static bool expand_at_instantiation(APValue &Result, ASTContext &C,
+                                    MetaActions &Meta, EvalFn Evaluator,
+                                    DiagFn Diagnoser, bool AllowInjection,
+                                    QualType ResultTy, SourceRange Range,
+                                    ArrayRef<Expr *> Args,
+                                    Decl *ContainingDecl);
+
 static bool is_declaration_spec(APValue &Result, ASTContext &C,
                                 MetaActions &Meta, EvalFn Evaluator,
                                 DiagFn Diagnoser, bool AllowInjection,
@@ -1017,6 +1024,8 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_tokenSequence, 2, 2, template_parameter_list_for },
   { Metafunction::MFRK_tokenSequence, 1, 1, template_argument_list_for },
   { Metafunction::MFRK_tokenSequence, 2, 2, argument_list_for },
+  { Metafunction::MFRK_bool, 0, 0, expand_at_instantiation,
+    /*WantsMacroExpansionContext=*/true },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -1033,6 +1042,12 @@ bool Metafunction::evaluate(APValue &Result, ASTContext &C,
                             ArrayRef<Expr *> Args, Decl *ContainingDecl) const {
   return ImplFn(Result, C, Meta, Evaluator, Diagnoser, AllowInjection, ResultTy,
                 Range, Args, ContainingDecl);
+}
+
+bool Metafunction::isSafeOnValueDependentExpressions() const {
+  return ImplFn == source_text_of || ImplFn == source_location_of ||
+         ImplFn == type_of || ImplFn == is_binary_operation ||
+         ImplFn == operator_of || ImplFn == get_ith_operand_of;
 }
 
 bool Metafunction::Lookup(unsigned ID, const Metafunction *&result) {
@@ -3389,6 +3404,28 @@ bool macro_expansion_context(APValue &Result, ASTContext &C, MetaActions &Meta,
     return SetAndSucceed(Result, makeReflection(C.getCanonicalTagType(RD)));
 
   return SetAndSucceed(Result, makeReflection(ContainingDecl));
+}
+
+// In a templated invocation context, ends the macro's evaluation so that the
+// expansion waits for instantiation, where the macro is evaluated again (and
+// this is a no-op). The caller recognizes the note; it is not an error.
+bool expand_at_instantiation(APValue &Result, ASTContext &C, MetaActions &Meta,
+                             EvalFn Evaluator, DiagFn Diagnoser,
+                             bool AllowInjection, QualType ResultTy,
+                             SourceRange Range, ArrayRef<Expr *> Args,
+                             Decl *ContainingDecl) {
+  assert(ResultTy == C.BoolTy);
+
+  if (!ContainingDecl)
+    return Diagnoser(Range.getBegin(),
+                     diag::metafn_no_expand_at_instantiation_context)
+           << Range;
+
+  if (cast<DeclContext>(ContainingDecl)->isDependentContext())
+    return Diagnoser(Range.getBegin(), diag::metafn_expand_at_instantiation)
+           << Range;
+
+  return SetAndSucceed(Result, makeBool(C, true));
 }
 
 // Reads a (length, const char *) argument pair produced by flattening a

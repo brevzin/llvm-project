@@ -23,6 +23,7 @@
 #include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Sema/SemaObjC.h"
 #include "clang/Sema/SemaOpenMP.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Frontend/OpenMP/OMPContext.h"
@@ -8629,11 +8630,37 @@ private:
            NextToken().is(tok::exclaim) &&
            isMacroArgumentListOpener(GetLookAheadToken(2).getKind());
   }
+  /// True if the current token starts a statement-position macro invocation:
+  /// 'identifier ! opener ... closer ;', the invocation being the whole
+  /// statement. (Anything else, e.g. 'm!(x) + 1;', is an expression.)
+  bool isStartOfStmtMacroInvocation();
+  /// Parse 'name!(args);' at block scope and parse the expansion, followed by
+  /// the invocation's ';', as statements in place. Directly in a compound
+  /// statement, the statements join the enclosing block (they are passed on
+  /// through Sema::PendingInjectedStmts, and an empty result is returned); as
+  /// a substatement, they form one compound statement.
+  StmtResult ParseStmtMacroInvocation(ParsedStmtContext StmtCtx);
   /// Parse 'name!(args);' at namespace or class scope and parse the
   /// expansion as declarations in place. At class scope the members are
   /// added to the current class (with access \p AS); at namespace scope the
   /// parsed declarations are returned.
   DeclGroupPtrTy ParseDeclMacroInvocation(AccessSpecifier AS, Decl *TagDecl);
+  /// The ';' of a whole-declaration (or whole-statement) macro invocation,
+  /// 'name!(args);', placed after the expansion: the invocation's terminator
+  /// terminates the expansion. An expansion that needs no terminator (one
+  /// that is empty, or already ends in ';') leaves a ';' that is not
+  /// diagnosed as extra or as an empty body: it is flagged as following an
+  /// empty macro (which the statement-level checks honor) and recorded in
+  /// InvocationTerminators (which ConsumeExtraSemi checks).
+  Token makeInvocationTerminator(SourceLocation Loc);
+  /// Locations of the ';'s made by makeInvocationTerminator.
+  llvm::DenseSet<SourceLocation> InvocationTerminators;
+  /// For the expansion of a statement macro: if \p Toks (the whole
+  /// expansion) is a do-expression rather than a do-while, parenthesize it,
+  /// so that it parses as the expression statement an expression macro
+  /// intends. (At the start of a statement, 'do' begins a do-while.)
+  static void parenthesizeDoExpression(SmallVectorImpl<Token> &Toks,
+                                       SourceLocation CloseLoc);
   /// Relocate the tokens of a macro's expansion into a macro-expansion
   /// SourceLocation of the invocation \p Invocation (from the macro name to
   /// the closing bracket), so diagnostics read "expanded from macro".

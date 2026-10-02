@@ -160,6 +160,13 @@ Retry:
 
   case tok::identifier:
   ParseIdentifier: {
+    // 'name!(args);' as a whole statement: a statement macro invocation.
+    if (isStartOfStmtMacroInvocation()) {
+      ProhibitAttributes(CXX11Attrs);
+      ProhibitAttributes(GNUAttrs);
+      return ParseStmtMacroInvocation(StmtCtx);
+    }
+
     Token Next = NextToken();
     if (Next.is(tok::colon)) { // C99 6.8.1: labeled-statement
       // Both C++11 and GNU attributes preceding the label appertain to the

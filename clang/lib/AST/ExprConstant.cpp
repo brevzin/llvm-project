@@ -969,6 +969,13 @@ namespace {
     /// invalid expression) instead of emitting the error directly.
     bool EvaluatingMacroBody = false;
 
+    /// Whether a parameter of the macro whose body is being evaluated holds a
+    /// reflection of a value-dependent expression (an argument in a template
+    /// that does not depend on it for its type). Asking what such an
+    /// expression evaluates to means the expansion must wait for
+    /// instantiation.
+    bool MacroArgsValueDependent = false;
+
     struct EvaluatingConstructorRAII {
       EvalInfo &EI;
       ObjectUnderConstruction Object;
@@ -10054,14 +10061,34 @@ bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
       (Info.EvalMode ==
        EvaluationMode::ConstantExpressionPlainlyConstantEvaluated);
 
+  const Metafunction *Metafn = nullptr;
+  if (Metafunction::Lookup(E->getMetaFnID(), Metafn))
+    Metafn = nullptr;
+
   // A metafunction that asks about the macro expansion context gets that
   // instead of the declaration being evaluated; the two are unrelated, and
   // ContainingDecl carries the injection target the others rely on.
   Decl *ContextDecl = Info.ContainingDecl;
-  if (const Metafunction *Metafn;
-      !Metafunction::Lookup(E->getMetaFnID(), Metafn) &&
-      Metafn->wantsMacroExpansionContext())
+  if (Metafn && Metafn->wantsMacroExpansionContext())
     ContextDecl = Info.MacroExpansionContext;
+
+  // In a macro body whose arguments include value-dependent expressions, a
+  // question about what such an expression evaluates to has no answer until
+  // instantiation: the expansion waits for it, as
+  // std::meta::expand_at_instantiation() would ask.
+  if (Info.MacroArgsValueDependent && Metafn &&
+      !Metafn->isSafeOnValueDependentExpressions()) {
+    for (Expr *Arg : Args) {
+      if (!Arg->getType()->isReflectionType())
+        continue;
+      APValue RV;
+      if (Evaluator(RV, Arg, true) && RV.isReflectedExpression() &&
+          RV.getReflectedExpression()->isValueDependent()) {
+        Info.FFDiag(E, diag::metafn_expand_at_instantiation);
+        return false;
+      }
+    }
+  }
 
   // Evaluate the metafunction.
   APValue Result;
@@ -24961,6 +24988,10 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
 
   // The parameters hold reflections and token sequences rather than values of
   // their declared types; nothing about them is evaluated from an argument.
+  for (const APValue &V : ParamValues)
+    if (V.isReflectedExpression() &&
+        V.getReflectedExpression()->isValueDependent())
+      Info.MacroArgsValueDependent = true;
   CallRef Call = Info.CurrentCall->createCall(Macro);
   for (unsigned I = 0, N = std::min<unsigned>(ParamValues.size(),
                                               Macro->getNumParams());

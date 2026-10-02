@@ -84,6 +84,11 @@ public:
     return WantsMacroExpansionContext;
   }
 
+  // Whether the metafunction asks only what a reflected expression is (its
+  // spelling, location, type, or operator structure), never what it
+  // evaluates to -- so it can answer for a value-dependent expression.
+  bool isSafeOnValueDependentExpressions() const;
+
   unsigned getMinArgs() const {
     return MinArgs;
   }

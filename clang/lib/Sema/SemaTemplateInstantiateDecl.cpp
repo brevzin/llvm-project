@@ -2560,9 +2560,19 @@ void Sema::InstantiateDeclMacroInvocation(
   Inj.TSD = Expansion;
   Inj.AS = D->getAccess();
   Inj.Invocation = SourceRange(NameLoc, E->getRParenLoc());
+  Inj.Terminated = true;
   PendingInjections.push_back(Inj);
-  MacroExpansionDepthRAII Depth(*this);
-  ProcessPendingTokenInjections();
+  size_t FirstInjected = PendingInjectedStmts.size();
+  {
+    MacroExpansionDepthRAII Depth(*this);
+    ProcessPendingTokenInjections();
+  }
+  // A statement macro's arguments are run-time expressions, each evaluated
+  // exactly once.
+  if (D->getDeclContext()->isFunctionOrMethod() &&
+      PendingInjectedStmts.size() > FirstInjected)
+    CheckMacroArgumentEvaluation(
+        Expansion, ArrayRef(PendingInjectedStmts).drop_front(FirstInjected));
 }
 
 Decl *TemplateDeclInstantiator::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
@@ -2572,9 +2582,30 @@ Decl *TemplateDeclInstantiator::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
   EnterExpressionEvaluationContext ConstantEvaluated(
       SemaRef, Sema::ExpressionEvaluationContext::ConstantEvaluated);
 
-  // A declaration macro invocation expands in place; nothing of it remains
-  // in the specialization but its expansion.
+  // Tokens injected into a function body are parsed with the instantiated
+  // locals that precede this point visible.
+  SmallVector<NamedDecl *> AddedInjectedLocalDeclsForLookup;
+  auto RestoreLookupDecls = llvm::make_scope_exit([&] {
+    for (NamedDecl *ND : AddedInjectedLocalDeclsForLookup)
+      llvm::erase(SemaRef.InjectedLocalDeclsForLookup, ND);
+  });
+  auto SeedLocalsForLookup = [&] {
+    SmallVector<NamedDecl *> VisibleLocalDeclsForLookup;
+    collectInstantiatedLocalDeclsForConstevalLookup(SemaRef, D,
+                                                    VisibleLocalDeclsForLookup);
+    for (NamedDecl *ND : VisibleLocalDeclsForLookup) {
+      if (llvm::is_contained(SemaRef.InjectedLocalDeclsForLookup, ND))
+        continue;
+      SemaRef.InjectedLocalDeclsForLookup.push_back(ND);
+      AddedInjectedLocalDeclsForLookup.push_back(ND);
+    }
+  };
+
+  // A declaration (or statement) macro invocation expands in place; nothing
+  // of it remains in the specialization but its expansion.
   if (D->getDeclMacroInvocation()) {
+    if (D->getDeclContext()->isFunctionOrMethod())
+      SeedLocalsForLookup();
     SemaRef.InstantiateDeclMacroInvocation(D, TemplateArgs);
     return nullptr;
   }
@@ -2591,20 +2622,7 @@ Decl *TemplateDeclInstantiator::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
   // During normal parsing, ParseConstevalBlockDeclaration handles this,
   // but during template instantiation we need to invoke the parser via
   // callback.
-  SmallVector<NamedDecl *> AddedInjectedLocalDeclsForLookup;
-  SmallVector<NamedDecl *> VisibleLocalDeclsForLookup;
-  collectInstantiatedLocalDeclsForConstevalLookup(
-      SemaRef, D, VisibleLocalDeclsForLookup);
-  for (NamedDecl *ND : VisibleLocalDeclsForLookup) {
-    if (llvm::is_contained(SemaRef.InjectedLocalDeclsForLookup, ND))
-      continue;
-    SemaRef.InjectedLocalDeclsForLookup.push_back(ND);
-    AddedInjectedLocalDeclsForLookup.push_back(ND);
-  }
-  auto RestoreLookupDecls = llvm::make_scope_exit([&] {
-    for (NamedDecl *ND : AddedInjectedLocalDeclsForLookup)
-      llvm::erase(SemaRef.InjectedLocalDeclsForLookup, ND);
-  });
+  SeedLocalsForLookup();
   SemaRef.ProcessPendingTokenInjections();
 
   return Result;

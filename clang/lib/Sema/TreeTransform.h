@@ -8778,8 +8778,16 @@ TreeTransform<Derived>::TransformDeclStmt(DeclStmt *S) {
   LambdaScopeInfo *LSI = getSema().getCurLambda();
   for (auto *D : S->decls()) {
     Decl *Transformed = getDerived().TransformDefinition(D->getLocation(), D);
-    if (!Transformed)
+    // A statement macro invocation deferred to instantiation leaves nothing
+    // of itself: its expansion was injected among the enclosing statements.
+    if (!Transformed) {
+      if (auto *CBD = dyn_cast<ConstevalBlockDecl>(D);
+          CBD && CBD->getDeclMacroInvocation()) {
+        DeclChanged = true;
+        continue;
+      }
       return StmtError();
+    }
 
     if (Transformed != D)
       DeclChanged = true;
@@ -8807,6 +8815,10 @@ TreeTransform<Derived>::TransformDeclStmt(DeclStmt *S) {
 
   if (!getDerived().AlwaysRebuild() && !DeclChanged)
     return S;
+
+  if (Decls.empty())
+    return new (getSema().Context)
+        NullStmt(S->getEndLoc(), /*HasLeadingEmptyMacro=*/true);
 
   return getDerived().RebuildDeclStmt(Decls, S->getBeginLoc(), S->getEndLoc());
 }
@@ -14378,6 +14390,23 @@ TreeTransform<Derived>::TransformOffsetOfExpr(OffsetOfExpr *E) {
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformOpaqueValueExpr(OpaqueValueExpr *E) {
+  // A macro argument interpolated into an expansion parsed in a template: a
+  // unique opaque value of the argument expression, which is transformed like
+  // any other -- it may be value-dependent, and even if not, it may name the
+  // template's locals, which each instantiation has its own of.
+  if (E->isUnique() && E->getSourceExpr()) {
+    ExprResult Source = getDerived().TransformExpr(E->getSourceExpr());
+    if (Source.isInvalid())
+      return ExprError();
+    if (!getDerived().AlwaysRebuild() && Source.get() == E->getSourceExpr())
+      return E;
+    Expr *S = Source.get();
+    auto *New = new (getSema().Context)
+        OpaqueValueExpr(E->getExprLoc(), S->getType(), S->getValueKind(),
+                        S->getObjectKind(), S);
+    New->setIsUnique(true);
+    return New;
+  }
   assert((!E->getSourceExpr() || getDerived().AlreadyTransformed(E->getType())) &&
          "opaque value expression requires transformation");
   return E;

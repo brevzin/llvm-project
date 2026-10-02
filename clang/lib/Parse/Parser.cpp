@@ -216,6 +216,14 @@ bool Parser::isLikelyAtStartOfNewDeclaration() {
 void Parser::ConsumeExtraSemi(ExtraSemiKind Kind, DeclSpec::TST TST) {
   if (!Tok.is(tok::semi)) return;
 
+  // The ';' of a token macro invocation, after its expansion, is not one the
+  // user wrote as extra. (Null statements are treated the same way.)
+  if (Tok.hasLeadingEmptyMacro() &&
+      InvocationTerminators.contains(Tok.getLocation())) {
+    ConsumeToken();
+    return;
+  }
+
   bool HadMultipleSemis = false;
   SourceLocation StartLoc = Tok.getLocation();
   SourceLocation EndLoc = Tok.getLocation();

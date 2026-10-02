@@ -355,15 +355,45 @@ showing the elided expansion stack, as for `-ftemplate-depth`. A failed
 invocation recovers as an error expression, so it does not cascade (for
 instance into deducing `void` for the enclosing `auto` function).
 
-If any argument is type-, value-, or otherwise instantiation-dependent, the
-invocation is kept as a `CXXMacroInvocationExpr` (callee, arguments, and
-locations) and overload resolution and expansion are deferred to instantiation,
-exactly as for a call. The expansion is then parsed in the instantiated
-context: the parser is given a scope for the instantiated function with its
-parameters and with the instantiations of the locals visible before the
-invocation, so unqualified names in the macro's tokens resolve as they would
-have at the invocation site. This is the case that matters most, because
-`fwd!(x)` lives in generic code.
+In a template, an invocation is expanded where it appears whenever it can
+be, like any non-dependent construct of the template, and waits for
+instantiation only when it must:
+
+- A dependent callee, or an argument whose *type* is dependent, defers it up
+  front: the macro can be neither selected nor have its parameters bound
+  without the types. The invocation is kept as a `CXXMacroInvocationExpr`
+  (callee, arguments, and locations), and overload resolution and expansion
+  happen at instantiation, exactly as for a call. This is the case that
+  matters most, because `fwd!(x)` lives in generic code.
+- An argument that is only *value*-dependent (its type is known: `N * 2` with
+  `int N`) does not. The macro is evaluated in the template, its parameters
+  holding reflections of the dependent expressions. If the body only moves
+  them around — interpolating them, or asking structural questions
+  (`source_text_of`, `source_location_of`, `type_of`, `is_binary_operation`,
+  `operator_of`, `operands_of`) — the expansion is parsed in the template and
+  instantiated with it. If the body asks what such an argument *evaluates*
+  to (`constant_of`, `extract`, `is_constant_expression`, anything not on that
+  list), the evaluation ends quietly and the invocation is deferred, as if
+  the body had called `expand_at_instantiation()` (below).
+- A macro can also ask to wait, whatever its arguments:
+  `std::meta::expand_at_instantiation()`.
+
+Expanding eagerly is what lets a name introduced by an expansion be used by
+later code in the template:
+
+```cpp
+template <int N>
+int f() {
+  let!(x, N * 2);   // expanded in the template: 'x' is a local of the pattern
+  return x + 1;
+}
+```
+
+A deferred expansion is parsed in the instantiated context: the parser is
+given a scope for the instantiated function with its parameters and with the
+instantiations of the locals visible before the invocation, so unqualified
+names in the macro's tokens resolve as they would have at the invocation
+site.
 
 ## Member macros and operator macros
 
@@ -633,6 +663,40 @@ channel could not be reused, because it carries the injection target that
 Evaluating it outside a macro expansion is an error rather than a guess,
 since there is no expansion whose context could be described.
 
+### Waiting for instantiation: `expand_at_instantiation`
+
+`std::meta::expand_at_instantiation()` makes the macro being expanded wait
+for template instantiation. In a templated context (a function template, a
+member of a class template, a generic lambda), the call ends the evaluation;
+the invocation becomes a dependent expression, and the macro is evaluated
+again for each instantiation, where the call does nothing. Outside templates
+it does nothing at all. It is the explicit form of what a value-dependent
+argument does implicitly (see Expansion), and the call can sit on one path
+of the body only.
+
+Its main use is naming something that exists only per instantiation, the
+way `this->x` names a member of a dependent base. (This `id!` takes raw
+tokens; it is not the identity macro of the Examples section.)
+
+```cpp
+__macro id(std::meta::token_sequence name) {
+  std::meta::expand_at_instantiation();
+  return name;
+}
+
+template <class T>
+int f(T t) {
+  consteval { declare_v(^^{ t * 10 }); }  // injects 'auto v = ...' per instantiation
+  return id!(v) + 1;                     // looked up in the instantiated function
+}
+```
+
+Like a dependent name, `id!(v)` is an expression: naming a type or template
+this way would need a `typename`/`template` equivalent. The evaluation the
+call ends is discarded, so it belongs at the top of the body. An operator
+macro cannot (yet) wait: there is no deferred form of an operator invocation
+to keep, and asking is an error. Outside a macro body, the call is an error.
+
 ## Name lookup and hygiene
 
 Expression parameters give most of hygiene for free, in both directions:
@@ -741,6 +805,14 @@ dependent invocations. Those are the pieces this design adds.
 Interpolated expressions materialize as unique `OpaqueValueExpr`s (source
 expression attached, emitted in place), which is how the once-evaluation rule
 is realized in the AST and what makes `decltype(\(t))` report value category.
+In an expansion parsed in a template, these are transformed with the
+template: the argument may be value-dependent, and even if not, it may name
+the template's locals, which each instantiation has its own of.
+
+Raw (`token_sequence`) arguments are consumed by the macro, so they are never
+values of the program (they would otherwise be diagnosed as consteval-only
+values in a run-time context), whether the macro expands now, later, or again
+at instantiation.
 
 ## Declaration-position invocation
 
@@ -766,15 +838,87 @@ define_op!(left_shift, x << y);   // at namespace scope; no consteval block,
 At class scope the members are injected under the access specifier in force
 at the invocation; the expansion may contain its own access-specifier labels,
 and those do not leak past the invocation. An expansion may itself contain
-declaration-position invocations, and an empty expansion injects nothing
-(useful for conditional injection). The trailing `;` is required.
+declaration-position invocations.
 
-There is no deferral: a declaration-position invocation in a dependent
-context (a class template, most commonly) is an error. That is what
-`consteval { queue_injection(...); }` is for — it remains the programmable
-form, both for dependent contexts and for loops
-(`for (auto m : members) queue_injection(gen(m))`). Declaration position is
-the one-shot sugar; the block is the general tool.
+In a class template, the invocation is recorded among the members and
+expands per specialization, in place, with the semantics of
+`consteval { queue_injection(...); }` — including its limitation that members
+injected only per specialization cannot be named unqualified from the
+pattern. The block remains the programmable form, for loops in particular
+(`for (auto m : members) queue_injection(gen(m))`); declaration position is
+the one-shot sugar.
+
+### The `;` belongs to the invocation
+
+A macro returns a fragment with no terminator — the same fragment an
+expression macro would. When the invocation is a whole declaration or
+statement, `name!(args);`, the expansion is parsed *followed by that `;`*, in
+its own delimited token stream. So:
+
+```cpp
+__macro maybe(bool c, std::meta::token_sequence decl) {
+  if (extract<bool>(constant_of(c)))
+    return decl;          // no ';' of its own
+  return ^^{};            // an empty declaration
+}
+
+struct S {
+  maybe!(sizeof(int) == 4, int x);   // 'int x' + ';'
+};
+
+__macro make_struct(std::meta::token_sequence name) {
+  return ^^{ struct \(name) { } };  // the invocation's ';' completes it
+}
+```
+
+An empty expansion leaves an empty declaration (or, at block scope, a null
+statement), which is valid everywhere. A macro that does end its expansion
+in `;` leaves an extra one, also valid. Neither is diagnosed as an extra
+`;` or an empty body: the `;` came from an invocation, not from the user.
+
+## Statement-position invocation
+
+At block scope, `name!(args);` as a *whole statement* is a statement-macro
+invocation: the expansion, followed by the invocation's `;`, is parsed as a
+sequence of statements in place. Anything else — `m!(x) + 1;` — is an
+expression with a macro invocation in it, as before.
+
+- The arguments are those of an expression macro (run-time expressions bound
+  to reflections, or raw tokens), evaluated exactly once across all the
+  statements of the expansion.
+- Directly in a block, the statements join the block: declarations they
+  introduce live to its end. That is what a scope guard needs, and the
+  placeholder name `_` lets any number of them share a block:
+
+  ```cpp
+  __macro defer(std::meta::token_sequence body) {
+    return ^^{ scope_guard _{[&] { \(body) }} };
+  }
+
+  void f(std::mutex& m) {
+    m.lock();
+    defer!{ m.unlock(); };
+    ...
+  }
+  ```
+
+- As a substatement (the body of `if`/`else`, a loop, a label), the
+  statements form one compound statement, as if braced — which is what C++
+  makes of a substatement anyway. Since the expansion is parsed in its own
+  delimited stream, a source `else` cannot attach to an `if` in it, so
+  `if (c) a!(x); else b!(y);` is correct whatever `a!` expands to, with no
+  `do { ... } while (0)`.
+- An expression macro invoked as a whole statement still works: its
+  expansion `e`, followed by the `;`, is the expression statement `e;`. One
+  case needs a rule: at the start of a statement `do` begins a do-while, but
+  an expression macro may expand to a do-expression. An expansion that is a
+  do-expression — `do -> T { ... }`, or `do { ... }` whose braces are not
+  followed by `while` — is parsed as an expression statement. (Knowing where
+  the expansion ends is what makes this decidable.)
+- In a template, the same eagerness rule as for expressions applies; a
+  deferred statement macro expands per instantiation in place among the
+  function's statements, with the locals before it visible.
+- An invocation takes no attributes.
 
 ## Annotation callbacks: `inject_members`
 
@@ -816,6 +960,18 @@ a phase should do that phase's work: mutate in `inject_members`, measure in
 
 ## Future directions
 
+- Statement position for qualified (`ns::m!(...);`) and member
+  (`obj.m!(...);`) invocations; a member invocation as a whole statement is
+  an expression statement today.
+- Hygiene for statement macros: a declaration whose name the macro wrote
+  should be private to its expansion (see `hygiene.md`). Until then, helper
+  names leak into the enclosing block (and trip `-Wshadow` when nested).
+- A general answer for a macro that introduces a name that later code in a
+  template should find when the expansion must wait for instantiation;
+  `id!` is the explicit form today.
+- A transparent AST node recording that a statement sequence came from an
+  invocation (for tooling and resugaring); today the statements are spliced
+  in and only their source locations remember the invocation.
 - A lazy parameter kind for `log_if!`-style macros.
 - `parse_expression(ts)` to turn raw tokens into a bound expression on demand.
 - Richer expression reflection: value category queries, unary operators,

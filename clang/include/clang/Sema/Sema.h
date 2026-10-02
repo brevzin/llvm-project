@@ -16546,15 +16546,15 @@ public:
                               TokenSequenceData &Expansion);
   /// \p NameLoc, if valid, is where the macro is named (a member macro's
   /// name); otherwise \p Loc (an operator) is.
-  ExprResult BuildMacroCandidateExpansion(const OverloadCandidate &Best,
-                                          ArrayRef<Expr *> Args,
-                                          SourceLocation Loc,
-                                          SourceLocation RParenLoc,
-                                          bool HadMultipleCandidates,
-                                          const Stmt *InstantiationPattern =
-                                              nullptr,
-                                          SourceLocation NameLoc =
-                                              SourceLocation());
+  ///
+  /// \p Defer, if given, builds the deferred invocation to return when the
+  /// macro asks to wait for instantiation (see EvaluateMacroExpansion).
+  ExprResult BuildMacroCandidateExpansion(
+      const OverloadCandidate &Best, ArrayRef<Expr *> Args, SourceLocation Loc,
+      SourceLocation RParenLoc, bool HadMultipleCandidates,
+      const Stmt *InstantiationPattern = nullptr,
+      SourceLocation NameLoc = SourceLocation(),
+      llvm::function_ref<ExprResult()> Defer = nullptr);
   /// The pattern expression currently being transformed by template
   /// instantiation. An operator or member-access rebuild that selects a macro
   /// has no deferred node of its own to name; this is what it uses to
@@ -16583,11 +16583,14 @@ public:
   /// The source member recorded for \p FD, or for the clone \p FD is a
   /// specialization or instantiation of; null if \p FD is not such a clone.
   const FunctionDecl *getClonedDeclarationSource(const FunctionDecl *FD) const;
-  ExprResult BuildExpressionMacroExpansion(Expr *Fn, FunctionDecl *Macro,
-                                           SourceLocation LParenLoc,
-                                           ArrayRef<Expr *> Args,
-                                           SourceLocation RParenLoc,
-                                           CallExpr::ADLCallKind UsesADL);
+  /// Evaluate an expression-position macro and parse its expansion. If the
+  /// macro asks to wait for instantiation, returns what \p Defer builds (the
+  /// deferred invocation); without \p Defer, that is an error.
+  ExprResult BuildExpressionMacroExpansion(
+      Expr *Fn, FunctionDecl *Macro, SourceLocation LParenLoc,
+      ArrayRef<Expr *> Args, SourceLocation RParenLoc,
+      CallExpr::ADLCallKind UsesADL,
+      llvm::function_ref<ExprResult()> Defer = nullptr);
   /// Overload resolution for a macro invocation. Returns true on (diagnosed)
   /// error.
   bool ResolveMacroCallee(Scope *S, UnresolvedLookupExpr *Callee,
@@ -16621,11 +16624,33 @@ public:
 
   /// Bind the arguments, evaluate the macro's body, and produce the expansion
   /// token sequence. Returns true on (diagnosed) error.
+  ///
+  /// If the body calls std::meta::expand_at_instantiation() in a templated
+  /// context, returns true without a diagnostic and sets \p *Deferred; the
+  /// caller then defers the invocation to instantiation. A caller that cannot
+  /// defer passes null, and that case is diagnosed.
   bool EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
                               SourceLocation LParenLoc, ArrayRef<Expr *> Args,
                               SourceLocation RParenLoc,
                               CallExpr::ADLCallKind UsesADL,
-                              TokenSequenceData &Expansion);
+                              TokenSequenceData &Expansion,
+                              bool *Deferred = nullptr);
+  /// A statement-position macro invocation, 'name!(args);' as a whole
+  /// statement. Returns true on (diagnosed) error. Otherwise either sets
+  /// \p Result -- a statement standing for the invocation (one deferred to
+  /// instantiation) -- or fills \p Expansion, which the parser parses,
+  /// followed by the ';' at \p SemiLoc, as statements in place.
+  bool
+  ActOnStmtMacroInvocation(Scope *S, const IdentifierInfo *II,
+                           SourceLocation NameLoc, SourceLocation ExclaimLoc,
+                           SourceLocation LParenLoc, MultiExprArg Args,
+                           SourceLocation RParenLoc, SourceLocation SemiLoc,
+                           TokenSequenceData &Expansion, StmtResult &Result);
+  /// The evaluate-once check of the arguments interpolated into
+  /// \p Expansion, over the statements parsed from it. Returns true on
+  /// (diagnosed) error.
+  bool CheckMacroArgumentEvaluation(const TokenSequenceData &Expansion,
+                                    ArrayRef<Stmt *> Stmts);
   /// A declaration-position macro invocation ('name!(args);' at namespace or
   /// class scope): resolve and evaluate; the parser parses \p Expansion as
   /// declarations in place. In a dependent class the invocation is instead

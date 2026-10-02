@@ -125,6 +125,11 @@ def metafn_interpolation_not_type_reflection : Note<
 def metafn_no_macro_expansion_context : Note<
   "std::meta::macro_expansion_context() is only available while expanding an "
   "expression macro">;
+def metafn_expand_at_instantiation : Note<
+  "expansion of the macro waits for template instantiation">;
+def metafn_no_expand_at_instantiation_context : Note<
+  "std::meta::expand_at_instantiation() is only available while expanding a "
+  "macro">;
 
 def metafn_cannot_clone_declaration : Note<
   "cannot produce a declaration description: %0">;

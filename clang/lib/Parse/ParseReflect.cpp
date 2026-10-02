@@ -555,6 +555,9 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   }
   if (T.consumeClose())
     return nullptr;
+  // The ';' belongs to the invocation; it terminates the expansion (below).
+  SourceLocation SemiLoc =
+      Tok.is(tok::semi) ? Tok.getLocation() : T.getCloseLocation();
   ExpectAndConsumeSemi(diag::err_expected_semi_declaration);
 
   TokenSequenceData Expansion;
@@ -563,11 +566,12 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
                                        T.getCloseLocation(), AS, Expansion))
     return nullptr;
 
-  // Parse the expansion as declarations at the current position, delimited
-  // by its own eof.
+  // Parse the expansion, followed by the invocation's ';', as declarations
+  // at the current position, delimited by its own eof.
   SmallVector<Token, 16> Toks(Expansion.begin(), Expansion.end());
   relocateExpansionTokens(PP.getSourceManager(), Toks,
                           SourceRange(NameLoc, T.getCloseLocation()));
+  Toks.push_back(makeInvocationTerminator(SemiLoc));
   Token Eof;
   Eof.startToken();
   Eof.setKind(tok::eof);
@@ -612,6 +616,195 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
     return nullptr;
   return DeclGroupPtrTy::make(
       DeclGroupRef::Create(Actions.Context, Decls.data(), Decls.size()));
+}
+
+/// Whether the (whole) token sequence \p Toks is a do-expression,
+/// 'do -> T { ... }' or 'do { ... }' with nothing after the braces, rather
+/// than a do-while statement, whose braces 'while' follows.
+static bool isDoExpression(ArrayRef<Token> Toks) {
+  if (Toks.size() < 2 || Toks[0].isNot(tok::kw_do))
+    return false;
+  if (Toks[1].is(tok::arrow))
+    return true;
+  if (Toks[1].isNot(tok::l_brace))
+    return false;
+  unsigned Depth = 0;
+  for (size_t I = 1; I != Toks.size(); ++I) {
+    if (Toks[I].is(tok::l_brace))
+      ++Depth;
+    else if (Toks[I].is(tok::r_brace) && --Depth == 0)
+      return I + 1 == Toks.size() || Toks[I + 1].isNot(tok::kw_while);
+  }
+  return false;
+}
+
+void Parser::parenthesizeDoExpression(SmallVectorImpl<Token> &Toks,
+                                      SourceLocation CloseLoc) {
+  if (!isDoExpression(Toks))
+    return;
+  Token LParen, RParen;
+  LParen.startToken();
+  LParen.setKind(tok::l_paren);
+  LParen.setLocation(Toks.front().getLocation());
+  LParen.setLength(0);
+  RParen.startToken();
+  RParen.setKind(tok::r_paren);
+  RParen.setLocation(CloseLoc);
+  RParen.setLength(0);
+  Toks.insert(Toks.begin(), LParen);
+  Toks.push_back(RParen);
+}
+
+bool Parser::isStartOfStmtMacroInvocation() {
+  if (!isStartOfDeclMacroInvocation())
+    return false;
+  // Only an invocation that is the whole statement: look past the balanced
+  // argument list for the ';'.
+  TentativeParsingAction TPA(*this);
+  ConsumeToken(); // name
+  ConsumeToken(); // '!'
+  BalancedDelimiterTracker T(*this, Tok.getKind());
+  T.consumeOpen();
+  T.skipToEnd();
+  bool WholeStatement = Tok.is(tok::semi);
+  TPA.Revert();
+  return WholeStatement;
+}
+
+/// Parse a statement-position macro invocation, 'name!(args);', and parse its
+/// expansion followed by the invocation's ';' as statements in place. The
+/// arguments are those of an expression macro (run-time expressions, or raw
+/// tokens); only the expansion is parsed differently.
+StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
+  assert(isStartOfStmtMacroInvocation());
+
+  IdentifierInfo *II = Tok.getIdentifierInfo();
+  SourceLocation NameLoc = ConsumeToken();
+
+  // The macro's parameter shape decides how each argument is parsed.
+  SmallVector<bool, 4> RawParams;
+  bool ShapeError;
+  {
+    LookupResult R(Actions, II, NameLoc, Sema::LookupOrdinaryName);
+    Actions.LookupParsedName(R, getCurScope(), /*SS=*/nullptr,
+                             /*ObjectType=*/QualType());
+    ShapeError = Actions.GetMacroParameterShape(R, RawParams);
+  }
+
+  SourceLocation ExclaimLoc = ConsumeToken();
+  BalancedDelimiterTracker T(*this, Tok.getKind());
+  T.consumeOpen();
+
+  if (ShapeError) {
+    T.skipToEnd();
+    TryConsumeToken(tok::semi);
+    return StmtError();
+  }
+
+  ExprVector Args;
+  if (ParseMacroArguments(RawParams, /*ShapeUnknown=*/false, T, Args)) {
+    TryConsumeToken(tok::semi);
+    return StmtError();
+  }
+  if (T.consumeClose())
+    return StmtError();
+  // The ';' belongs to the invocation; it terminates the expansion (below).
+  // (isStartOfStmtMacroInvocation saw it.)
+  SourceLocation SemiLoc = ConsumeToken();
+
+  bool InCompound =
+      (StmtCtx & ParsedStmtContext::Compound) == ParsedStmtContext::Compound;
+
+  TokenSequenceData Expansion;
+  StmtResult Result;
+  if (Actions.ActOnStmtMacroInvocation(
+          getCurScope(), II, NameLoc, ExclaimLoc, T.getOpenLocation(), Args,
+          T.getCloseLocation(), SemiLoc, Expansion, Result))
+    return StmtError();
+  // Deferred to instantiation (or not a statement macro after all): a single
+  // statement. As a substatement, still a compound one: the statements the
+  // instantiation injects for it are collected by an enclosing compound.
+  if (Result.isUsable()) {
+    if (InCompound)
+      return Result;
+    Stmt *S = Result.get();
+    return Actions.ActOnCompoundStmt(NameLoc, SemiLoc, S, /*isStmtExpr=*/false);
+  }
+
+  // Parse the expansion, followed by the invocation's ';', as statements at
+  // the current position, delimited by its own eof. Directly in a compound
+  // statement this is the enclosing block's scope, so the expansion's
+  // declarations (e.g. a scope guard) live to the end of it. As a
+  // substatement, the statements are one compound statement, as if braced --
+  // which is what C++ makes of a substatement anyway.
+  SmallVector<Token, 16> Toks(Expansion.begin(), Expansion.end());
+  relocateExpansionTokens(PP.getSourceManager(), Toks,
+                          SourceRange(NameLoc, T.getCloseLocation()));
+  // An expansion that is a do-expression is an expression statement, as the
+  // expression macro it typically comes from intends. At the start of a
+  // statement 'do' would begin a do-while, so parenthesize it. (Knowing where
+  // the expansion ends makes this decidable: a do-while's body is followed by
+  // 'while'.)
+  parenthesizeDoExpression(Toks, T.getCloseLocation());
+  Toks.push_back(makeInvocationTerminator(SemiLoc));
+  Token Eof;
+  Eof.startToken();
+  Eof.setKind(tok::eof);
+  Eof.setLocation(SemiLoc);
+  Toks.push_back(Eof);
+
+  std::optional<ParseScope> SubStmtScope;
+  std::optional<Sema::CompoundScopeRAII> CompoundScope;
+  if (!InCompound) {
+    SubStmtScope.emplace(this, Scope::DeclScope);
+    CompoundScope.emplace(Actions);
+  }
+
+  Token SavedTok = Tok;
+  PP.EnterTokenStream(Toks, /*DisableMacroExpansion=*/true,
+                      /*IsReinject=*/true);
+  ConsumeAnyToken();
+
+  // Statements injected while parsing the expansion (by a consteval block in
+  // it) belong in place among its own.
+  SmallVector<Stmt *> SavedPendingInjected;
+  SavedPendingInjected.swap(Actions.PendingInjectedStmts);
+
+  StmtVector Stmts;
+  {
+    Sema::MacroExpansionDepthRAII Depth(Actions);
+    Actions.runWithSufficientStackSpace(NameLoc, [&] {
+      while (Tok.isNot(tok::eof)) {
+        SourceLocation Before = Tok.getLocation();
+        size_t Count = Stmts.size();
+        StmtResult R =
+            ParseStatementOrDeclaration(Stmts, ParsedStmtContext::Compound);
+        if (R.isUsable())
+          Stmts.push_back(R.get());
+        Stmts.append(Actions.PendingInjectedStmts.begin(),
+                     Actions.PendingInjectedStmts.end());
+        Actions.PendingInjectedStmts.clear();
+        // Guarantee progress on malformed tokens.
+        if (Tok.isNot(tok::eof) && Tok.getLocation() == Before &&
+            Stmts.size() == Count)
+          ConsumeAnyToken();
+      }
+    });
+  }
+  Tok = SavedTok;
+  SavedPendingInjected.swap(Actions.PendingInjectedStmts);
+
+  bool Invalid = Actions.CheckMacroArgumentEvaluation(Expansion, Stmts);
+
+  if (!InCompound) {
+    StmtResult Compound = Actions.ActOnCompoundStmt(NameLoc, SemiLoc, Stmts,
+                                                    /*isStmtExpr=*/false);
+    return Invalid ? StmtError() : Compound;
+  }
+  if (Invalid)
+    return StmtError();
+  Actions.PendingInjectedStmts.append(Stmts.begin(), Stmts.end());
+  return StmtEmpty();
 }
 
 /// Parse the arguments of a macro invocation up to (not including) the
@@ -863,6 +1056,17 @@ ExprResult Parser::SpeculativeExpressionCallback(void *P,
 /// token, which is why the range starts at the name). Tokens that already
 /// lie within the invocation -- a raw token argument's -- and interpolated
 /// argument expressions (located at the argument) are left where they are.
+Token Parser::makeInvocationTerminator(SourceLocation Loc) {
+  Token Semi;
+  Semi.startToken();
+  Semi.setKind(tok::semi);
+  Semi.setLocation(Loc);
+  Semi.setLength(1);
+  Semi.setFlag(Token::LeadingEmptyMacro);
+  InvocationTerminators.insert(Loc);
+  return Semi;
+}
+
 void Parser::relocateExpansionTokens(SourceManager &SM,
                                      SmallVectorImpl<Token> &Toks,
                                      SourceRange Invocation) {

@@ -1306,6 +1306,12 @@ void Parser::ProcessTokenInjections(
     SmallVector<Token, 16> Toks;
     Toks.append(TSD.begin(), TSD.end());
     relocateExpansionTokens(PP.getSourceManager(), Toks, Inj.Invocation);
+    if (Inj.Terminated) {
+      // A statement macro's expansion (a deferred one, expanded now).
+      if (Actions.CurContext->isFunctionOrMethod())
+        parenthesizeDoExpression(Toks, Loc);
+      Toks.push_back(makeInvocationTerminator(Loc));
+    }
     Token Eof;
     Eof.startToken();
     Eof.setKind(tok::eof);

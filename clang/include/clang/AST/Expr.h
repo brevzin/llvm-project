@@ -665,6 +665,9 @@ public:
       /// For the expansion of a declaration macro deferred to instantiation:
       /// the invocation, so the tokens read as expanded from it.
       SourceRange Invocation = SourceRange();
+      /// The expansion of a whole-declaration invocation 'name!(args);': the
+      /// invocation's ';' terminates it, so one follows the tokens (at Loc).
+      bool Terminated = false;
     };
 
     /// Token sequences pending injection from std::meta::queue_injection calls
