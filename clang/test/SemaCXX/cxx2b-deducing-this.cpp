@@ -1430,6 +1430,22 @@ namespace ConstexprBacktrace {
   }
   static_assert(test2()); // expected-error {{not an integral constant expression}} \
                           // expected-note {{in call to}}
+
+  // A by-value explicit object parameter: the object argument is the
+  // parameter itself (this used to crash when rendering the note).
+  struct V {
+    int v;
+    constexpr int foo(this V) {
+      (void)(1/0); // expected-note 2{{division by zero}} \
+                   // expected-warning {{division by zero is undefined}}
+      return 0;
+    }
+  };
+  constexpr V gv{1};
+  constexpr int t3 = V{2}.foo(); // expected-error {{must be initialized by a constant expression}} \
+                                 // expected-note {{in call to 'V{2}.foo()'}}
+  constexpr int t4 = gv.foo(); // expected-error {{must be initialized by a constant expression}} \
+                               // expected-note {{in call to 'gv.foo()'}}
 }
 
 namespace GH176639 {

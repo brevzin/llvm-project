@@ -2139,6 +2139,21 @@ void CallStackFrame::describe(raw_ostream &Out) const {
       OCE->getArg(0)->printPretty(Out, /*Helper=*/nullptr, PrintingPolicy,
                                   /*Indentation=*/0);
       Out << ".";
+    } else if (const auto *CE = dyn_cast_if_present<clang::CallExpr>(CallExpr);
+               ExplicitInstanceParam && CE && CE->getNumArgs()) {
+      // A call to an explicit object member function: the object is the
+      // first argument (possibly copied into a by-value parameter).
+      const Expr *Object = CE->getArg(0)->IgnoreImplicit();
+      if (const auto *CCE = dyn_cast<CXXConstructExpr>(Object);
+          CCE && CCE->getNumArgs() == 1 &&
+          CCE->getConstructor()->isCopyOrMoveConstructor())
+        Object = CCE->getArg(0)->IgnoreImplicit();
+      const auto *Deref = dyn_cast<UnaryOperator>(Object->IgnoreParens());
+      bool Arrow = Deref && Deref->getOpcode() == UO_Deref;
+      (Arrow ? Deref->getSubExpr() : Object)
+          ->printPretty(Out, /*Helper=*/nullptr, PrintingPolicy,
+                        /*Indentation=*/0);
+      Out << (Arrow ? "->" : ".");
     } else {
       APValue Val;
       This->moveInto(Val);
@@ -7539,7 +7554,8 @@ static bool MaybeHandleUnionActiveMemberChange(EvalInfo &Info,
 
 static bool EvaluateCallArg(const ParmVarDecl *PVD, const Expr *Arg,
                             CallRef Call, EvalInfo &Info, bool NonNull = false,
-                            APValue **EvaluatedArg = nullptr) {
+                            APValue **EvaluatedArg = nullptr,
+                            LValue *EvaluatedArgSlot = nullptr) {
   LValue LV;
   // Create the parameter slot and register its destruction. For a vararg
   // argument, create a temporary.
@@ -7561,6 +7577,8 @@ static bool EvaluateCallArg(const ParmVarDecl *PVD, const Expr *Arg,
 
   if (EvaluatedArg)
     *EvaluatedArg = &V;
+  if (EvaluatedArgSlot)
+    *EvaluatedArgSlot = LV;
 
   return true;
 }
@@ -7593,15 +7611,24 @@ static bool EvaluateArgs(ArrayRef<const Expr *> Args, CallRef Call,
         Idx < Callee->getNumParams() ? Callee->getParamDecl(Idx) : nullptr;
     bool NonNull = !ForbiddenNullArgs.empty() && ForbiddenNullArgs[Idx];
     APValue *That = nullptr;
-    if (!EvaluateCallArg(PVD, Args[Idx], Call, Info, NonNull, &That)) {
+    LValue Slot;
+    if (!EvaluateCallArg(PVD, Args[Idx], Call, Info, NonNull, &That, &Slot)) {
       // If we're checking for a potential constant expression, evaluate all
       // initializers even if some of them fail.
       if (!Info.noteFailure())
         return false;
       Success = false;
     }
-    if (PVD && PVD->isExplicitObjectParameter() && That && That->isLValue())
-      ObjectArg->setFrom(Info.Ctx, *That);
+    // The object argument is the referenced object for an explicit object
+    // parameter of reference type, and the parameter itself otherwise.
+    if (PVD && PVD->isExplicitObjectParameter() && That) {
+      if (PVD->getType()->isReferenceType()) {
+        if (That->isLValue())
+          ObjectArg->setFrom(Info.Ctx, *That);
+      } else {
+        *ObjectArg = Slot;
+      }
+    }
   }
   return Success;
 }
