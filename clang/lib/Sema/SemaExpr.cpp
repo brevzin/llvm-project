@@ -3405,10 +3405,17 @@ static bool isExpressionMacroParameter(const ValueDecl *VD) {
 }
 
 static bool isRawMacroParameter(const ParmVarDecl *PVD) {
-  return PVD->getType()
-      .getNonReferenceType()
-      .getUnqualifiedType()
-      ->isTokenSequenceType();
+  return PVD->isMacroRawPack() || PVD->getType()
+                                      .getNonReferenceType()
+                                      .getUnqualifiedType()
+                                      ->isTokenSequenceType();
+}
+
+static MacroParamKind getMacroParamKind(const ParmVarDecl *PVD) {
+  if (PVD->isMacroRawPack())
+    return MacroParamKind::RawPack;
+  return isRawMacroParameter(PVD) ? MacroParamKind::Raw
+                                  : MacroParamKind::Expression;
 }
 
 ExprResult Sema::BuildDeclarationNameExpr(const CXXScopeSpec &SS,
@@ -3695,8 +3702,11 @@ ExprResult Sema::BuildDeclarationNameExpr(
 
   // Inside an expression-macro body a parameter names the reflection of the
   // argument expression bound to it (or the raw token sequence), not a value
-  // of the declared type.
-  if (isExpressionMacroParameter(VD)) {
+  // of the declared type. (Not a parameter pack, which is dependent, as any
+  // function parameter pack is: the parameters it expands to are named this
+  // way when the macro is instantiated.)
+  if (isExpressionMacroParameter(VD) &&
+      !cast<ParmVarDecl>(VD)->isParameterPack()) {
     type = isRawMacroParameter(cast<ParmVarDecl>(VD)) ? Context.TokenSequenceTy
                                                       : Context.MetaInfoTy;
     valueKind = VK_PRValue;
@@ -7282,7 +7292,7 @@ static InterceptedMetaFnPtr getInterceptedMetaFn(const FunctionDecl *FDecl) {
 
 
 bool Sema::GetMacroParameterShape(LookupResult &R,
-                                  SmallVectorImpl<bool> &RawParams) {
+                                  SmallVectorImpl<MacroParamKind> &RawParams) {
   if (R.empty()) {
     Diag(R.getNameLoc(), diag::err_undeclared_macro) << R.getLookupName();
     return true;
@@ -7301,10 +7311,10 @@ bool Sema::GetMacroParameterShape(LookupResult &R,
 
     // The object expression of a member macro is never written as an
     // argument, so the shape is that of the remaining parameters.
-    SmallVector<bool, 4> Shape;
+    SmallVector<MacroParamKind, 4> Shape;
     for (const ParmVarDecl *P : FD->parameters())
       if (!P->isExplicitObjectParameter())
-        Shape.push_back(isRawMacroParameter(P));
+        Shape.push_back(getMacroParamKind(P));
     if (!First) {
       First = FD;
       RawParams.assign(Shape.begin(), Shape.end());
@@ -7328,7 +7338,7 @@ static bool isUnknownDependentScope(Sema &S, CXXScopeSpec &SS) {
 bool Sema::GetQualifiedMacroParameterShape(Scope *S, CXXScopeSpec &SS,
                                            const IdentifierInfo *II,
                                            SourceLocation NameLoc,
-                                           SmallVectorImpl<bool> &RawParams,
+                                           SmallVectorImpl<MacroParamKind> &RawParams,
                                            bool &ShapeUnknown) {
   ShapeUnknown = isUnknownDependentScope(*this, SS);
   if (ShapeUnknown)
@@ -7351,7 +7361,7 @@ static ExprResult buildDependentMacroCallee(Sema &S,
 bool Sema::LookupDeferredQualifiedMacro(NestedNameSpecifierLoc QualifierLoc,
                                         const DeclarationNameInfo &NameInfo,
                                         UnresolvedLookupExpr *&Callee,
-                                        SmallVectorImpl<bool> &RawParams,
+                                        SmallVectorImpl<MacroParamKind> &RawParams,
                                         bool &StillDependent) {
   CXXScopeSpec SS;
   SS.Adopt(QualifierLoc);
@@ -7379,7 +7389,7 @@ bool Sema::LookupDeferredQualifiedMacro(NestedNameSpecifierLoc QualifierLoc,
   return false;
 }
 
-bool Sema::ParseDeferredMacroArguments(ArrayRef<bool> RawParams,
+bool Sema::ParseDeferredMacroArguments(ArrayRef<MacroParamKind> RawParams,
                                        const CXXMacroInvocationExpr *E,
                                        SmallVectorImpl<Expr *> &PatternArgs) {
   assert(E->areArgsUnparsed() && "arguments already parsed");
@@ -7478,7 +7488,7 @@ Sema::ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS, const IdentifierInfo *II,
 
   LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
   LookupParsedName(R, S, &SS, /*ObjectType=*/QualType());
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   if (GetMacroParameterShape(R, RawParams))
     return ExprError();
 
@@ -7625,7 +7635,7 @@ bool Sema::ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
 
   LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
   LookupParsedName(R, S, /*SS=*/nullptr, /*ObjectType=*/QualType());
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   if (GetMacroParameterShape(R, RawParams))
     return true;
 
@@ -7686,7 +7696,7 @@ bool Sema::ActOnStmtMacroInvocation(
 
   LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
   LookupParsedName(R, S, /*SS=*/nullptr, /*ObjectType=*/QualType());
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   if (GetMacroParameterShape(R, RawParams))
     return true;
 
@@ -7786,7 +7796,7 @@ bool Sema::ActOnMemInitMacroInvocation(
 
   LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
   LookupParsedName(R, S, &SS, /*ObjectType=*/QualType());
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   if (GetMacroParameterShape(R, RawParams))
     return true;
 
@@ -7840,7 +7850,7 @@ bool Sema::ActOnMemInitMacroInvocation(
 bool Sema::GetMemberMacroParameterShape(Expr *Base, tok::TokenKind OpKind,
                                         const IdentifierInfo *II,
                                         SourceLocation NameLoc,
-                                        SmallVectorImpl<bool> &RawParams,
+                                        SmallVectorImpl<MacroParamKind> &RawParams,
                                         bool &ShapeUnknown) {
   ShapeUnknown = false;
   QualType ObjectType = Base->getType();
@@ -7945,7 +7955,7 @@ bool Sema::ResolveMemberMacroInvocation(
 
   LookupResult R(*this, NameInfo, LookupMemberName);
   LookupQualifiedName(R, RD);
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   if (GetMacroParameterShape(R, RawParams))
     return true;
 

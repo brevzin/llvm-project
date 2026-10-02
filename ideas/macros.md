@@ -163,6 +163,34 @@ the closing paren, commas included, like `__VA_ARGS__`. That is what lets
 A macro may mix the two kinds. Overloads must agree on which positions are
 raw.
 
+#### A pack of raw parameters
+
+`std::meta::token_sequence... args` as the last parameter takes *each*
+remaining argument as its own raw token sequence, split at top-level commas
+as any argument list is — so a macro taking a list never re-splits a greedy
+blob itself, tracking brackets by hand:
+
+```cpp
+__macro call(std::meta::token_sequence fn, std::meta::token_sequence... args) {
+  ...
+  std::vector<named_arg> named{parse_named(args)...};   // one 'name = value' each
+  ...
+}
+
+call!(f, y = sum(P{1, 2}), x = [i = 2, j = 3] { return i + j; }());
+```
+
+This is P1219 (homogeneous variadic function parameters) in its narrowest
+form: only in a macro, and only for `token_sequence` itself (not a reference
+to it). As P1219 has it, the macro is then a template — written that way, it
+is the abbreviated function template `auto... args`, the type deduced as
+`token_sequence` from the raw arguments — so in the body `args` is an
+ordinary pack: `sizeof...(args)`, `args...[i]` (with a constant index),
+`{args...}`, folds. The pack must come last, and an operator macro, whose
+operands are expressions, cannot have one. The braced invocation's trailing
+comma (`m!{a, b,}`) adds no argument. Outside macros,
+`std::meta::token_sequence...` is ill-formed as before.
+
 ## Inside the body
 
 Within the macro body, a parameter name does not denote a value of its declared
@@ -601,6 +629,11 @@ Probing is SFINAE-flavored: template instantiations it triggers are
 permanent, and an error outside the probed expression's immediate context is
 (deliberately) swallowed rather than diagnosed — validity means "parsed and
 type-checked", the same contract as `requires`.
+
+A value the speculative parse records as consteval-only — `^^f`, say, which a
+macro parses only to evaluate it (`extract<info>(constant_of(*r))`) — is not
+one of the invocation site's run-time expressions, and is not diagnosed as
+one.
 
 ### Seeing the invocation site: `macro_expansion_context`
 

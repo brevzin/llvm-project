@@ -870,6 +870,12 @@ void inferNoReturnAttr(Sema &S, Decl *D);
 #endif
 /// Sema - This implements semantic analysis and AST building for C.
 /// \nosubgrouping
+/// How a macro parameter takes its argument: as an expression (bound to a
+/// reflection), as raw tokens, or -- for a pack of raw parameters,
+/// 'std::meta::token_sequence... args' -- each remaining argument as raw
+/// tokens.
+enum class MacroParamKind : unsigned char { Expression, Raw, RawPack };
+
 class Sema final : public SemaBase {
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
@@ -1384,7 +1390,7 @@ public:
     // Parse the argument list of a macro invocation, captured as tokens when
     // the macro's parameter shape was unknown, according to \p RawParams.
     // Returns true on error.
-    typedef bool DeferredMacroArgumentsCB(void *P, ArrayRef<bool> RawParams,
+    typedef bool DeferredMacroArgumentsCB(void *P, ArrayRef<MacroParamKind> RawParams,
                                           bool Braced, TokenSequenceData TSD,
                                           SourceLocation Loc, DeclContext *Ctx,
                                           ArrayRef<NamedDecl *> TemplateParams,
@@ -1423,7 +1429,7 @@ public:
       return DeferredMacroArgumentsCallback && OpaqueParser;
     }
 
-    bool parseDeferredMacroArguments(ArrayRef<bool> RawParams, bool Braced,
+    bool parseDeferredMacroArguments(ArrayRef<MacroParamKind> RawParams, bool Braced,
                                      TokenSequenceData TSD, SourceLocation Loc,
                                      DeclContext *Ctx,
                                      ArrayRef<NamedDecl *> TemplateParams,
@@ -16440,7 +16446,7 @@ public:
   /// parameters. Diagnoses and returns true if \p R does not name macros or
   /// the overloads disagree.
   bool GetMacroParameterShape(LookupResult &R,
-                              SmallVectorImpl<bool> &RawParams);
+                              SmallVectorImpl<MacroParamKind> &RawParams);
   /// Look up the macros 'SS name' names and determine their parameter shape,
   /// as for GetMacroParameterShape. If \p SS is dependent and names no known
   /// class, the macros cannot be found until instantiation: sets
@@ -16448,7 +16454,7 @@ public:
   bool GetQualifiedMacroParameterShape(Scope *S, CXXScopeSpec &SS,
                                        const IdentifierInfo *II,
                                        SourceLocation NameLoc,
-                                       SmallVectorImpl<bool> &RawParams,
+                                       SmallVectorImpl<MacroParamKind> &RawParams,
                                        bool &ShapeUnknown);
   /// \p ArgsUnparsed: the shape was unknown, and the single argument is the
   /// argument list as tokens (see CXXMacroInvocationExpr::areArgsUnparsed).
@@ -16464,13 +16470,13 @@ public:
   bool LookupDeferredQualifiedMacro(NestedNameSpecifierLoc QualifierLoc,
                                     const DeclarationNameInfo &NameInfo,
                                     UnresolvedLookupExpr *&Callee,
-                                    SmallVectorImpl<bool> &RawParams,
+                                    SmallVectorImpl<MacroParamKind> &RawParams,
                                     bool &StillDependent);
   /// Parse the argument list of \p E, captured as tokens when the macro's
   /// shape was unknown, according to the now-known shape \p RawParams. The
   /// arguments are parsed where they were written, as part of the template,
   /// so \p PatternArgs are to be substituted into like any other part of it.
-  bool ParseDeferredMacroArguments(ArrayRef<bool> RawParams,
+  bool ParseDeferredMacroArguments(ArrayRef<MacroParamKind> RawParams,
                                    const CXXMacroInvocationExpr *E,
                                    SmallVectorImpl<Expr *> &PatternArgs);
   /// Mark the arguments of \p E unparsed, to be parsed where they are
@@ -16498,7 +16504,7 @@ public:
   bool GetMemberMacroParameterShape(Expr *Base, tok::TokenKind OpKind,
                                     const IdentifierInfo *II,
                                     SourceLocation NameLoc,
-                                    SmallVectorImpl<bool> &RawParams,
+                                    SmallVectorImpl<MacroParamKind> &RawParams,
                                     bool &ShapeUnknown);
   ExprResult ActOnMemberMacroInvocation(
       Scope *S, Expr *Base, SourceLocation OpLoc, tok::TokenKind OpKind,

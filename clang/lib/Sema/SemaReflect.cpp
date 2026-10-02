@@ -28,6 +28,7 @@
 #include "clang/Sema/Sema.h"
 #include "clang/Sema/Template.h"
 #include "clang/Sema/TemplateDeduction.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
@@ -536,6 +537,25 @@ public:
   Expr *TestExpression(TokenSequenceData TSD, SourceLocation Loc) override {
     if (!S.CanParseSpeculativeExpression())
       return nullptr;
+    // The speculative parse decides only whether the tokens form an
+    // expression; a consteval-only value in it (a reflection, say, which the
+    // macro uses only at translation time) is not one of the invocation
+    // site's run-time expressions.
+    unsigned Ctx = S.ExprEvalContexts.size() - 1;
+    llvm::SmallPtrSet<Expr *, 4> ConstevalOnlyBefore(
+        S.ExprEvalContexts[Ctx].ConstevalOnly.begin(),
+        S.ExprEvalContexts[Ctx].ConstevalOnly.end());
+    auto ForgetSpeculative = llvm::make_scope_exit([&] {
+      if (Ctx >= S.ExprEvalContexts.size())
+        return;
+      auto &Now = S.ExprEvalContexts[Ctx].ConstevalOnly;
+      SmallVector<Expr *, 4> Added;
+      for (Expr *E : Now)
+        if (!ConstevalOnlyBefore.contains(E))
+          Added.push_back(E);
+      for (Expr *E : Added)
+        Now.erase(E);
+    });
     ExprResult R =
         S.ParseSpeculativeExpressionFromParserBridge(TSD, SourceRange(Loc, Loc));
     if (R.isInvalid() || !R.get() || R.get()->containsErrors())

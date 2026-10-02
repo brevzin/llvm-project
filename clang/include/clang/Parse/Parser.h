@@ -8655,6 +8655,8 @@ private:
   Token makeInvocationTerminator(SourceLocation Loc);
   /// Locations of the ';'s made by makeInvocationTerminator.
   llvm::DenseSet<SourceLocation> InvocationTerminators;
+  /// Whether the parameter-declaration-clause being parsed is a macro's.
+  bool ParsingMacroParameters = false;
   /// For the expansion of a statement macro: if \p Toks (the whole
   /// expansion) is a do-expression rather than a do-while, parenthesize it,
   /// so that it parses as the expression statement an expression macro
@@ -8684,25 +8686,25 @@ private:
   /// \p RawParams. If \p ShapeUnknown (the macro cannot be looked up until
   /// instantiation), the whole list is captured as a single token sequence
   /// instead, since even where the arguments split depends on the shape.
-  bool ParseMacroArguments(ArrayRef<bool> RawParams, bool ShapeUnknown,
+  bool ParseMacroArguments(ArrayRef<MacroParamKind> RawParams, bool ShapeUnknown,
                            BalancedDelimiterTracker &T, ExprVector &Args);
   /// Parse a macro argument list ending at \p Close; \p Braced if the
   /// invocation's brackets were braces (which permit a trailing comma).
   /// Returns true on error, without skipping.
-  bool ParseMacroArgumentList(ArrayRef<bool> RawParams, tok::TokenKind Close,
+  bool ParseMacroArgumentList(ArrayRef<MacroParamKind> RawParams, tok::TokenKind Close,
                               bool Braced, ExprVector &Args);
   ExprResult ParseMacroRawArgument(tok::TokenKind Close, bool Greedy);
   /// Parse an argument list captured when the macro's shape was unknown
   /// (see ParseMacroArguments), now that it is known: in the context \p Ctx
   /// it was written in, with the template parameters of that context (and
   /// \p TemplateParams) in scope, so producing dependent expressions.
-  bool ParseDeferredMacroArguments(ArrayRef<bool> RawParams, bool Braced,
+  bool ParseDeferredMacroArguments(ArrayRef<MacroParamKind> RawParams, bool Braced,
                                    TokenSequenceData TSD, SourceLocation Loc,
                                    DeclContext *Ctx,
                                    ArrayRef<NamedDecl *> TemplateParams,
                                    SmallVectorImpl<Expr *> &Args);
   static bool DeferredMacroArgumentsCallback(
-      void *P, ArrayRef<bool> RawParams, bool Braced, TokenSequenceData TSD,
+      void *P, ArrayRef<MacroParamKind> RawParams, bool Braced, TokenSequenceData TSD,
       SourceLocation Loc, DeclContext *Ctx,
       ArrayRef<NamedDecl *> TemplateParams, SmallVectorImpl<Expr *> &Args);
   ExprResult ParseExpressionMacroExpansion(TokenSequenceData TSD,

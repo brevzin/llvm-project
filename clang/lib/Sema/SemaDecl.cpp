@@ -10197,11 +10197,17 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
         if (!P)
           continue;
         // Operator syntax supplies expression operands only.
-        if (IsOperator && P->getType()
-                              .getNonReferenceType()
-                              .getUnqualifiedType()
-                              ->isTokenSequenceType()) {
+        if (IsOperator && (P->isMacroRawPack() ||
+                           P->getType()
+                               .getNonReferenceType()
+                               .getUnqualifiedType()
+                               ->isTokenSequenceType())) {
           Diag(P->getLocation(), diag::err_macro_operator_raw_parameter);
+          NewFD->setInvalidDecl();
+        }
+        // A raw pack takes the remaining arguments, so it comes last.
+        if (P->isMacroRawPack() && I + 1 != FTI.NumParams) {
+          Diag(P->getLocation(), diag::err_macro_raw_pack_not_last);
           NewFD->setInvalidDecl();
         }
       }

@@ -437,7 +437,7 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
   // The macro's parameter shape decides how each argument is parsed, so the
   // macro has to be found before the arguments are read. (With a dependent
   // qualifier it cannot be, and the arguments wait for instantiation.)
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   bool ShapeUnknown = false;
   bool ShapeError = Actions.GetQualifiedMacroParameterShape(
       getCurScope(), SS, II, NameLoc, RawParams, ShapeUnknown);
@@ -481,7 +481,7 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
 
   // If the object's class is not known yet (a dependent object expression),
   // the arguments wait for instantiation.
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   bool ShapeUnknown = false;
   bool ShapeError = Actions.GetMemberMacroParameterShape(
       Base, OpKind, II, NameLoc, RawParams, ShapeUnknown);
@@ -529,7 +529,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
       Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
 
   // The macro's parameter shape decides how each argument is parsed.
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   bool ShapeError;
   {
     LookupResult R(Actions, II, NameLoc, Sema::LookupOrdinaryName);
@@ -682,7 +682,7 @@ StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
   SourceLocation NameLoc = ConsumeToken();
 
   // The macro's parameter shape decides how each argument is parsed.
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   bool ShapeError;
   {
     LookupResult R(Actions, II, NameLoc, Sema::LookupOrdinaryName);
@@ -811,7 +811,7 @@ StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
 /// closing bracket (the one matching the invocation's opener); raw parameters
 /// take their arguments as token sequences. Skips to the closing bracket and
 /// returns true on error.
-bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams, bool ShapeUnknown,
+bool Parser::ParseMacroArguments(ArrayRef<MacroParamKind> RawParams, bool ShapeUnknown,
                                  BalancedDelimiterTracker &T,
                                  ExprVector &Args) {
   tok::TokenKind Close = T.getCloseKind();
@@ -831,17 +831,25 @@ bool Parser::ParseMacroArguments(ArrayRef<bool> RawParams, bool ShapeUnknown,
   return false;
 }
 
-bool Parser::ParseMacroArgumentList(ArrayRef<bool> RawParams,
+bool Parser::ParseMacroArgumentList(ArrayRef<MacroParamKind> RawParams,
                                     tok::TokenKind Close, bool Braced,
                                     ExprVector &Args) {
   if (Tok.isNot(Close)) {
     while (true) {
+      // A raw pack (last) takes each remaining argument as raw tokens; a
+      // last raw parameter takes all of them, commas included.
       unsigned Idx = Args.size();
-      bool Raw = Idx < RawParams.size() && RawParams[Idx];
+      MacroParamKind Kind = MacroParamKind::Expression;
+      if (Idx < RawParams.size())
+        Kind = RawParams[Idx];
+      else if (!RawParams.empty() &&
+               RawParams.back() == MacroParamKind::RawPack)
+        Kind = MacroParamKind::RawPack;
       ExprResult Arg;
-      if (Raw)
-        Arg = ParseMacroRawArgument(Close,
-                                    /*Greedy=*/Idx + 1 == RawParams.size());
+      if (Kind != MacroParamKind::Expression)
+        Arg = ParseMacroRawArgument(
+            Close, /*Greedy=*/Kind == MacroParamKind::Raw &&
+                       Idx + 1 == RawParams.size());
       else if (Tok.is(tok::l_brace))
         Arg = ParseBraceInitializer();
       else
@@ -908,7 +916,7 @@ ExprResult Parser::ParseMacroRawArgument(tok::TokenKind Close, bool Greedy) {
       getCurScope(), StartLoc, SourceRange(StartLoc, EndLoc), Tokens);
 }
 
-bool Parser::ParseDeferredMacroArguments(ArrayRef<bool> RawParams, bool Braced,
+bool Parser::ParseDeferredMacroArguments(ArrayRef<MacroParamKind> RawParams, bool Braced,
                                          TokenSequenceData TSD,
                                          SourceLocation Loc, DeclContext *Ctx,
                                          ArrayRef<NamedDecl *> TemplateParams,
@@ -1026,7 +1034,7 @@ bool Parser::ParseDeferredMacroArguments(ArrayRef<bool> RawParams, bool Braced,
 }
 
 bool Parser::DeferredMacroArgumentsCallback(
-    void *P, ArrayRef<bool> RawParams, bool Braced, TokenSequenceData TSD,
+    void *P, ArrayRef<MacroParamKind> RawParams, bool Braced, TokenSequenceData TSD,
     SourceLocation Loc, DeclContext *Ctx, ArrayRef<NamedDecl *> TemplateParams,
     SmallVectorImpl<Expr *> &Args) {
   return static_cast<Parser *>(P)->ParseDeferredMacroArguments(
@@ -1288,7 +1296,7 @@ bool Parser::ParseMemInitMacroInvocation(
   SourceLocation StartLoc = SS.isEmpty() ? NameLoc : SS.getBeginLoc();
 
   // The macro's parameter shape decides how each argument is parsed.
-  SmallVector<bool, 4> RawParams;
+  SmallVector<MacroParamKind, 4> RawParams;
   bool ShapeUnknown = false;
   // An invalid qualifier has already been diagnosed.
   bool ShapeError = SS.isInvalid() || Actions.GetQualifiedMacroParameterShape(

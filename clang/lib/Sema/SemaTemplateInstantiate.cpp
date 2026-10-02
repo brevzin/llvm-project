@@ -3603,6 +3603,10 @@ Sema::SubstParmVarDecl(ParmVarDecl *OldParm,
   NewParm->setExplicitObjectParameterLoc(
       OldParm->getExplicitObjectParamThisLoc());
   NewParm->setHasInheritedDefaultArg(OldParm->hasInheritedDefaultArg());
+  // A macro's raw pack that is still a pack (its own template not yet
+  // instantiated); the elements of an expanded one are raw by their type.
+  if (OldParm->isMacroRawPack() && NewParm->isParameterPack())
+    NewParm->setMacroRawPack();
 
   if (OldParm->isParameterPack() && !NewParm->isParameterPack()) {
     // Add the new parameter to the instantiated parameter pack.

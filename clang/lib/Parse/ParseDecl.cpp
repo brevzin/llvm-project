@@ -7535,6 +7535,12 @@ void Parser::ParseFunctionDeclarator(Declarator &D,
   // lparen is already consumed!
   assert(D.isPastIdentifier() && "Should not call before identifier!");
 
+  // The parameters of a macro may include a raw pack (see
+  // ParseParameterDeclarationClause). A nested function declarator, e.g. a
+  // parameter of function type, is not a macro's.
+  llvm::SaveAndRestore InMacroParameters(ParsingMacroParameters,
+                                         D.getDeclSpec().isMacroSpecified());
+
   // This should be true when the function has typed arguments.
   // Otherwise, it is treated as a K&R-style function.
   bool HasProto = false;
@@ -7974,10 +7980,35 @@ void Parser::ParseParameterDeclarationClause(
         break;
       }
 
+      // P1219 (homogeneous variadic function parameters), only for macros and
+      // only for raw parameters: 'std::meta::token_sequence... args' takes
+      // each remaining argument as raw tokens. Like 'auto... args', it makes
+      // the macro a template, with an invented template parameter pack for
+      // its type (deduced as token_sequence from the raw arguments): the
+      // parameter is declared as that, and marked.
+      bool MacroRawPack = false;
+      if (ParsingMacroParameters && ParmDeclarator.hasEllipsis() &&
+          ParmDeclarator.getNumTypeObjects() == 0 &&
+          DS.getTypeSpecType() == DeclSpec::TST_typename) {
+        QualType T = Actions.GetTypeFromParser(DS.getRepAsType());
+        if (!T.isNull() && !T.hasQualifiers() && T->isTokenSequenceType()) {
+          SourceLocation Loc = DS.getTypeSpecTypeLoc();
+          const char *PrevSpec = nullptr;
+          unsigned DiagID = 0;
+          DS.ClearTypeSpecType();
+          DS.SetTypeSpecType(DeclSpec::TST_auto, Loc, PrevSpec, DiagID,
+                             Actions.getASTContext().getPrintingPolicy());
+          MacroRawPack = true;
+        }
+      }
+
       // Inform the actions module about the parameter declarator, so it gets
       // added to the current scope.
       Decl *Param =
           Actions.ActOnParamDeclarator(getCurScope(), ParmDeclarator, ThisLoc);
+      if (MacroRawPack)
+        if (auto *PVD = dyn_cast_or_null<ParmVarDecl>(Param))
+          PVD->setMacroRawPack();
       // Parse the default argument, if any. We parse the default
       // arguments in all dialects; the semantic analysis in
       // ActOnParamDefaultArgument will reject the default argument in

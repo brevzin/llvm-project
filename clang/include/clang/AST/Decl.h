@@ -1052,6 +1052,11 @@ protected:
     /// The number of parameters preceding this parameter in the
     /// function parameter scope in which it was declared.
     unsigned ParameterIndex : NumParameterIndexBits;
+
+    /// Whether this is a macro's pack of raw parameters,
+    /// 'std::meta::token_sequence... args'.
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned IsMacroRawPack : 1;
   };
 
   class NonParmVarDeclBitfields {
@@ -1859,6 +1864,7 @@ protected:
     assert(ParmVarDeclBits.DefaultArgKind == DAK_None);
     assert(ParmVarDeclBits.IsKNRPromoted == false);
     assert(ParmVarDeclBits.IsObjCMethodParam == false);
+    assert(ParmVarDeclBits.IsMacroRawPack == false);
     setDefaultArg(DefArg);
   }
 
@@ -1932,6 +1938,13 @@ public:
   void setKNRPromoted(bool promoted) {
     ParmVarDeclBits.IsKNRPromoted = promoted;
   }
+
+  /// Whether this is a macro's pack of raw parameters,
+  /// 'std::meta::token_sequence... args': each argument it takes is raw
+  /// tokens. (The macro is a template, its type an invented template
+  /// parameter pack, as for 'auto... args'.)
+  bool isMacroRawPack() const { return ParmVarDeclBits.IsMacroRawPack; }
+  void setMacroRawPack(bool V = true) { ParmVarDeclBits.IsMacroRawPack = V; }
 
   bool isExplicitObjectParameter() const {
     return ExplicitObjectParameterIntroducerLoc.isValid();

@@ -7183,7 +7183,7 @@ bool Sema::SubstAndEvaluateMacroInvocation(
     if (!QualifierLoc)
       return true;
     UnresolvedLookupExpr *Found = nullptr;
-    SmallVector<bool, 4> RawParams;
+    SmallVector<MacroParamKind, 4> RawParams;
     bool StillDependent = false;
     if (LookupDeferredQualifiedMacro(QualifierLoc, Old->getNameInfo(), Found,
                                      RawParams, StillDependent))
