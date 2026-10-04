@@ -544,7 +544,8 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S, NestedNameSpecInfo &IdInfo,
   if (Found.empty() && isDependent &&
       !(LookupCtx && LookupCtx->isRecord() &&
         (!cast<CXXRecordDecl>(LookupCtx)->hasDefinition() ||
-         !cast<CXXRecordDecl>(LookupCtx)->hasAnyDependentBases()))) {
+         !mayHaveMembersFromInstantiation(
+             cast<CXXRecordDecl>(LookupCtx))))) {
     // Don't speculate if we're just trying to improve error recovery.
     if (ErrorRecoveryLookup)
       return true;

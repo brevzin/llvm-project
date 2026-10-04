@@ -7657,6 +7657,8 @@ bool Sema::ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
     auto *D = ConstevalBlockDecl::Create(Context, CurContext, NameLoc, E);
     D->setAccess(AS);
     CurContext->addDecl(D);
+    ClassesWithPendingInjections.insert(
+        cast<CXXRecordDecl>(CurContext)->getCanonicalDecl());
     return false;
   }
 

@@ -895,11 +895,45 @@ declaration-position invocations.
 
 In a class template, the invocation is recorded among the members and
 expands per specialization, in place, with the semantics of
-`consteval { queue_injection(...); }` — including its limitation that members
-injected only per specialization cannot be named unqualified from the
-pattern. The block remains the programmable form, for loops in particular
-(`for (auto m : members) queue_injection(gen(m))`); declaration position is
-the one-shot sugar.
+`consteval { queue_injection(...); }`. The block remains the programmable
+form, for loops in particular (`for (auto m : members) queue_injection(gen(m))`);
+declaration position is the one-shot sugar.
+
+### Naming members injected per specialization
+
+The pattern of such a class does not have the members its specializations
+will receive, and nothing says in advance which names they will be. So a
+class template that may receive members per specialization — from a deferred
+class-scope macro invocation, a deferred consteval block, or an annotation
+with an `inject_members` callback (or of a dependent type, which might have
+one) — is treated exactly as one with a dependent base class: a name not
+found in it, written `this->x` or `C::x`, is looked up again at
+instantiation instead of being diagnosed.
+
+```cpp
+template <bool B>
+struct C {
+  long always;
+  maybe!(B, long sometimes);
+  long f() { return this->sometimes; }   // found in C<true>; an error in
+};                                       // C<false>, if f is instantiated
+```
+
+The consequences are the dependent-base ones, and only in such classes: a
+misspelled `this->x` is diagnosed at instantiation, not definition; a member
+template needs `this->template m<...>`, a type `typename C::T`; and an
+unqualified name does not find an injected member (it finds whatever the
+enclosing scopes have, as with a dependent base — `sometimes` alone above
+would be the global). Class templates with no pending injection, and with
+annotations that have no `inject_members`, still diagnose unknown names when
+defined.
+
+Ordering still matters. Macro and consteval-block injections happen in place,
+so later declarations can use what earlier ones injected; `inject_members`
+runs after the written members, so its members can be named in member
+function bodies (instantiated later) but not in the written members'
+declarations. And a mem-initializer cannot (yet) name an injected member:
+mem-initializers find members directly, not through this rule.
 
 ### The `;` belongs to the invocation
 

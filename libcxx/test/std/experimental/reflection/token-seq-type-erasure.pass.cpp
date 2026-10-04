@@ -122,15 +122,6 @@ consteval auto inject_interface(std::meta::info interface) -> void {
   queue_injection(forwarders);
 }
 
-consteval auto inject_erasing_ctor() -> void {
-  queue_injection(^^{
-    template <class T> Dyn(T&& t)
-      : data(&t)
-      , vtable(&vtable_for<std::remove_cvref_t<T>>)
-      {}
-  });
-}
-
 template<class Iface> class Dyn {
   void *data;
   consteval {
@@ -144,8 +135,11 @@ public:
     inject_interface(^^Iface);
   }
 
-  consteval {
-    inject_erasing_ctor();
+  // Written directly: Dyn receives members per specialization (vtable,
+  // vtable_for), so, as with a dependent base, names it does not have yet are
+  // looked up at instantiation when reached through 'this'.
+  template <class T> Dyn(T&& t) : data(&t) {
+    this->vtable = &this->template vtable_for<std::remove_cvref_t<T>>;
   }
   Dyn(Dyn&) = default;
   Dyn(Dyn const&) = default;

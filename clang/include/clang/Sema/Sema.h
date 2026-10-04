@@ -16641,6 +16641,21 @@ public:
                               CallExpr::ADLCallKind UsesADL,
                               TokenSequenceData &Expansion,
                               bool *Deferred = nullptr);
+  /// Class templates (patterns) whose specializations receive members the
+  /// pattern does not have: a class-scope macro invocation or a consteval
+  /// block is expanded or evaluated per specialization. See
+  /// mayHaveMembersFromInstantiation.
+  llvm::SmallPtrSet<const CXXRecordDecl *, 4> ClassesWithPendingInjections;
+
+  /// Whether the dependent class \p RD may have members that are not known
+  /// until instantiation: members of a dependent base, or members injected
+  /// per specialization (by a deferred class-scope macro invocation, a
+  /// consteval block, or an annotation whose inject_members callback -- or
+  /// whose type, being dependent -- is not known). A name not found in such a
+  /// class (as 'this->x' or 'C::x') is looked up again at instantiation
+  /// rather than diagnosed.
+  bool mayHaveMembersFromInstantiation(const CXXRecordDecl *RD);
+
   /// A statement-position macro invocation, 'name!(args);' as a whole
   /// statement. Returns true on (diagnosed) error. Otherwise either sets
   /// \p Result -- a statement standing for the invocation (one deferred to

@@ -3360,6 +3360,13 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
                                             EvaluatingExpr);
   CurContext->addDecl(Result);
 
+  // Evaluated per specialization of a class template, a consteval block may
+  // inject members the pattern does not have.
+  if (EvaluatingExpr->isTypeDependent() || EvaluatingExpr->isValueDependent())
+    if (auto *RD = dyn_cast<CXXRecordDecl>(CurContext);
+        RD && RD->isDependentContext())
+      ClassesWithPendingInjections.insert(RD->getCanonicalDecl());
+
   if (!EvaluatingExpr->isTypeDependent() &&
       !EvaluatingExpr->isValueDependent()) {
     SmallVector<PartialDiagnosticAt, 4> Diags;
@@ -3378,6 +3385,32 @@ Decl *Sema::BuildConstevalBlockDeclaration(SourceLocation ConstevalLoc,
     }
   }
   return Result;
+}
+
+bool Sema::mayHaveMembersFromInstantiation(const CXXRecordDecl *RD) {
+  if (!RD || !RD->isDependentContext())
+    return false;
+  if (RD->hasDefinition() && RD->hasAnyDependentBases())
+    return true;
+  if (ClassesWithPendingInjections.contains(RD->getCanonicalDecl()))
+    return true;
+  // An annotation that injects members per specialization: one with an
+  // inject_members callback, or one whose type is dependent (so whether it
+  // has one is not known).
+  const CXXRecordDecl *Def = RD->getDefinition();
+  for (const auto *A : (Def ? Def : RD)->specific_attrs<CXX26AnnotationAttr>()) {
+    const Expr *Arg = A->getArg();
+    if (!Arg || Arg->isTypeDependent())
+      return true;
+    const auto *AnnotRD = Arg->getType()->getAsCXXRecordDecl();
+    if (!AnnotRD || !AnnotRD->hasDefinition())
+      continue;
+    LookupResult R(*this, &Context.Idents.get("inject_members"),
+                   A->getLocation(), LookupMemberName);
+    if (LookupQualifiedName(R, const_cast<CXXRecordDecl *>(AnnotRD)))
+      return true;
+  }
+  return false;
 }
 
 void Sema::ProcessPendingTokenInjections() {
