@@ -136,11 +136,10 @@ public:
   }
 
   // Written directly: Dyn receives members per specialization (vtable,
-  // vtable_for), so, as with a dependent base, names it does not have yet are
-  // looked up at instantiation when reached through 'this'.
-  template <class T> Dyn(T&& t) : data(&t) {
-    this->vtable = &this->template vtable_for<std::remove_cvref_t<T>>;
-  }
+  // vtable_for), so names it does not have yet -- through 'this', or as a
+  // mem-initializer-id -- are looked up at instantiation.
+  template <class T> Dyn(T&& t)
+    : data(&t), vtable(&this->template vtable_for<std::remove_cvref_t<T>>) {}
   Dyn(Dyn&) = default;
   Dyn(Dyn const&) = default;
 };

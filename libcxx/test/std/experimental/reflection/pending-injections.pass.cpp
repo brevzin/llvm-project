@@ -24,6 +24,7 @@
 
 #include <meta>
 #include <cassert>
+#include <string_view>
 
 using std::meta::info;
 using std::meta::token_sequence;
@@ -96,6 +97,45 @@ struct [[=adds_named<T>{}]] F {
   T get() const { return this->named; }
 };
 
+// ------------------------------------------------ mem-initializers ------
+
+// A mem-initializer may name a member the class does not have yet; it is
+// built at instantiation, in its place among the others. (Which a const or
+// reference member, that cannot be assigned in the body, needs.)
+consteval void add_members() {
+  queue_injection(^^{
+    const int fixed;
+    int& ref;
+  });
+}
+
+__macro init_if_member(std::meta::token_sequence init) {
+  std::meta::info ctor = std::meta::macro_expansion_context();
+  std::string_view name = identifier_of(init[0]);
+  for (std::meta::info m : nonstatic_data_members_of(
+           parent_of(ctor), std::meta::access_context::unchecked()))
+    if (has_identifier(m) && identifier_of(m) == name)
+      return init;
+  return ^^{};
+}
+
+template <class T>
+struct G {
+  int first;
+  consteval { add_members(); }
+  maybe!(sizeof(T) > 1, int optional);
+  int last;
+
+  G(int& r)
+      : first(1), fixed(first + 1), ref(r), init_if_member!(optional(3)),
+        last(4) {}
+  G(int& r, int);
+};
+
+// Out of line, too.
+template <class T>
+G<T>::G(int& r, int f) : first(f), fixed(f), ref(r), last(f) {}
+
 int main(int, char**) {
   C<true> c{1, 42};
   assert(c.f() == 42 && c.g() == 42);
@@ -109,5 +149,19 @@ int main(int, char**) {
 
   F<short> f;
   assert(f.get() == 0);
+
+  int x = 0;
+  G<int> g(x);
+  assert(g.first == 1 && g.fixed == 2 && &g.ref == &x && g.optional == 3 &&
+         g.last == 4);
+  G<char> h(x, 9);
+  assert(h.fixed == 9 && h.last == 9);
+  // G<char> has no 'optional'.
+  static_assert(nonstatic_data_members_of(^^G<char>,
+                                          std::meta::access_context::unchecked())
+                    .size() == 4);
+  static_assert(nonstatic_data_members_of(^^G<int>,
+                                          std::meta::access_context::unchecked())
+                    .size() == 5);
   return 0;
 }

@@ -3392,6 +3392,12 @@ bool Sema::mayHaveMembersFromInstantiation(const CXXRecordDecl *RD) {
     return false;
   if (RD->hasDefinition() && RD->hasAnyDependentBases())
     return true;
+  return mayHaveInjectedMembers(RD);
+}
+
+bool Sema::mayHaveInjectedMembers(const CXXRecordDecl *RD) {
+  if (!RD || !RD->isDependentContext())
+    return false;
   if (ClassesWithPendingInjections.contains(RD->getCanonicalDecl()))
     return true;
   // An annotation that injects members per specialization: one with an

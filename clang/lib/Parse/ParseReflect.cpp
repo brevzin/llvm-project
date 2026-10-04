@@ -1279,10 +1279,19 @@ bool Parser::ParseMemInitializerOrMacro(
       isMacroArgumentListOpener(GetLookAheadToken(2).getKind()))
     return ParseMemInitMacroInvocation(ConstructorDecl, SS, MemInits);
 
-  MemInitResult MemInit = ParseMemInitializer(ConstructorDecl, SS);
+  MemInitResult MemInit;
+  {
+    // Where it goes among the written initializers, if Sema defers it (see
+    // Sema::DeferredMemInit).
+    llvm::SaveAndRestore Position(Actions.CurrentMemInitPosition,
+                                  unsigned(MemInits.size()));
+    MemInit = ParseMemInitializer(ConstructorDecl, SS);
+  }
   if (MemInit.isInvalid())
     return true;
-  MemInits.push_back(MemInit.get());
+  // Null: deferred to instantiation.
+  if (MemInit.get())
+    MemInits.push_back(MemInit.get());
   return false;
 }
 

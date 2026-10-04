@@ -27,6 +27,7 @@ __macro maybe(bool cond, std::meta::token_sequence decl) {
 template <class T>
 struct Plain {
   int f() { return this->missing; } // expected-error {{no member named 'missing' in 'Plain<T>'}}
+  Plain() : missing(1) {} // expected-error {{member initializer 'missing' does not name a non-static data member or base class}}
 };
 
 // An annotation without an inject_members callback injects nothing.
@@ -42,3 +43,12 @@ struct C {
   long f() { return this->sometimes; } // expected-error {{no member named 'sometimes' in 'C<false>'}}
 };
 long use = C<false>().f(); // expected-note {{in instantiation of member function 'C<false>::f' requested here}}
+
+// A deferred mem-initializer whose member the specialization does not receive.
+template <bool B>
+struct M {
+  maybe!(B, int sometimes);
+  M() : sometimes(1) {} // expected-error {{member initializer 'sometimes' does not name a non-static data member or base class}}
+};
+M<true> ok;
+M<false> bad; // expected-note {{in instantiation of member function 'M<false>::M' requested here}}

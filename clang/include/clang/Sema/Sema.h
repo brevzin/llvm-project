@@ -16655,6 +16655,9 @@ public:
   /// class (as 'this->x' or 'C::x') is looked up again at instantiation
   /// rather than diagnosed.
   bool mayHaveMembersFromInstantiation(const CXXRecordDecl *RD);
+  /// The part of mayHaveMembersFromInstantiation that is about members
+  /// injected per specialization (not a dependent base's).
+  bool mayHaveInjectedMembers(const CXXRecordDecl *RD);
 
   /// A statement-position macro invocation, 'name!(args);' as a whole
   /// statement. Returns true on (diagnosed) error. Otherwise either sets
@@ -16719,12 +16722,36 @@ public:
                                SourceLocation RParenLoc,
                                TokenSequenceData &Expansion);
 
-  /// Mem-initializer macro invocations in dependent constructors, keyed by
-  /// the (canonical) constructor, each with its position among the written
-  /// mem-initializers. Expanded by InstantiateMemInitializers.
-  llvm::DenseMap<const CXXConstructorDecl *,
-                 SmallVector<std::pair<unsigned, CXXMacroInvocationExpr *>, 1>>
+  /// A mem-initializer of a dependent constructor that waits for
+  /// instantiation: a macro invocation (Macro), or an initializer of a member
+  /// the class does not have yet (Name), which may be injected per
+  /// specialization. Position is its place among the written
+  /// mem-initializers: the number of (non-deferred) ones before it.
+  struct DeferredMemInit {
+    unsigned Position;
+    CXXMacroInvocationExpr *Macro = nullptr;
+    IdentifierInfo *Name = nullptr;
+    SourceLocation NameLoc;
+    Expr *Init = nullptr;
+    SourceLocation EllipsisLoc;
+  };
+
+  /// Deferred mem-initializers, keyed by the (canonical) constructor, in
+  /// source order. Expanded or built by InstantiateMemInitializers.
+  llvm::DenseMap<const CXXConstructorDecl *, SmallVector<DeferredMemInit, 1>>
       DeferredMemInitMacros;
+
+  /// While the parser builds a mem-initializer: its position among the
+  /// written ones (see DeferredMemInit). ~0u otherwise, e.g. when
+  /// instantiating, which never defers.
+  unsigned CurrentMemInitPosition = ~0u;
+
+  /// Build a mem-initializer, deferred from the pattern, of a member that may
+  /// have been injected into the specialization \p New belongs to.
+  MemInitResult
+  BuildDeferredNamedMemInitializer(CXXConstructorDecl *New,
+                                   const DeferredMemInit &D,
+                                   const MultiLevelTemplateArgumentList &Args);
 
   ExprResult ActOnCXXBuiltinInject(SourceLocation KwLoc,
                                    SourceLocation LParenLoc,

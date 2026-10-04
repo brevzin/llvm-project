@@ -4580,6 +4580,21 @@ Sema::BuildMemInitializer(Decl *ConstructorD,
         }
       }
 
+      // Nothing by this name, but the class may receive members per
+      // specialization: initialize it, if it is one, when instantiated.
+      if (R.empty() && BaseType.isNull() && SS.isEmpty() &&
+          CurrentMemInitPosition != ~0u && Constructor->isDependentContext() &&
+          mayHaveInjectedMembers(ClassDecl)) {
+        DeferredMemInit D;
+        D.Position = CurrentMemInitPosition;
+        D.Name = MemberOrBase;
+        D.NameLoc = IdLoc;
+        D.Init = Init;
+        D.EllipsisLoc = EllipsisLoc;
+        DeferredMemInitMacros[Constructor->getCanonicalDecl()].push_back(D);
+        return MemInitResult();
+      }
+
       // If no results were found, try to correct typos.
       TypoCorrection Corr;
       MemInitializerValidatorCCC CCC(ClassDecl);
@@ -4664,6 +4679,29 @@ Sema::BuildMemInitializer(Decl *ConstructorD,
     TInfo = Context.getTrivialTypeSourceInfo(BaseType, IdLoc);
 
   return BuildBaseInitializer(BaseType, TInfo, Init, ClassDecl, EllipsisLoc);
+}
+
+MemInitResult Sema::BuildDeferredNamedMemInitializer(
+    CXXConstructorDecl *New, const DeferredMemInit &D,
+    const MultiLevelTemplateArgumentList &Args) {
+  ExprResult Init = SubstInitializer(D.Init, Args, /*CXXDirectInit=*/true);
+  if (Init.isInvalid())
+    return true;
+  CXXScopeSpec SS;
+  ValueDecl *Member = tryLookupCtorInitMemberDecl(
+      New->getParent(), SS, /*TemplateTypeTy=*/nullptr, D.Name);
+  if (!Member) {
+    Diag(D.NameLoc, diag::err_mem_init_not_member_or_class)
+        << D.Name
+        << SourceRange(D.NameLoc, D.Init->getSourceRange().getEnd());
+    return true;
+  }
+  if (D.EllipsisLoc.isValid()) {
+    Diag(D.EllipsisLoc, diag::err_pack_expansion_member_init)
+        << D.Name << SourceRange(D.NameLoc, D.Init->getSourceRange().getEnd());
+    return true;
+  }
+  return BuildMemberInitializer(Member, Init.get(), D.NameLoc);
 }
 
 MemInitResult

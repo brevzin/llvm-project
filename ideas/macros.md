@@ -932,8 +932,27 @@ Ordering still matters. Macro and consteval-block injections happen in place,
 so later declarations can use what earlier ones injected; `inject_members`
 runs after the written members, so its members can be named in member
 function bodies (instantiated later) but not in the written members'
-declarations. And a mem-initializer cannot (yet) name an injected member:
-mem-initializers find members directly, not through this rule.
+declarations.
+
+A mem-initializer may name such a member too. In a class that may receive
+members per specialization, a mem-initializer-id that names nothing — no
+member, and no type that could be a base — waits for instantiation, keeping
+its place among the others, and initializes the member if the specialization
+has received one (and is diagnosed there if it has not):
+
+```cpp
+template <class Iface> class Dyn {
+  void* data;
+  consteval { inject_vtable(^^Iface); }      // VTable const* vtable; vtable_for<T>
+  ...
+  template <class T> Dyn(T&& t)
+    : data(&t), vtable(&this->template vtable_for<std::remove_cvref_t<T>>) {}
+};
+```
+
+That is what a `const` or reference member, which the body cannot assign,
+needs. (A dependent base has no counterpart: its members are not initialized
+by mem-initializers.)
 
 ### The `;` belongs to the invocation
 

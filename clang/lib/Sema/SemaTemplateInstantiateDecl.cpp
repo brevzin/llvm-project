@@ -7257,19 +7257,34 @@ Sema::InstantiateMemInitializers(CXXConstructorDecl *New,
   // Mem-initializer macro invocations were deferred to here; each expands in
   // place, at its position among the written initializers. (Copied: an
   // expansion may instantiate further constructors.)
-  SmallVector<std::pair<unsigned, CXXMacroInvocationExpr *>, 1> Macros;
+  // So were initializers of members the pattern did not have, which may have
+  // been injected into the specialization.
+  SmallVector<DeferredMemInit, 1> Macros;
   if (auto It = DeferredMemInitMacros.find(Tmpl->getCanonicalDecl());
       It != DeferredMemInitMacros.end())
     Macros.assign(It->second.begin(), It->second.end());
   unsigned NextMacro = 0;
   auto ExpandMacrosThrough = [&](unsigned Position) {
-    for (; NextMacro != Macros.size() && Macros[NextMacro].first <= Position;
-         ++NextMacro)
-      if (expandDeferredMemInitMacro(*this, New, Macros[NextMacro].second,
-                                     TemplateArgs, NewInits)) {
+    for (; NextMacro != Macros.size() &&
+           Macros[NextMacro].Position <= Position;
+         ++NextMacro) {
+      const DeferredMemInit &D = Macros[NextMacro];
+      bool Failed;
+      if (D.Macro) {
+        Failed = expandDeferredMemInitMacro(*this, New, D.Macro, TemplateArgs,
+                                            NewInits);
+      } else {
+        MemInitResult R =
+            BuildDeferredNamedMemInitializer(New, D, TemplateArgs);
+        Failed = R.isInvalid();
+        if (!Failed)
+          NewInits.push_back(R.get());
+      }
+      if (Failed) {
         AnyErrors = true;
         New->setInvalidDecl();
       }
+    }
   };
   unsigned WrittenPosition = 0;
 
