@@ -443,6 +443,9 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
       getCurScope(), SS, II, NameLoc, RawParams, ShapeUnknown);
 
   SourceLocation ExclaimLoc = ConsumeToken();
+  std::optional<TemplateArgumentListInfo> TemplateArgs;
+  if (ParseMacroTemplateArguments(TemplateArgs))
+    return ExprError();
   BalancedDelimiterTracker T(*this, Tok.getKind());
   T.consumeOpen();
 
@@ -459,7 +462,8 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
 
   ExprResult Result = Actions.ActOnMacroInvocation(
       getCurScope(), SS, II, NameLoc, ExclaimLoc, T.getOpenLocation(), Args,
-      T.getCloseLocation(), ShapeUnknown);
+      T.getCloseLocation(), ShapeUnknown,
+      TemplateArgs ? &*TemplateArgs : nullptr);
   // As for a failed call: keep an error-containing placeholder, so the
   // failure (already diagnosed) does not cascade -- e.g. into deducing 'void'
   // for the enclosing 'auto' function from 'return m!();'.
@@ -487,6 +491,9 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
       Base, OpKind, II, NameLoc, RawParams, ShapeUnknown);
 
   SourceLocation ExclaimLoc = ConsumeToken();
+  std::optional<TemplateArgumentListInfo> TemplateArgs;
+  if (ParseMacroTemplateArguments(TemplateArgs))
+    return ExprError();
   BalancedDelimiterTracker T(*this, Tok.getKind());
   T.consumeOpen();
 
@@ -503,7 +510,8 @@ ExprResult Parser::ParseMemberMacroInvocation(Expr *Base, SourceLocation OpLoc,
 
   ExprResult Result = Actions.ActOnMemberMacroInvocation(
       getCurScope(), Base, OpLoc, OpKind, II, NameLoc, ExclaimLoc,
-      T.getOpenLocation(), Args, T.getCloseLocation(), ShapeUnknown);
+      T.getOpenLocation(), Args, T.getCloseLocation(), ShapeUnknown,
+      TemplateArgs ? &*TemplateArgs : nullptr);
   if (Result.isInvalid()) {
     Args.insert(Args.begin(), Base);
     Result = Actions.CreateRecoveryExpr(Base->getBeginLoc(),
@@ -539,6 +547,9 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   }
 
   SourceLocation ExclaimLoc = ConsumeToken();
+  std::optional<TemplateArgumentListInfo> TemplateArgs;
+  if (ParseMacroTemplateArguments(TemplateArgs))
+    return nullptr;
   BalancedDelimiterTracker T(*this, Tok.getKind());
   T.consumeOpen();
 
@@ -563,7 +574,8 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   TokenSequenceData Expansion;
   if (Actions.ActOnDeclMacroInvocation(getCurScope(), II, NameLoc, ExclaimLoc,
                                        T.getOpenLocation(), Args,
-                                       T.getCloseLocation(), AS, Expansion))
+                                       T.getCloseLocation(), AS, Expansion,
+                                       TemplateArgs ? &*TemplateArgs : nullptr))
     return nullptr;
 
   // Parse the expansion, followed by the invocation's ';', as declarations
@@ -663,12 +675,87 @@ bool Parser::isStartOfStmtMacroInvocation() {
   TentativeParsingAction TPA(*this);
   ConsumeToken(); // name
   ConsumeToken(); // '!'
-  BalancedDelimiterTracker T(*this, Tok.getKind());
-  T.consumeOpen();
-  T.skipToEnd();
-  bool WholeStatement = Tok.is(tok::semi);
+  bool WholeStatement = false;
+  if (SkipMacroTemplateArguments() &&
+      isMacroArgumentListOpener(Tok.getKind())) {
+    BalancedDelimiterTracker T(*this, Tok.getKind());
+    T.consumeOpen();
+    T.skipToEnd();
+    WholeStatement = Tok.is(tok::semi);
+  }
   TPA.Revert();
   return WholeStatement;
+}
+
+bool Parser::SkipMacroTemplateArguments() {
+  if (Tok.isNot(tok::less))
+    return true;
+  // Track the angle brackets; anything bracketed otherwise nests (a '>'
+  // inside parentheses is an operator, as in any template argument list).
+  ConsumeToken();
+  unsigned Depth = 1;
+  while (true) {
+    switch (Tok.getKind()) {
+    case tok::eof:
+    case tok::semi:
+    case tok::annot_module_begin:
+    case tok::annot_module_end:
+    case tok::annot_repl_input_end:
+      return false;
+    case tok::less:
+      ++Depth;
+      ConsumeToken();
+      break;
+    case tok::greater:
+      ConsumeToken();
+      if (--Depth == 0)
+        return true;
+      break;
+    case tok::greatergreater:
+      // Closes two levels (C++11 splits it); closing more than are open is
+      // left for the real parse to diagnose.
+      ConsumeToken();
+      if (Depth <= 2)
+        return true;
+      Depth -= 2;
+      break;
+    case tok::l_paren:
+    case tok::l_square:
+    case tok::l_brace: {
+      BalancedDelimiterTracker T(*this, Tok.getKind());
+      T.consumeOpen();
+      T.skipToEnd();
+      break;
+    }
+    case tok::r_paren:
+    case tok::r_square:
+    case tok::r_brace:
+      return false;
+    default:
+      ConsumeAnyToken();
+      break;
+    }
+  }
+}
+
+bool Parser::ParseMacroTemplateArguments(
+    std::optional<TemplateArgumentListInfo> &TemplateArgs) {
+  if (Tok.is(tok::less)) {
+    SourceLocation LAngleLoc, RAngleLoc;
+    TemplateArgList Args;
+    if (ParseTemplateIdAfterTemplateName(/*ConsumeLastToken=*/true, LAngleLoc,
+                                         Args, RAngleLoc))
+      return true;
+    TemplateArgs.emplace(LAngleLoc, RAngleLoc);
+    ASTTemplateArgsPtr ArgsPtr(Args);
+    Actions.translateTemplateArguments(ArgsPtr, *TemplateArgs);
+  }
+  if (!isMacroArgumentListOpener(Tok.getKind())) {
+    // 'name!<Args>' with no argument list: an empty one is written '()'.
+    Diag(Tok, diag::err_expected) << tok::l_paren;
+    return true;
+  }
+  return false;
 }
 
 /// Parse a statement-position macro invocation, 'name!(args);', and parse its
@@ -692,6 +779,9 @@ StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
   }
 
   SourceLocation ExclaimLoc = ConsumeToken();
+  std::optional<TemplateArgumentListInfo> TemplateArgs;
+  if (ParseMacroTemplateArguments(TemplateArgs))
+    return StmtError();
   BalancedDelimiterTracker T(*this, Tok.getKind());
   T.consumeOpen();
 
@@ -719,7 +809,8 @@ StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
   StmtResult Result;
   if (Actions.ActOnStmtMacroInvocation(
           getCurScope(), II, NameLoc, ExclaimLoc, T.getOpenLocation(), Args,
-          T.getCloseLocation(), SemiLoc, Expansion, Result))
+          T.getCloseLocation(), SemiLoc, Expansion, Result,
+          TemplateArgs ? &*TemplateArgs : nullptr))
     return StmtError();
   // Deferred to instantiation (or not a statement macro after all): a single
   // statement. As a substatement, still a compound one: the statements the
@@ -1276,7 +1367,7 @@ bool Parser::ParseMemInitializerOrMacro(
 
   if (getLangOpts().Reflection && Tok.is(tok::identifier) &&
       NextToken().is(tok::exclaim) &&
-      isMacroArgumentListOpener(GetLookAheadToken(2).getKind()))
+      isMacroInvocationContinuation(GetLookAheadToken(2).getKind()))
     return ParseMemInitMacroInvocation(ConstructorDecl, SS, MemInits);
 
   MemInitResult MemInit;
@@ -1313,6 +1404,9 @@ bool Parser::ParseMemInitMacroInvocation(
                                           RawParams, ShapeUnknown);
 
   SourceLocation ExclaimLoc = ConsumeToken();
+  std::optional<TemplateArgumentListInfo> TemplateArgs;
+  if (ParseMacroTemplateArguments(TemplateArgs))
+    return true;
   BalancedDelimiterTracker T(*this, Tok.getKind());
   T.consumeOpen();
 
@@ -1332,7 +1426,8 @@ bool Parser::ParseMemInitMacroInvocation(
   if (Actions.ActOnMemInitMacroInvocation(
           getCurScope(), ConstructorDecl, MemInits.size(), SS, II, NameLoc,
           ExclaimLoc, T.getOpenLocation(), Args, T.getCloseLocation(),
-          ShapeUnknown, Expansion, Deferred))
+          ShapeUnknown, Expansion, Deferred,
+          TemplateArgs ? &*TemplateArgs : nullptr))
     return true;
   if (Deferred)
     return false;

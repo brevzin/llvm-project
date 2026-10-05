@@ -7177,6 +7177,28 @@ bool Sema::SubstAndEvaluateMacroInvocation(
         ExprEvalContexts.back().ConstevalOnly.erase(Arg);
   };
 
+  // The explicit template arguments of 'name!<Args>(...)', if any: the
+  // callee's, or the member invocation's own.
+  TemplateArgumentListInfo MacroTemplateArgsBuffer;
+  const TemplateArgumentListInfo *MacroTemplateArgs = nullptr;
+  auto SubstMacroTemplateArgs = [&](ArrayRef<TemplateArgumentLoc> In,
+                                    SourceLocation LAngleLoc,
+                                    SourceLocation RAngleLoc) {
+    MacroTemplateArgsBuffer.setLAngleLoc(LAngleLoc);
+    MacroTemplateArgsBuffer.setRAngleLoc(RAngleLoc);
+    MacroTemplateArgs = &MacroTemplateArgsBuffer;
+    return SubstTemplateArguments(In, TemplateArgs, MacroTemplateArgsBuffer);
+  };
+  if (const ASTTemplateArgumentListInfo *In = E->getMemberTemplateArgs()) {
+    if (SubstMacroTemplateArgs(In->arguments(), In->LAngleLoc, In->RAngleLoc))
+      return true;
+  } else if (UnresolvedLookupExpr *Callee = E->getCallee();
+             Callee && Callee->hasExplicitTemplateArgs()) {
+    if (SubstMacroTemplateArgs(Callee->template_arguments(),
+                               Callee->getLAngleLoc(), Callee->getRAngleLoc()))
+      return true;
+  }
+
   SmallVector<Expr *, 4> Args;
   if (E->isMemberInvocation()) {
     // An implicit member access, 'this->name!(...)'.
@@ -7187,7 +7209,8 @@ bool Sema::SubstAndEvaluateMacroInvocation(
     ForgetRawArgs(Args);
     return EvaluateMemberMacroInvocation(
         Base.get(), E->isArrow(), E->getOperatorLoc(), E->getMemberNameInfo(),
-        E->getLParenLoc(), Args, E->getRParenLoc(), Expansion);
+        E->getLParenLoc(), Args, E->getRParenLoc(), Expansion,
+        MacroTemplateArgs);
   }
 
   UnresolvedLookupExpr *Old = E->getCallee();
@@ -7203,7 +7226,8 @@ bool Sema::SubstAndEvaluateMacroInvocation(
     SmallVector<MacroParamKind, 4> RawParams;
     bool StillDependent = false;
     if (LookupDeferredQualifiedMacro(QualifierLoc, Old->getNameInfo(), Found,
-                                     RawParams, StillDependent))
+                                     RawParams, StillDependent,
+                                     MacroTemplateArgs))
       return true;
     assert(!StillDependent && "instantiated context still dependent");
     // The arguments are parsed as part of the template, then substituted
@@ -7228,9 +7252,8 @@ bool Sema::SubstAndEvaluateMacroInvocation(
       if (!QualifierLoc)
         return true;
     }
-    Callee = CreateUnresolvedLookupExpr(
-        /*NamingClass=*/nullptr, QualifierLoc, Old->getNameInfo(), Macros,
-        /*PerformADL=*/false);
+    Callee = BuildMacroCallee(QualifierLoc, Old->getNameInfo(), Macros,
+                              MacroTemplateArgs);
     if (Callee.isInvalid())
       return true;
 

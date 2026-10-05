@@ -16462,16 +16462,28 @@ public:
   ActOnMacroInvocation(Scope *S, CXXScopeSpec &SS, const IdentifierInfo *II,
                        SourceLocation NameLoc, SourceLocation ExclaimLoc,
                        SourceLocation LParenLoc, MultiExprArg Args,
-                       SourceLocation RParenLoc, bool ArgsUnparsed = false);
+                       SourceLocation RParenLoc, bool ArgsUnparsed = false,
+                       const TemplateArgumentListInfo *TemplateArgs = nullptr);
+  /// The callee of a non-member macro invocation: the macros \p Macros found
+  /// for \p NameInfo (qualified by \p QualifierLoc), with the explicit
+  /// template arguments \p TemplateArgs of 'name!<Args>(...)', if any.
+  ExprResult BuildMacroCallee(NestedNameSpecifierLoc QualifierLoc,
+                              const DeclarationNameInfo &NameInfo,
+                              const UnresolvedSetImpl &Macros,
+                              const TemplateArgumentListInfo *TemplateArgs);
+  /// For 'name!<Args>(...)': diagnose (and return true) if \p R found no
+  /// macro template.
+  bool CheckMacroTemplateArgs(const LookupResult &R,
+                              const TemplateArgumentListInfo *TemplateArgs);
   /// For an invocation whose qualifier was dependent when parsed: look up
   /// the macros in the substituted qualifier \p QualifierLoc, producing the
   /// callee and parameter shape. Sets \p StillDependent (and the callee, with
   /// no declarations) if the qualifier is still dependent.
-  bool LookupDeferredQualifiedMacro(NestedNameSpecifierLoc QualifierLoc,
-                                    const DeclarationNameInfo &NameInfo,
-                                    UnresolvedLookupExpr *&Callee,
-                                    SmallVectorImpl<MacroParamKind> &RawParams,
-                                    bool &StillDependent);
+  bool LookupDeferredQualifiedMacro(
+      NestedNameSpecifierLoc QualifierLoc, const DeclarationNameInfo &NameInfo,
+      UnresolvedLookupExpr *&Callee, SmallVectorImpl<MacroParamKind> &RawParams,
+      bool &StillDependent,
+      const TemplateArgumentListInfo *TemplateArgs = nullptr);
   /// Parse the argument list of \p E, captured as tokens when the macro's
   /// shape was unknown, according to the now-known shape \p RawParams. The
   /// arguments are parsed where they were written, as part of the template,
@@ -16510,7 +16522,8 @@ public:
       Scope *S, Expr *Base, SourceLocation OpLoc, tok::TokenKind OpKind,
       const IdentifierInfo *II, SourceLocation NameLoc,
       SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
-      SourceLocation RParenLoc, bool ArgsUnparsed = false);
+      SourceLocation RParenLoc, bool ArgsUnparsed = false,
+      const TemplateArgumentListInfo *TemplateArgs = nullptr);
   /// Resolve and expand 'base.name!(args)', binding the object expression to
   /// the macro's explicit object parameter, or defer it if anything about it
   /// is dependent.
@@ -16518,7 +16531,8 @@ public:
       Expr *Base, bool IsArrow, SourceLocation OpLoc,
       const DeclarationNameInfo &NameInfo, SourceLocation ExclaimLoc,
       SourceLocation LParenLoc, MultiExprArg Args, SourceLocation RParenLoc,
-      const Stmt *InstantiationPattern = nullptr);
+      const Stmt *InstantiationPattern = nullptr,
+      const TemplateArgumentListInfo *TemplateArgs = nullptr);
   /// Resolve 'base.name!(args)' (non-dependent) to a member macro and hand
   /// the selected candidate, with the object argument prepended to the
   /// arguments, to \p Finish. Returns true on (diagnosed) error, or whatever
@@ -16529,16 +16543,15 @@ public:
       llvm::function_ref<bool(const OverloadCandidate &Best,
                               ArrayRef<Expr *> MacroArgs,
                               bool HadMultipleCandidates)>
-          Finish);
+          Finish,
+      const TemplateArgumentListInfo *TemplateArgs = nullptr);
   /// Resolve 'base.name!(args)' and evaluate the member macro, producing its
   /// expansion without parsing it (as for a mem-initializer macro).
-  bool EvaluateMemberMacroInvocation(Expr *Base, bool IsArrow,
-                                     SourceLocation OpLoc,
-                                     const DeclarationNameInfo &NameInfo,
-                                     SourceLocation LParenLoc,
-                                     MultiExprArg Args,
-                                     SourceLocation RParenLoc,
-                                     TokenSequenceData &Expansion);
+  bool EvaluateMemberMacroInvocation(
+      Expr *Base, bool IsArrow, SourceLocation OpLoc,
+      const DeclarationNameInfo &NameInfo, SourceLocation LParenLoc,
+      MultiExprArg Args, SourceLocation RParenLoc, TokenSequenceData &Expansion,
+      const TemplateArgumentListInfo *TemplateArgs = nullptr);
   /// Expand the macro that overload resolution selected for an operator
   /// expression or a member invocation. \p Args are the operands as written
   /// (the object expression first, for a member macro).
@@ -16664,12 +16677,12 @@ public:
   /// \p Result -- a statement standing for the invocation (one deferred to
   /// instantiation) -- or fills \p Expansion, which the parser parses,
   /// followed by the ';' at \p SemiLoc, as statements in place.
-  bool
-  ActOnStmtMacroInvocation(Scope *S, const IdentifierInfo *II,
-                           SourceLocation NameLoc, SourceLocation ExclaimLoc,
-                           SourceLocation LParenLoc, MultiExprArg Args,
-                           SourceLocation RParenLoc, SourceLocation SemiLoc,
-                           TokenSequenceData &Expansion, StmtResult &Result);
+  bool ActOnStmtMacroInvocation(
+      Scope *S, const IdentifierInfo *II, SourceLocation NameLoc,
+      SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
+      SourceLocation RParenLoc, SourceLocation SemiLoc,
+      TokenSequenceData &Expansion, StmtResult &Result,
+      const TemplateArgumentListInfo *TemplateArgs = nullptr);
   /// The evaluate-once check of the arguments interpolated into
   /// \p Expansion, over the statements parsed from it. Returns true on
   /// (diagnosed) error.
@@ -16681,12 +16694,12 @@ public:
   /// recorded as a member (starting access \p AS) that expands per
   /// specialization, and \p Expansion is left empty. Returns true on
   /// (diagnosed) error.
-  bool ActOnDeclMacroInvocation(Scope *S, const IdentifierInfo *II,
-                                SourceLocation NameLoc,
-                                SourceLocation ExclaimLoc,
-                                SourceLocation LParenLoc, MultiExprArg Args,
-                                SourceLocation RParenLoc, AccessSpecifier AS,
-                                TokenSequenceData &Expansion);
+  bool ActOnDeclMacroInvocation(
+      Scope *S, const IdentifierInfo *II, SourceLocation NameLoc,
+      SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
+      SourceLocation RParenLoc, AccessSpecifier AS,
+      TokenSequenceData &Expansion,
+      const TemplateArgumentListInfo *TemplateArgs = nullptr);
 
   /// Substitute into the callee and arguments of a macro invocation deferred
   /// from a template, then evaluate the macro. Returns true on (diagnosed)
@@ -16713,7 +16726,7 @@ public:
       const IdentifierInfo *II, SourceLocation NameLoc,
       SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
       SourceLocation RParenLoc, bool ArgsUnparsed, TokenSequenceData &Expansion,
-      bool &Deferred);
+      bool &Deferred, const TemplateArgumentListInfo *TemplateArgs = nullptr);
 
   /// Resolve and evaluate a macro invocation that was deferred from a
   /// template, with already-substituted callee and arguments.

@@ -8617,19 +8617,34 @@ private:
   static bool isMacroArgumentListOpener(tok::TokenKind K) {
     return K == tok::l_paren || K == tok::l_brace || K == tok::l_square;
   }
+  /// True if \p K, following 'name!', continues a macro invocation: an
+  /// argument-list opener, or the '<' of explicit template arguments,
+  /// 'name!<Args>(...)'. ('!' cannot follow a name otherwise, so neither is
+  /// ambiguous.)
+  static bool isMacroInvocationContinuation(tok::TokenKind K) {
+    return isMacroArgumentListOpener(K) || K == tok::less;
+  }
   /// True if the current token is the '!' of a macro invocation: '!' followed
-  /// by an argument-list opener.
+  /// by an argument-list opener or by explicit template arguments.
   bool isMacroInvocationExclaim() {
     return Tok.is(tok::exclaim) &&
-           isMacroArgumentListOpener(NextToken().getKind());
+           isMacroInvocationContinuation(NextToken().getKind());
   }
   /// True if the current token starts a declaration-position macro
-  /// invocation, 'identifier ! opener'.
+  /// invocation, 'identifier ! opener' or 'identifier ! <'.
   bool isStartOfDeclMacroInvocation() {
     return getLangOpts().Reflection && Tok.is(tok::identifier) &&
            NextToken().is(tok::exclaim) &&
-           isMacroArgumentListOpener(GetLookAheadToken(2).getKind());
+           isMacroInvocationContinuation(GetLookAheadToken(2).getKind());
   }
+  /// After the '!' of a macro invocation: parse the explicit template
+  /// arguments of 'name!<Args>(...)' into \p TemplateArgs, if present, and
+  /// check that an argument-list opener follows. Returns true on error.
+  bool ParseMacroTemplateArguments(
+      std::optional<TemplateArgumentListInfo> &TemplateArgs);
+  /// While looking ahead (tentatively): skip the explicit template arguments
+  /// of 'name!<Args>(...)', if present. Returns false if they are malformed.
+  bool SkipMacroTemplateArguments();
   /// True if the current token starts a statement-position macro invocation:
   /// 'identifier ! opener ... closer ;', the invocation being the whole
   /// statement. (Anything else, e.g. 'm!(x) + 1;', is an expression.)

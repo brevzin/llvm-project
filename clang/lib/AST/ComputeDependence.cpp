@@ -1127,6 +1127,10 @@ ExprDependence clang::computeDependence(CXXMacroInvocationExpr *E) {
     D |= Base->getDependence();
   for (Expr *Arg : E->getArgs())
     D |= Arg->getDependence();
+  if (const ASTTemplateArgumentListInfo *TArgs = E->getMemberTemplateArgs())
+    for (const TemplateArgumentLoc &A : TArgs->arguments())
+      D |= toExprDependence(A.getArgument().getDependence() &
+                            TemplateArgumentDependence::UnexpandedPack);
   return D;
 }
 

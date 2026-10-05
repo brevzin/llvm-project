@@ -2470,10 +2470,16 @@ CXXMacroInvocationExpr *CXXMacroInvocationExpr::CreateMember(
     ASTContext &C, Expr *Base, bool IsArrow, SourceLocation OperatorLoc,
     const DeclarationNameInfo &MemberNameInfo, ArrayRef<Expr *> Args,
     SourceLocation ExclaimLoc, SourceLocation LParenLoc,
-    SourceLocation RParenLoc) {
-  return new (C) CXXMacroInvocationExpr(C, /*Callee=*/nullptr, Base, IsArrow,
-                                        MemberNameInfo, OperatorLoc, Args,
-                                        ExclaimLoc, LParenLoc, RParenLoc);
+    SourceLocation RParenLoc, const TemplateArgumentListInfo *TemplateArgs) {
+  auto *E = new (C) CXXMacroInvocationExpr(C, /*Callee=*/nullptr, Base, IsArrow,
+                                           MemberNameInfo, OperatorLoc, Args,
+                                           ExclaimLoc, LParenLoc, RParenLoc);
+  if (TemplateArgs) {
+    E->MemberTemplateArgs =
+        ASTTemplateArgumentListInfo::Create(C, *TemplateArgs);
+    E->setDependence(computeDependence(E));
+  }
+  return E;
 }
 
 CXXMacroInvocationExpr *CXXMacroInvocationExpr::CreateEmpty(ASTContext &C,

@@ -6331,6 +6331,10 @@ class CXXMacroInvocationExpr : public Expr {
   unsigned NumUnparsedTemplateParams = 0;
   /// The member name of a member invocation.
   DeclarationNameInfo MemberNameInfo;
+  /// The explicit template arguments of a member invocation,
+  /// 'obj.name!<Args>(...)' (ASTContext storage), or null. (Those of a
+  /// non-member invocation are the callee's.) Not serialized.
+  const ASTTemplateArgumentListInfo *MemberTemplateArgs = nullptr;
   SourceLocation OperatorLoc;
   SourceLocation ExclaimLoc;
   SourceLocation LParenLoc;
@@ -6351,13 +6355,16 @@ public:
                                         SourceLocation ExclaimLoc,
                                         SourceLocation LParenLoc,
                                         SourceLocation RParenLoc);
-  /// A member invocation 'base.name!(args)' or 'base->name!(args)'.
+  /// A member invocation 'base.name!(args)' or 'base->name!(args)', with
+  /// explicit template arguments \p TemplateArgs ('base.name!<Args>(args)')
+  /// if non-null.
   static CXXMacroInvocationExpr *
   CreateMember(ASTContext &C, Expr *Base, bool IsArrow,
                SourceLocation OperatorLoc,
                const DeclarationNameInfo &MemberNameInfo, ArrayRef<Expr *> Args,
                SourceLocation ExclaimLoc, SourceLocation LParenLoc,
-               SourceLocation RParenLoc);
+               SourceLocation RParenLoc,
+               const TemplateArgumentListInfo *TemplateArgs = nullptr);
   static CXXMacroInvocationExpr *CreateEmpty(ASTContext &C, unsigned NumArgs);
 
   UnresolvedLookupExpr *getCallee() const {
@@ -6387,6 +6394,10 @@ public:
   }
   void setMemberNameInfo(const DeclarationNameInfo &NI) {
     MemberNameInfo = NI;
+  }
+  /// The explicit template arguments of a member invocation, or null.
+  const ASTTemplateArgumentListInfo *getMemberTemplateArgs() const {
+    return MemberTemplateArgs;
   }
 
   unsigned getNumArgs() const { return NumArgs; }

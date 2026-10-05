@@ -9404,6 +9404,31 @@ void TreeTransform<Derived>::TransformUnparsedMacroEnvironment(
 template <typename Derived>
 ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
     CXXMacroInvocationExpr *E) {
+  // The explicit template arguments of 'name!<Args>(...)', if any: the
+  // callee's, or the member invocation's own.
+  TemplateArgumentListInfo TemplateArgsBuffer;
+  const TemplateArgumentListInfo *TemplateArgs = nullptr;
+  auto TransformMacroTemplateArgs = [&](ArrayRef<TemplateArgumentLoc> Args,
+                                        SourceLocation LAngleLoc,
+                                        SourceLocation RAngleLoc) {
+    TemplateArgsBuffer.setLAngleLoc(LAngleLoc);
+    TemplateArgsBuffer.setRAngleLoc(RAngleLoc);
+    TemplateArgs = &TemplateArgsBuffer;
+    return getDerived().TransformTemplateArguments(Args.data(), Args.size(),
+                                                   TemplateArgsBuffer);
+  };
+  if (const ASTTemplateArgumentListInfo *Args = E->getMemberTemplateArgs()) {
+    if (TransformMacroTemplateArgs(Args->arguments(), Args->LAngleLoc,
+                                   Args->RAngleLoc))
+      return ExprError();
+  } else if (UnresolvedLookupExpr *Callee = E->getCallee();
+             Callee && Callee->hasExplicitTemplateArgs()) {
+    if (TransformMacroTemplateArgs(Callee->template_arguments(),
+                                   Callee->getLAngleLoc(),
+                                   Callee->getRAngleLoc()))
+      return ExprError();
+  }
+
   // A member invocation looks its macros up in the (now known) class of the
   // object expression.
   if (E->isMemberInvocation()) {
@@ -9427,7 +9452,7 @@ ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
         auto *New = CXXMacroInvocationExpr::CreateMember(
             getSema().Context, Base.get(), E->isArrow(), E->getOperatorLoc(),
             E->getMemberNameInfo(), {Blob.get()}, E->getExclaimLoc(),
-            E->getLParenLoc(), E->getRParenLoc());
+            E->getLParenLoc(), E->getRParenLoc(), TemplateArgs);
         getDerived().TransformUnparsedMacroEnvironment(E, New);
         return New;
       }
@@ -9437,7 +9462,7 @@ ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
       return getSema().BuildMemberMacroInvocation(
           Base.get(), E->isArrow(), E->getOperatorLoc(), E->getMemberNameInfo(),
           E->getExclaimLoc(), E->getLParenLoc(), Args, E->getRParenLoc(),
-          /*InstantiationPattern=*/E);
+          /*InstantiationPattern=*/E, TemplateArgs);
     }
     SmallVector<Expr *, 4> Args;
     if (getDerived().TransformExprs(E->getArgs().data(), E->getNumArgs(),
@@ -9446,7 +9471,7 @@ ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
     return getSema().BuildMemberMacroInvocation(
         Base.get(), E->isArrow(), E->getOperatorLoc(), E->getMemberNameInfo(),
         E->getExclaimLoc(), E->getLParenLoc(), Args, E->getRParenLoc(),
-        /*InstantiationPattern=*/E);
+        /*InstantiationPattern=*/E, TemplateArgs);
   }
 
   // A dependent qualifier: the macros are looked up only now, and the
@@ -9462,7 +9487,7 @@ ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
     bool StillDependent = false;
     if (getSema().LookupDeferredQualifiedMacro(QualifierLoc, Old->getNameInfo(),
                                                Callee, RawParams,
-                                               StillDependent))
+                                               StillDependent, TemplateArgs))
       return ExprError();
     if (StillDependent) {
       ExprResult Blob = getDerived().TransformExpr(E->getArg(0));
@@ -9499,9 +9524,8 @@ ExprResult TreeTransform<Derived>::TransformCXXMacroInvocationExpr(
     if (!QualifierLoc)
       return ExprError();
   }
-  ExprResult Callee = getSema().CreateUnresolvedLookupExpr(
-      /*NamingClass=*/nullptr, QualifierLoc, Old->getNameInfo(), Macros,
-      /*PerformADL=*/false);
+  ExprResult Callee = getSema().BuildMacroCallee(
+      QualifierLoc, Old->getNameInfo(), Macros, TemplateArgs);
   if (Callee.isInvalid())
     return ExprError();
 

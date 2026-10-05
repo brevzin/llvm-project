@@ -70,10 +70,34 @@ Default arguments are allowed: `id!()` binds the default
 argument expression exactly as a call would. `name!()` is an empty argument
 list — never a single empty token sequence — so a sole raw parameter needs a
 default argument (`token_sequence body = ^^{}`) for an empty invocation to be
-viable. Explicit template arguments
-cannot be written at an invocation; the only spelling that fits the
-`name!(` recognition is `name<Args>!(...)`, which is left for a later
-iteration. Macro templates deduce everything from the arguments for now.
+viable.
+
+Explicit template arguments go after the `!`: `name!<Args>(...)` (or
+`{...}` / `[...]`). This is how a macro takes a *type* — or a template, a
+constant, a reflection — as a real template parameter, with all that implies:
+constraints, overloading, and a "no viable macro" error at the invocation:
+
+```cpp
+template <class E> requires std::is_enum_v<E>
+__macro bitmask_type() { ... \(^^E) ... }
+
+enum class Permission : int { Read = 1, Write = 2 };
+bitmask_type!<Permission>();
+
+template <class To> __macro as(auto&& e) { ... }   // explicit and deduced
+as!<int>(3.9);
+```
+
+The `!` comes first so that it alone marks a macro invocation: the parser
+knows what it is reading at `name!`, before any `<`. That also means no
+`template` keyword is ever needed, even on a dependent object
+(`obj.m!<T>()`, where `obj.template m<T>!()` would have been required), and
+`!<` cannot mean anything else, since `!` cannot follow a name. As for a
+template-id naming a function, only the macro templates of an overload set
+are candidates; if there are none, the name "does not name a template but is
+followed by template arguments". A dependent template argument defers the
+expansion to instantiation, as a type-dependent argument does. An empty
+argument list is still written: `bitmask_type!<Permission>();`.
 
 ## Invocation
 

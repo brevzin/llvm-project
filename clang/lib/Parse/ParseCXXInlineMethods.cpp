@@ -1027,10 +1027,38 @@ bool Parser::ConsumeAndStoreFunctionPrologue(CachedTokens &Toks) {
     }
 
     // A macro invocation, 'name!(...)', whose expansion is mem-initializers.
-    // The arguments are bracketed by any of (), {} or [].
+    // The arguments are bracketed by any of (), {} or [], and may be preceded
+    // by explicit template arguments, 'name!<Args>(...)'.
     if (getLangOpts().Reflection && isMacroInvocationExclaim()) {
       Toks.push_back(Tok);
       ConsumeToken();
+      auto CloserOf = [](tok::TokenKind K) {
+        return K == tok::l_paren   ? tok::r_paren
+               : K == tok::l_brace ? tok::r_brace
+                                   : tok::r_square;
+      };
+      if (Tok.is(tok::less)) {
+        unsigned Depth = 0;
+        do {
+          tok::TokenKind K = Tok.getKind();
+          if (K == tok::eof || K == tok::semi)
+            return Diag(Tok, diag::err_expected) << tok::greater;
+          Toks.push_back(Tok);
+          ConsumeAnyToken();
+          if (isMacroArgumentListOpener(K)) {
+            if (!ConsumeAndStoreUntil(CloserOf(K), Toks, /*StopAtSemi=*/true))
+              return Diag(Tok, diag::err_expected) << CloserOf(K);
+          } else if (K == tok::less) {
+            ++Depth;
+          } else if (K == tok::greater) {
+            --Depth;
+          } else if (K == tok::greatergreater) {
+            Depth -= std::min(Depth, 2u);
+          }
+        } while (Depth);
+        if (!isMacroArgumentListOpener(Tok.getKind()))
+          return Diag(Tok, diag::err_expected) << tok::l_paren;
+      }
       tok::TokenKind OpenKind = Tok.getKind();
       tok::TokenKind CloseKind = OpenKind == tok::l_paren   ? tok::r_paren
                                  : OpenKind == tok::l_brace ? tok::r_brace
