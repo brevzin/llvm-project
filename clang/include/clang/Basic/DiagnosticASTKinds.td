@@ -39,6 +39,9 @@ def note_constexpr_macro_operator_not_token : Note<
   "operator '%0' is not a single token and cannot be interpolated">;
 def note_constexpr_invalid_punctuator : Note<
   "%0 is not a std::meta::punctuator enumerator">;
+def note_constexpr_id_not_identifier : Note<
+  "std::meta::id produces '%0', which %select{is not an identifier|"
+  "is a keyword}1">;
 // P2758: std::constexpr_print_str / constexpr_warning_str / constexpr_error_str
 // (via __builtin_constexpr_diag). The err/warn/note trio is emitted directly
 // by the constant evaluator when the call is manifestly constant-evaluated;

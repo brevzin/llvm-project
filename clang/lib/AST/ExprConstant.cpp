@@ -23163,8 +23163,28 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
   }
 
   // A single identifier token: id() is a token_sequence producer, the
-  // identifier sibling of str_lit().
+  // identifier sibling of str_lit(). The name must lex as exactly one
+  // identifier -- not, say, 'operator|=' (which would declare an ordinary
+  // function of that odd name, not an operator function) -- and not as a
+  // keyword, which the token would not behave as.
+  bool IsIdentifier = false;
+  {
+    SmallString<64> Buf(Name);
+    Buf.push_back('\0');
+    Lexer RawLex(SourceLocation(), Info.Ctx.getLangOpts(), Buf.begin(),
+                 Buf.begin(), Buf.end() - 1);
+    Token First, Next;
+    RawLex.LexFromRawLexer(First);
+    RawLex.LexFromRawLexer(Next);
+    IsIdentifier = First.is(tok::raw_identifier) &&
+                   First.getLength() == Name.size() && Next.is(tok::eof);
+  }
   IdentifierInfo &II = Info.Ctx.Idents.get(Name);
+  if (!IsIdentifier || II.isKeyword(Info.Ctx.getLangOpts())) {
+    Info.FFDiag(E->getExprLoc(), diag::note_constexpr_id_not_identifier)
+        << Name << IsIdentifier;
+    return false;
+  }
   Token Tok;
   Tok.startToken();
   Tok.setKind(tok::identifier);
