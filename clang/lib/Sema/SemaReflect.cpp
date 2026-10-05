@@ -3529,30 +3529,48 @@ bool Sema::EvaluateInjectMembersAnnotation(Decl *TagDecl, unsigned Index,
   return true;
 }
 
-void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
+void Sema::HandleAnnotationOnComplete(Decl *TheDecl) {
   // For a class template, the parser hands us the ClassTemplateDecl.
-  if (auto *CT = dyn_cast_or_null<ClassTemplateDecl>(TagDecl))
-    TagDecl = CT->getTemplatedDecl();
-  auto *RD = dyn_cast_or_null<CXXRecordDecl>(TagDecl);
-  if (!RD || !RD->isCompleteDefinition())
+  if (auto *CT = dyn_cast_or_null<ClassTemplateDecl>(TheDecl))
+    TheDecl = CT->getTemplatedDecl();
+  auto *RD = dyn_cast_or_null<TagDecl>(TheDecl);
+  if (!RD)
     return;
 
-  // For the pattern of a class template, annotations fire their
-  // on_template_defined callback with a reflection of the template itself;
-  // on_complete fires for each specialization once it is instantiated.
-  // Other dependent definitions (partial specializations, members of class
-  // templates) fire neither here: the primary template's callback already
-  // covers every specialization.
   ClassTemplateDecl *CTD = nullptr;
-  if (RD->isDependentType()) {
-    CTD = RD->getDescribedClassTemplate();
-    if (!CTD || CTD->getDeclContext()->isDependentContext())
+  bool OwnAnnotationsOnly = false;
+  if (auto *ED = dyn_cast<EnumDecl>(RD)) {
+    // Complete once defined (enumerators and all), or as soon as declared
+    // with a fixed underlying type. A dependent enumeration -- a member of a
+    // class template, or local to a function template -- runs its callbacks
+    // per instantiation. Each declaration runs only the annotations written
+    // on it, not those it inherits from an earlier one, so an
+    // opaque-enum-declaration followed by the definition runs none twice.
+    if (!ED->isComplete() || ED->isDependentContext())
       return;
+    OwnAnnotationsOnly = true;
+  } else {
+    if (!isa<CXXRecordDecl>(RD) || !RD->isCompleteDefinition())
+      return;
+
+    // For the pattern of a class template, annotations fire their
+    // on_template_defined callback with a reflection of the template itself;
+    // on_complete fires for each specialization once it is instantiated.
+    // Other dependent definitions (partial specializations, members of class
+    // templates) fire neither here: the primary template's callback already
+    // covers every specialization.
+    if (cast<CXXRecordDecl>(RD)->isDependentType()) {
+      CTD = cast<CXXRecordDecl>(RD)->getDescribedClassTemplate();
+      if (!CTD || CTD->getDeclContext()->isDependentContext())
+        return;
+    }
   }
 
   for (auto *Attr : RD->attrs()) {
     auto *A = dyn_cast<CXX26AnnotationAttr>(Attr);
     if (!A)
+      continue;
+    if (OwnAnnotationsOnly && A->isInherited())
       continue;
 
     // A dependent annotation cannot be evaluated at definition time.
@@ -3620,9 +3638,17 @@ void Sema::HandleAnnotationOnComplete(Decl *TagDecl) {
       continue;
     }
 
-    // 6. Collect pending token injections.
-    PendingInjections.append(ER.PendingInjections.begin(),
-                             ER.PendingInjections.end());
+    // 6. Collect pending token injections. A callback's unary
+    // queue_injection goes to the nearest namespace enclosing the type --
+    // not to an enclosing class still being defined, a function body, or (in
+    // an instantiation) the type itself -- which is where declarations about
+    // the type, found by argument-dependent lookup, belong.
+    DeclContext *NS = RD->getDeclContext()->getEnclosingNamespaceContext();
+    for (Expr::EvalStatus::TokenInjection Inj : ER.PendingInjections) {
+      if (!Inj.TargetDC)
+        Inj.TargetDC = NS;
+      PendingInjections.push_back(Inj);
+    }
   }
 }
 

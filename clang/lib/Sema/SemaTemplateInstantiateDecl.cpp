@@ -2757,6 +2757,15 @@ Decl *TemplateDeclInstantiator::VisitEnumDecl(EnumDecl *D) {
     }
   }
 
+  // An opaque-enum-declaration is complete as declared: its annotations'
+  // on_complete callbacks run now. (A definition's run once its enumerators
+  // are instantiated; see InstantiateEnumDefinition.)
+  if (!D->isThisDeclarationADefinition() && Enum->isComplete() &&
+      !Enum->isInvalidDecl()) {
+    SemaRef.HandleAnnotationOnComplete(Enum);
+    SemaRef.ProcessPendingTokenInjections();
+  }
+
   return Enum;
 }
 
@@ -2818,6 +2827,14 @@ void TemplateDeclInstantiator::InstantiateEnumDefinition(
 
   SemaRef.ActOnEnumBody(Enum->getLocation(), Enum->getBraceRange(), Enum,
                         Enumerators, nullptr, ParsedAttributesView());
+
+  // Its annotations' on_complete callbacks, now that the enumerators exist.
+  // (A scoped member enumeration's definition is instantiated only when
+  // needed, so its callbacks run then.)
+  if (!Enum->isInvalidDecl()) {
+    SemaRef.HandleAnnotationOnComplete(Enum);
+    SemaRef.ProcessPendingTokenInjections();
+  }
 }
 
 Decl *TemplateDeclInstantiator::VisitEnumConstantDecl(EnumConstantDecl *D) {

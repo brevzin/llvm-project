@@ -1039,6 +1039,40 @@ Class annotations support three callbacks, split by phase:
   participate fully in completion: layout, triviality, implicit members.
 - `on_complete(info type)` — after completion, with the complete type;
   for measurement (layout asserts, registration) and external injection.
+  It also runs for an **enumeration**: after the last enumerator of its
+  definition, or at an opaque-enum-declaration (complete as declared, though
+  not enumerable: `enumerators_of` needs the enumerator-list). Each
+  declaration runs the annotations written on it, so an opaque declaration
+  followed by the definition runs none twice. For a member of a class
+  template, it runs per specialization — for a scoped member enumeration,
+  when its definition is instantiated.
+
+A unary `queue_injection` in `on_template_defined` or `on_complete` injects
+into the **nearest namespace enclosing the type** — not into an enclosing
+class still being defined (for a nested type), a function body (for a local
+type), or the type itself. That is where declarations about the type belong,
+and where argument-dependent lookup finds them:
+
+```cpp
+struct BitmaskType {
+  static consteval auto on_complete(std::meta::info ty) -> void {
+    using enum std::meta::operators;
+    for (auto op : {op_pipe, op_ampersand, op_caret})
+      queue_injection(^^{
+        constexpr auto operator \(op)(\(ty) lhs, \(ty) rhs) -> \(ty) {
+          return \(ty)(std::to_underlying(lhs) \(op) std::to_underlying(rhs));
+        }
+      });
+  }
+};
+
+namespace N {
+  enum class [[=BitmaskType()]] Permission : int { Read = 1, Write = 2 };
+  struct File { enum class [[=BitmaskType()]] Mode { In = 1, Out = 2 }; };
+}
+static_assert((N::Permission::Read | N::Permission::Write) == N::Permission(3));
+// File::Mode's operators are in N too.
+```
 
 The `inject_members` contract: callbacks of multiple annotations run once
 each, in annotation order, and each is interleaved with the parsing of its

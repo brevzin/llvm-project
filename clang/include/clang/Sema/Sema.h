@@ -16936,8 +16936,14 @@ public:
 
   void ProcessPendingTokenInjections();
 
-  /// After a class definition completes, check its [[=expr]] annotations
-  /// for an on_complete member function and call it with ^^TheType.
+  /// After a class or enumeration becomes complete, check its [[=expr]]
+  /// annotations for an on_complete member function and call it with
+  /// ^^TheType. A class is complete at the end of its definition; an
+  /// enumeration at the end of its definition (once its enumerators exist),
+  /// or at an opaque-enum-declaration (fixed underlying type, no
+  /// enumerators). Each enumeration declaration runs only the annotations
+  /// written on it, so a declaration followed by the definition does not run
+  /// one twice.
   void HandleAnnotationOnComplete(Decl *TagDecl);
 
   /// Evaluate the inject_members callback of the \p Index'th annotation of

@@ -4354,8 +4354,8 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
     Actions.ActOnTagFinishDefinition(getCurScope(), TagDecl, T.getRange());
 
   // Handle annotation on_complete callbacks. At this point, the class is
-  // fully complete and CurContext is the enclosing namespace, so any
-  // unary queue_injection will inject into that namespace.
+  // fully complete; a unary queue_injection in a callback injects into the
+  // nearest enclosing namespace (see HandleAnnotationOnComplete).
   if (TagDecl) {
     Actions.HandleAnnotationOnComplete(TagDecl);
     // Inside a template declaration the template parameter depth is still

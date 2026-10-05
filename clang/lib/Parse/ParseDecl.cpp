@@ -5654,6 +5654,19 @@ void Parser::ParseEnumSpecifier(SourceLocation StartLoc, DeclSpec &DS,
     }
   }
 
+  // Annotation on_complete callbacks: after a definition's enumerators, or at
+  // an opaque-enum-declaration (complete as declared). As for a class, the
+  // injections they queue go to the nearest enclosing namespace, and wait
+  // while we are inside a template declaration (see the class case).
+  if (TUK == TagUseKind::Definition || TUK == TagUseKind::Declaration) {
+    Actions.HandleAnnotationOnComplete(TagDecl);
+    while (TemplateParameterDepth == 0 && !Actions.PendingInjections.empty()) {
+      auto Injections = std::move(Actions.PendingInjections);
+      Actions.PendingInjections.clear();
+      ProcessTokenInjections(Injections);
+    }
+  }
+
   if (DS.SetTypeSpecType(DeclSpec::TST_enum, StartLoc,
                          NameLoc.isValid() ? NameLoc : StartLoc,
                          PrevSpec, DiagID, TagDecl, Owned,
