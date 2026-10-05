@@ -893,8 +893,11 @@ at instantiation.
 
 ## Declaration-position invocation
 
-`name!(args);` may also appear where a declaration can: at namespace scope
-and at class scope. There the expansion is parsed as a *sequence of
+`name!(args);` (or `ns::name!(args);`, with any nested-name-specifier) may
+also appear where a declaration can: at namespace scope and at class scope.
+With a dependent qualifier in a class template (`P::m!();`), the macro — and
+so how its arguments are parsed — is known only per specialization, where the
+invocation is expanded. There the expansion is parsed as a *sequence of
 declarations* in place of the invocation — the invocation context decides how
 the expansion is parsed, exactly as the expression form's single-expression
 rule does. This is what makes `define_op` read the way it means:
@@ -1124,9 +1127,9 @@ a phase should do that phase's work: mutate in `inject_members`, measure in
 
 ## Future directions
 
-- Statement position for qualified (`ns::m!(...);`) and member
-  (`obj.m!(...);`) invocations; a member invocation as a whole statement is
-  an expression statement today.
+- Statement position for member (`obj.m!(...);`) invocations; a member
+  invocation as a whole statement is an expression statement today.
+  (Qualified invocations, `ns::m!(...);`, work in every position.)
 - Hygiene for statement macros: a declaration whose name the macro wrote
   should be private to its expansion (see `hygiene.md`). Until then, helper
   names leak into the enclosing block (and trip `-Wshadow` when nested).

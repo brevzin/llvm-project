@@ -8631,12 +8631,26 @@ private:
            isMacroInvocationContinuation(NextToken().getKind());
   }
   /// True if the current token starts a declaration-position macro
-  /// invocation, 'identifier ! opener' or 'identifier ! <'.
+  /// invocation, 'identifier ! opener' or 'identifier ! <', possibly after an
+  /// annotated nested-name-specifier (see TryAnnotateQualifiedMacroScope).
   bool isStartOfDeclMacroInvocation() {
-    return getLangOpts().Reflection && Tok.is(tok::identifier) &&
-           NextToken().is(tok::exclaim) &&
-           isMacroInvocationContinuation(GetLookAheadToken(2).getKind());
+    if (!getLangOpts().Reflection)
+      return false;
+    unsigned N = Tok.is(tok::annot_cxxscope) ? 1 : 0;
+    return GetLookAheadToken(N).is(tok::identifier) &&
+           GetLookAheadToken(N + 1).is(tok::exclaim) &&
+           isMacroInvocationContinuation(GetLookAheadToken(N + 2).getKind());
   }
+  /// True if the tokens look like the start of a qualified macro invocation,
+  /// '::'[opt] (identifier template-arguments[opt] '::')+ identifier '!'
+  /// followed by an opener or '<'. Only looks at tokens (no lookup).
+  bool isStartOfQualifiedMacroInvocation();
+  /// At the start of a declaration or statement: if a qualified macro
+  /// invocation follows, annotate its nested-name-specifier (as parsing the
+  /// declaration or statement would have, with \p EnteringContext), so that
+  /// isStartOfDeclMacroInvocation / isStartOfStmtMacroInvocation see it.
+  /// Returns true on error.
+  bool TryAnnotateQualifiedMacroScope(bool EnteringContext);
   /// After the '!' of a macro invocation: parse the explicit template
   /// arguments of 'name!<Args>(...)' into \p TemplateArgs, if present, and
   /// check that an argument-list opener follows. Returns true on error.

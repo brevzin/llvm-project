@@ -7653,11 +7653,23 @@ bool Sema::ResolveMacroCallee(Scope *S, UnresolvedLookupExpr *Callee,
 /// 'consteval { queue_injection(...); }' would: the class the macro sees is
 /// only the pattern until then, and its arguments may be dependent.
 bool Sema::ActOnDeclMacroInvocation(
-    Scope *S, const IdentifierInfo *II, SourceLocation NameLoc,
-    SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
-    SourceLocation RParenLoc, AccessSpecifier AS, TokenSequenceData &Expansion,
+    Scope *S, CXXScopeSpec &SS, const IdentifierInfo *II,
+    SourceLocation NameLoc, SourceLocation ExclaimLoc, SourceLocation LParenLoc,
+    MultiExprArg Args, SourceLocation RParenLoc, AccessSpecifier AS,
+    TokenSequenceData &Expansion, bool ArgsUnparsed,
     const TemplateArgumentListInfo *TemplateArgs) {
-  bool Dependent = CurContext->isDependentContext();
+  // Record a deferred invocation as a member of the pattern; each
+  // specialization expands it in place, among the members that precede it.
+  auto DeferInClass = [&](CXXMacroInvocationExpr *E) {
+    auto *D = ConstevalBlockDecl::Create(Context, CurContext, NameLoc, E);
+    D->setAccess(AS);
+    CurContext->addDecl(D);
+    ClassesWithPendingInjections.insert(
+        cast<CXXRecordDecl>(CurContext)->getCanonicalDecl());
+    return false;
+  };
+
+  bool Dependent = ArgsUnparsed || CurContext->isDependentContext();
   for (Expr *Arg : Args)
     Dependent |= Arg->isInstantiationDependent() ||
                  Arg->containsUnexpandedParameterPack();
@@ -7669,8 +7681,23 @@ bool Sema::ActOnDeclMacroInvocation(
     return true;
   }
 
+  // With a dependent qualifier, the macros and even the arguments await
+  // instantiation.
+  if (ArgsUnparsed) {
+    ExprResult Callee = buildDependentMacroCallee(
+        *this, SS.getWithLocInContext(Context),
+        DeclarationNameInfo(II, NameLoc), TemplateArgs);
+    if (Callee.isInvalid())
+      return true;
+    auto *E = CXXMacroInvocationExpr::Create(
+        Context, cast<UnresolvedLookupExpr>(Callee.get()), Args, ExclaimLoc,
+        LParenLoc, RParenLoc);
+    SetUnparsedMacroEnvironment(E, S);
+    return DeferInClass(E);
+  }
+
   LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
-  LookupParsedName(R, S, /*SS=*/nullptr, /*ObjectType=*/QualType());
+  LookupParsedName(R, S, &SS, /*ObjectType=*/QualType());
   SmallVector<MacroParamKind, 4> RawParams;
   if (GetMacroParameterShape(R, RawParams) ||
       CheckMacroTemplateArgs(R, TemplateArgs))
@@ -7679,24 +7706,16 @@ bool Sema::ActOnDeclMacroInvocation(
   UnresolvedSet<8> Macros;
   for (LookupResult::iterator I = R.begin(), E = R.end(); I != E; ++I)
     Macros.addDecl(*I, I.getAccess());
-  ExprResult Callee = BuildMacroCallee(
-      NestedNameSpecifierLoc(), R.getLookupNameInfo(), Macros, TemplateArgs);
+  ExprResult Callee =
+      BuildMacroCallee(SS.getWithLocInContext(Context), R.getLookupNameInfo(),
+                       Macros, TemplateArgs);
   if (Callee.isInvalid())
     return true;
   auto *ULE = cast<UnresolvedLookupExpr>(Callee.get());
 
-  if (Dependent) {
-    // Record the invocation as a member of the pattern; each specialization
-    // expands it in place, among the members that precede it.
-    auto *E = CXXMacroInvocationExpr::Create(Context, ULE, Args, ExclaimLoc,
-                                             LParenLoc, RParenLoc);
-    auto *D = ConstevalBlockDecl::Create(Context, CurContext, NameLoc, E);
-    D->setAccess(AS);
-    CurContext->addDecl(D);
-    ClassesWithPendingInjections.insert(
-        cast<CXXRecordDecl>(CurContext)->getCanonicalDecl());
-    return false;
-  }
+  if (Dependent)
+    return DeferInClass(CXXMacroInvocationExpr::Create(
+        Context, ULE, Args, ExclaimLoc, LParenLoc, RParenLoc));
 
   return EvaluateMacroInvocation(S, ULE, LParenLoc, Args, RParenLoc,
                                  Expansion);
@@ -7724,17 +7743,40 @@ bool Sema::EvaluateMacroInvocation(Scope *S, UnresolvedLookupExpr *Callee,
 /// recorded as a declaration-macro consteval block, which each instantiation
 /// expands in place among the function's statements.
 bool Sema::ActOnStmtMacroInvocation(
-    Scope *S, const IdentifierInfo *II, SourceLocation NameLoc,
-    SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
-    SourceLocation RParenLoc, SourceLocation SemiLoc,
-    TokenSequenceData &Expansion, StmtResult &Result,
+    Scope *S, CXXScopeSpec &SS, const IdentifierInfo *II,
+    SourceLocation NameLoc, SourceLocation ExclaimLoc, SourceLocation LParenLoc,
+    MultiExprArg Args, SourceLocation RParenLoc, SourceLocation SemiLoc,
+    TokenSequenceData &Expansion, StmtResult &Result, bool ArgsUnparsed,
     const TemplateArgumentListInfo *TemplateArgs) {
   Result = StmtEmpty();
   // Raw arguments are consumed by the macro (see BuildMacroInvocation).
   ForgetConsumedMacroArguments(Args);
 
+  // Each instantiation expands a deferred invocation in place.
+  auto Defer = [&](CXXMacroInvocationExpr *E) {
+    auto *D = ConstevalBlockDecl::Create(Context, CurContext, NameLoc, E);
+    CurContext->addDecl(D);
+    Result = ActOnDeclStmt(ConvertDeclToDeclGroup(D), NameLoc, SemiLoc);
+    return Result.isInvalid();
+  };
+
+  // With a dependent qualifier, the macros and even the arguments await
+  // instantiation.
+  if (ArgsUnparsed) {
+    ExprResult Callee = buildDependentMacroCallee(
+        *this, SS.getWithLocInContext(Context),
+        DeclarationNameInfo(II, NameLoc), TemplateArgs);
+    if (Callee.isInvalid())
+      return true;
+    auto *E = CXXMacroInvocationExpr::Create(
+        Context, cast<UnresolvedLookupExpr>(Callee.get()), Args, ExclaimLoc,
+        LParenLoc, RParenLoc);
+    SetUnparsedMacroEnvironment(E, S);
+    return Defer(E);
+  }
+
   LookupResult R(*this, II, NameLoc, LookupOrdinaryName);
-  LookupParsedName(R, S, /*SS=*/nullptr, /*ObjectType=*/QualType());
+  LookupParsedName(R, S, &SS, /*ObjectType=*/QualType());
   SmallVector<MacroParamKind, 4> RawParams;
   if (GetMacroParameterShape(R, RawParams) ||
       CheckMacroTemplateArgs(R, TemplateArgs))
@@ -7742,7 +7784,7 @@ bool Sema::ActOnStmtMacroInvocation(
 
   // A non-static member macro named without an object is an implicit member
   // access, as in expression position; it stays an expression statement.
-  if (findsNonStaticMemberMacro(R)) {
+  if (SS.isEmpty() && findsNonStaticMemberMacro(R)) {
     ExprResult This = ActOnCXXThis(NameLoc);
     if (This.isInvalid())
       return true;
@@ -7759,8 +7801,9 @@ bool Sema::ActOnStmtMacroInvocation(
   UnresolvedSet<8> Macros;
   for (LookupResult::iterator I = R.begin(), E = R.end(); I != E; ++I)
     Macros.addDecl(*I, I.getAccess());
-  ExprResult Callee = BuildMacroCallee(
-      NestedNameSpecifierLoc(), R.getLookupNameInfo(), Macros, TemplateArgs);
+  ExprResult Callee =
+      BuildMacroCallee(SS.getWithLocInContext(Context), R.getLookupNameInfo(),
+                       Macros, TemplateArgs);
   if (Callee.isInvalid())
     return true;
   auto *ULE = cast<UnresolvedLookupExpr>(Callee.get());
@@ -7786,13 +7829,8 @@ bool Sema::ActOnStmtMacroInvocation(
       return true;
   }
 
-  // Each instantiation expands the invocation in place.
-  auto *E = CXXMacroInvocationExpr::Create(Context, ULE, Args, ExclaimLoc,
-                                           LParenLoc, RParenLoc);
-  auto *D = ConstevalBlockDecl::Create(Context, CurContext, NameLoc, E);
-  CurContext->addDecl(D);
-  Result = ActOnDeclStmt(ConvertDeclToDeclGroup(D), NameLoc, SemiLoc);
-  return Result.isInvalid();
+  return Defer(CXXMacroInvocationExpr::Create(Context, ULE, Args, ExclaimLoc,
+                                              LParenLoc, RParenLoc));
 }
 
 /// A macro invocation as an entry of a ctor-initializer, 'C(...) : m!(...)'.

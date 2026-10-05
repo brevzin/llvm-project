@@ -439,8 +439,10 @@ ExprResult Parser::ParseMacroInvocation(CXXScopeSpec &SS,
   // qualifier it cannot be, and the arguments wait for instantiation.)
   SmallVector<MacroParamKind, 4> RawParams;
   bool ShapeUnknown = false;
-  bool ShapeError = Actions.GetQualifiedMacroParameterShape(
-      getCurScope(), SS, II, NameLoc, RawParams, ShapeUnknown);
+  // (An invalid qualifier has been diagnosed already.)
+  bool ShapeError = SS.isInvalid() || Actions.GetQualifiedMacroParameterShape(
+                                          getCurScope(), SS, II, NameLoc,
+                                          RawParams, ShapeUnknown);
 
   SourceLocation ExclaimLoc = ConsumeToken();
   std::optional<TemplateArgumentListInfo> TemplateArgs;
@@ -529,6 +531,12 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
                                                         Decl *TagDecl) {
   assert(isStartOfDeclMacroInvocation());
 
+  CXXScopeSpec SS;
+  if (Tok.is(tok::annot_cxxscope)) {
+    Actions.RestoreNestedNameSpecifierAnnotation(Tok.getAnnotationValue(),
+                                                 Tok.getAnnotationRange(), SS);
+    ConsumeAnnotationToken();
+  }
   IdentifierInfo *II = Tok.getIdentifierInfo();
   SourceLocation NameLoc = ConsumeToken();
 
@@ -536,15 +544,15 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   EnterExpressionEvaluationContext ConstantEvaluated(
       Actions, Sema::ExpressionEvaluationContext::ConstantEvaluated);
 
-  // The macro's parameter shape decides how each argument is parsed.
+  // The macro's parameter shape decides how each argument is parsed. (With a
+  // dependent qualifier it cannot be known, and the arguments wait for
+  // instantiation.)
   SmallVector<MacroParamKind, 4> RawParams;
-  bool ShapeError;
-  {
-    LookupResult R(Actions, II, NameLoc, Sema::LookupOrdinaryName);
-    Actions.LookupParsedName(R, getCurScope(), /*SS=*/nullptr,
-                             /*ObjectType=*/QualType());
-    ShapeError = Actions.GetMacroParameterShape(R, RawParams);
-  }
+  bool ShapeUnknown = false;
+  // (An invalid qualifier has been diagnosed already.)
+  bool ShapeError = SS.isInvalid() || Actions.GetQualifiedMacroParameterShape(
+                                          getCurScope(), SS, II, NameLoc,
+                                          RawParams, ShapeUnknown);
 
   SourceLocation ExclaimLoc = ConsumeToken();
   std::optional<TemplateArgumentListInfo> TemplateArgs;
@@ -560,7 +568,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   }
 
   ExprVector Args;
-  if (ParseMacroArguments(RawParams, /*ShapeUnknown=*/false, T, Args)) {
+  if (ParseMacroArguments(RawParams, ShapeUnknown, T, Args)) {
     TryConsumeToken(tok::semi);
     return nullptr;
   }
@@ -572,17 +580,18 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
   ExpectAndConsumeSemi(diag::err_expected_semi_declaration);
 
   TokenSequenceData Expansion;
-  if (Actions.ActOnDeclMacroInvocation(getCurScope(), II, NameLoc, ExclaimLoc,
-                                       T.getOpenLocation(), Args,
-                                       T.getCloseLocation(), AS, Expansion,
-                                       TemplateArgs ? &*TemplateArgs : nullptr))
+  if (Actions.ActOnDeclMacroInvocation(
+          getCurScope(), SS, II, NameLoc, ExclaimLoc, T.getOpenLocation(), Args,
+          T.getCloseLocation(), AS, Expansion, ShapeUnknown,
+          TemplateArgs ? &*TemplateArgs : nullptr))
     return nullptr;
 
   // Parse the expansion, followed by the invocation's ';', as declarations
   // at the current position, delimited by its own eof.
   SmallVector<Token, 16> Toks(Expansion.begin(), Expansion.end());
   relocateExpansionTokens(PP.getSourceManager(), Toks,
-                          SourceRange(NameLoc, T.getCloseLocation()));
+                          SourceRange(SS.isEmpty() ? NameLoc : SS.getBeginLoc(),
+                                      T.getCloseLocation()));
   Toks.push_back(makeInvocationTerminator(SemiLoc));
   Token Eof;
   Eof.startToken();
@@ -673,6 +682,8 @@ bool Parser::isStartOfStmtMacroInvocation() {
   // Only an invocation that is the whole statement: look past the balanced
   // argument list for the ';'.
   TentativeParsingAction TPA(*this);
+  if (Tok.is(tok::annot_cxxscope))
+    ConsumeAnnotationToken();
   ConsumeToken(); // name
   ConsumeToken(); // '!'
   bool WholeStatement = false;
@@ -685,6 +696,40 @@ bool Parser::isStartOfStmtMacroInvocation() {
   }
   TPA.Revert();
   return WholeStatement;
+}
+
+bool Parser::isStartOfQualifiedMacroInvocation() {
+  if (!getLangOpts().Reflection)
+    return false;
+  if (!Tok.is(tok::coloncolon) &&
+      !(Tok.is(tok::identifier) &&
+        NextToken().isOneOf(tok::coloncolon, tok::less)))
+    return false;
+  TentativeParsingAction TPA(*this);
+  bool Qualified = TryConsumeToken(tok::coloncolon);
+  bool Found = false;
+  while (Tok.is(tok::identifier)) {
+    if (NextToken().is(tok::exclaim)) {
+      ConsumeToken();
+      Found = Qualified && isMacroInvocationExclaim();
+      break;
+    }
+    ConsumeToken();
+    if (Tok.is(tok::less) && !SkipMacroTemplateArguments())
+      break;
+    if (!TryConsumeToken(tok::coloncolon))
+      break;
+    Qualified = true;
+    TryConsumeToken(tok::kw_template);
+  }
+  TPA.Revert();
+  return Found;
+}
+
+bool Parser::TryAnnotateQualifiedMacroScope(bool EnteringContext) {
+  if (!isStartOfQualifiedMacroInvocation())
+    return false;
+  return TryAnnotateCXXScopeToken(EnteringContext);
 }
 
 bool Parser::SkipMacroTemplateArguments() {
@@ -765,18 +810,24 @@ bool Parser::ParseMacroTemplateArguments(
 StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
   assert(isStartOfStmtMacroInvocation());
 
+  CXXScopeSpec SS;
+  if (Tok.is(tok::annot_cxxscope)) {
+    Actions.RestoreNestedNameSpecifierAnnotation(Tok.getAnnotationValue(),
+                                                 Tok.getAnnotationRange(), SS);
+    ConsumeAnnotationToken();
+  }
   IdentifierInfo *II = Tok.getIdentifierInfo();
   SourceLocation NameLoc = ConsumeToken();
 
-  // The macro's parameter shape decides how each argument is parsed.
+  // The macro's parameter shape decides how each argument is parsed. (With a
+  // dependent qualifier it cannot be known, and the arguments wait for
+  // instantiation.)
   SmallVector<MacroParamKind, 4> RawParams;
-  bool ShapeError;
-  {
-    LookupResult R(Actions, II, NameLoc, Sema::LookupOrdinaryName);
-    Actions.LookupParsedName(R, getCurScope(), /*SS=*/nullptr,
-                             /*ObjectType=*/QualType());
-    ShapeError = Actions.GetMacroParameterShape(R, RawParams);
-  }
+  bool ShapeUnknown = false;
+  // (An invalid qualifier has been diagnosed already.)
+  bool ShapeError = SS.isInvalid() || Actions.GetQualifiedMacroParameterShape(
+                                          getCurScope(), SS, II, NameLoc,
+                                          RawParams, ShapeUnknown);
 
   SourceLocation ExclaimLoc = ConsumeToken();
   std::optional<TemplateArgumentListInfo> TemplateArgs;
@@ -792,7 +843,7 @@ StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
   }
 
   ExprVector Args;
-  if (ParseMacroArguments(RawParams, /*ShapeUnknown=*/false, T, Args)) {
+  if (ParseMacroArguments(RawParams, ShapeUnknown, T, Args)) {
     TryConsumeToken(tok::semi);
     return StmtError();
   }
@@ -808,8 +859,8 @@ StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
   TokenSequenceData Expansion;
   StmtResult Result;
   if (Actions.ActOnStmtMacroInvocation(
-          getCurScope(), II, NameLoc, ExclaimLoc, T.getOpenLocation(), Args,
-          T.getCloseLocation(), SemiLoc, Expansion, Result,
+          getCurScope(), SS, II, NameLoc, ExclaimLoc, T.getOpenLocation(), Args,
+          T.getCloseLocation(), SemiLoc, Expansion, Result, ShapeUnknown,
           TemplateArgs ? &*TemplateArgs : nullptr))
     return StmtError();
   // Deferred to instantiation (or not a statement macro after all): a single
@@ -830,7 +881,8 @@ StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
   // which is what C++ makes of a substatement anyway.
   SmallVector<Token, 16> Toks(Expansion.begin(), Expansion.end());
   relocateExpansionTokens(PP.getSourceManager(), Toks,
-                          SourceRange(NameLoc, T.getCloseLocation()));
+                          SourceRange(SS.isEmpty() ? NameLoc : SS.getBeginLoc(),
+                                      T.getCloseLocation()));
   // An expansion that is a do-expression is an expression statement, as the
   // expression macro it typically comes from intends. At the start of a
   // statement 'do' would begin a do-while, so parenthesize it. (Knowing where

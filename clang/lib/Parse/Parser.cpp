@@ -773,8 +773,10 @@ Parser::ParseExternalDeclaration(ParsedAttributes &Attrs,
     return nullptr;
   }
 
-  // A declaration-position macro invocation: 'name!(args);' expands to a
-  // sequence of declarations parsed in place.
+  // A declaration-position macro invocation: 'name!(args);' (or
+  // 'ns::name!(args);') expands to a sequence of declarations parsed in place.
+  if (TryAnnotateQualifiedMacroScope(/*EnteringContext=*/true))
+    return nullptr;
   if (isStartOfDeclMacroInvocation())
     return ParseDeclMacroInvocation(AS_none, /*TagDecl=*/nullptr);
 

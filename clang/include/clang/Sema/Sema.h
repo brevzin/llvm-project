@@ -16677,11 +16677,13 @@ public:
   /// \p Result -- a statement standing for the invocation (one deferred to
   /// instantiation) -- or fills \p Expansion, which the parser parses,
   /// followed by the ';' at \p SemiLoc, as statements in place.
+  /// (\p SS and \p ArgsUnparsed as for ActOnDeclMacroInvocation.)
   bool ActOnStmtMacroInvocation(
-      Scope *S, const IdentifierInfo *II, SourceLocation NameLoc,
-      SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
-      SourceLocation RParenLoc, SourceLocation SemiLoc,
-      TokenSequenceData &Expansion, StmtResult &Result,
+      Scope *S, CXXScopeSpec &SS, const IdentifierInfo *II,
+      SourceLocation NameLoc, SourceLocation ExclaimLoc,
+      SourceLocation LParenLoc, MultiExprArg Args, SourceLocation RParenLoc,
+      SourceLocation SemiLoc, TokenSequenceData &Expansion, StmtResult &Result,
+      bool ArgsUnparsed,
       const TemplateArgumentListInfo *TemplateArgs = nullptr);
   /// The evaluate-once check of the arguments interpolated into
   /// \p Expansion, over the statements parsed from it. Returns true on
@@ -16694,11 +16696,14 @@ public:
   /// recorded as a member (starting access \p AS) that expands per
   /// specialization, and \p Expansion is left empty. Returns true on
   /// (diagnosed) error.
+  /// \p SS is the invocation's qualifier, if any; \p ArgsUnparsed if it is
+  /// dependent, so that the macro, and the shape of its arguments, are not
+  /// known (the single argument is then the captured argument list).
   bool ActOnDeclMacroInvocation(
-      Scope *S, const IdentifierInfo *II, SourceLocation NameLoc,
-      SourceLocation ExclaimLoc, SourceLocation LParenLoc, MultiExprArg Args,
-      SourceLocation RParenLoc, AccessSpecifier AS,
-      TokenSequenceData &Expansion,
+      Scope *S, CXXScopeSpec &SS, const IdentifierInfo *II,
+      SourceLocation NameLoc, SourceLocation ExclaimLoc,
+      SourceLocation LParenLoc, MultiExprArg Args, SourceLocation RParenLoc,
+      AccessSpecifier AS, TokenSequenceData &Expansion, bool ArgsUnparsed,
       const TemplateArgumentListInfo *TemplateArgs = nullptr);
 
   /// Substitute into the callee and arguments of a macro invocation deferred

@@ -3964,8 +3964,11 @@ Parser::DeclGroupPtrTy Parser::ParseCXXClassMemberDeclarationWithPragmas(
     Decl *TagDecl) {
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
 
-  // A declaration-position macro invocation: 'name!(args);' expands to a
-  // sequence of member declarations parsed in place.
+  // A declaration-position macro invocation: 'name!(args);' (or
+  // 'ns::name!(args);') expands to a sequence of member declarations parsed
+  // in place.
+  if (TryAnnotateQualifiedMacroScope(/*EnteringContext=*/true))
+    return nullptr;
   if (isStartOfDeclMacroInvocation())
     return ParseDeclMacroInvocation(AS, TagDecl);
 

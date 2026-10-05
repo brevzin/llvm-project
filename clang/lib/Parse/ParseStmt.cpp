@@ -143,6 +143,16 @@ StmtResult Parser::ParseStatementOrDeclarationAfterAttributes(
   // the token to end in a semicolon (in which case SemiError should be set),
   // or they directly 'return;' if not.
 Retry:
+  // 'ns::name!(args);' as a whole statement: a qualified statement macro
+  // invocation. (The unqualified form is handled with identifiers below.)
+  if (TryAnnotateQualifiedMacroScope(/*EnteringContext=*/false))
+    return StmtError();
+  if (Tok.is(tok::annot_cxxscope) && isStartOfStmtMacroInvocation()) {
+    ProhibitAttributes(CXX11Attrs);
+    ProhibitAttributes(GNUAttrs);
+    return ParseStmtMacroInvocation(StmtCtx);
+  }
+
   tok::TokenKind Kind  = Tok.getKind();
   SourceLocation AtLoc;
   switch (Kind) {
