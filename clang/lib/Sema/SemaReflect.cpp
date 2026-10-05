@@ -985,7 +985,11 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
     if (getLangOpts().EntityProxyReflection)
       return BuildCXXReflectExpr(OpLoc, NameInfo.getBeginLoc(), USD);
     else {
-      Diag(SS.getBeginLoc(), diag::err_reflect_using_declarator);
+      // (At the name: an unqualified name has no qualifier to point at.)
+      Diag(NameInfo.getBeginLoc(), diag::err_reflect_using_declarator)
+          << SourceRange(SS.isEmpty() ? NameInfo.getBeginLoc()
+                                      : SS.getBeginLoc(),
+                         NameInfo.getEndLoc());
       return ExprError();
     }
   }
