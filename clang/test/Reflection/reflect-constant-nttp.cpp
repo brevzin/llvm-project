@@ -49,6 +49,37 @@ static_assert(f<Frac{2, 4}>() == 102);
 // interned object directly: interned<2,4>'s value {2,4} renormalizes.
 static_assert(addr<interned<2, 4>> == &interned<1, 2>);
 
+// ==== Private customization point ====
+
+// The customization point may be private: the language invokes it without
+// checking access.
+class PrivFrac {
+  int numer, denom;
+  consteval auto reflect_constant() const -> std::meta::info; // #privfrac-cp
+public:
+  consteval PrivFrac(int n, int d) : numer(n), denom(d) {}
+  consteval int value() const { return numer * 100 + denom; }
+};
+
+template <int N, int D> constexpr PrivFrac priv_interned = PrivFrac{N, D};
+
+consteval auto PrivFrac::reflect_constant() const -> std::meta::info {
+  int g = gcd(numer, denom);
+  int n = numer / g, d = denom / g;
+  if (n == 1 && d == 2) return ^^priv_interned<1, 2>;
+  return ^^priv_interned<0, 1>;
+}
+
+template <PrivFrac F> constexpr const PrivFrac* priv_addr = &F;
+static_assert(priv_addr<PrivFrac{2, 4}> == &priv_interned<1, 2>);
+static_assert(priv_addr<PrivFrac{2, 4}>->value() == 102);
+
+// Access is still checked for ordinary calls.
+consteval std::meta::info call_private(PrivFrac f) {
+  return f.reflect_constant(); // expected-error {{'reflect_constant' is a private member of 'PrivFrac'}}
+                               // expected-note@#privfrac-cp {{implicitly declared private here}}
+}
+
 // ==== Rejected results ====
 
 struct BadKind {

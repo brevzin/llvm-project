@@ -31,7 +31,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 namespace chrono {
 
 class year {
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 private:
   short __y_;
 

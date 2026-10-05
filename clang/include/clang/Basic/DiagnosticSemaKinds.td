@@ -10745,8 +10745,7 @@ def err_reflect_constant_bad_shape : Error<
   "must be const-qualified|"
   "must not be &&-qualified|"
   "must return 'std::meta::info'|"
-  "must have an object parameter of type %1|"
-  "must be public}0">;
+  "must have an object parameter of type %1}0">;
 def err_defaulted_reflect_constant_template : Error<
   "'reflect_constant' customization point template cannot be defaulted">;
 def err_reflect_constant_bad_result : Error<

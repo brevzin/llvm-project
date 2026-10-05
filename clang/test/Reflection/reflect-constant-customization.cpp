@@ -24,6 +24,15 @@ struct Ok4 {
   consteval auto reflect_constant(this Ok4) -> std::meta::info;
 };
 
+// The customization point may have any access.
+class Private {
+  consteval auto reflect_constant() const -> std::meta::info;
+};
+class Protected {
+protected:
+  consteval auto reflect_constant() const -> std::meta::info;
+};
+
 // ==== Defaulted and deleted ====
 
 class Defaulted {
@@ -72,10 +81,6 @@ struct TemplateCP {
   consteval auto reflect_constant() const -> std::meta::info; // expected-error {{'reflect_constant' customization point must not be a template}}
 };
 
-class Private {
-  consteval auto reflect_constant() const -> std::meta::info; // expected-error {{'reflect_constant' customization point must be public}}
-};
-
 struct BadExplicitObject {
   consteval auto reflect_constant(this BadExplicitObject&&) -> std::meta::info; // expected-error {{'reflect_constant' customization point must have an object parameter of type}}
 };
@@ -100,6 +105,32 @@ public:
   consteval auto reflect_constant() const -> std::meta::info;
 };
 static_assert(is_structural(^^NotOtherwiseStructural));
+
+// Private customization points (user-provided or defaulted) still opt in.
+class PrivateCustomized {
+  int i;
+  consteval auto reflect_constant() const -> std::meta::info;
+};
+static_assert(is_structural(^^PrivateCustomized));
+
+class PrivateDefaulted {
+  int i;
+  consteval auto reflect_constant() const -> std::meta::info = default;
+};
+static_assert(is_structural(^^PrivateDefaulted));
+
+class PrivateDefaultedOutOfLine {
+  int i;
+  consteval auto reflect_constant() const -> std::meta::info;
+};
+consteval auto PrivateDefaultedOutOfLine::reflect_constant() const
+    -> std::meta::info = default;
+static_assert(is_structural(^^PrivateDefaultedOutOfLine));
+
+class PrivateDeleted {
+  consteval auto reflect_constant() const -> std::meta::info = delete;
+};
+static_assert(!is_structural(^^PrivateDeleted));
 
 struct PlainStructural { int i; };
 static_assert(is_structural(^^PlainStructural));

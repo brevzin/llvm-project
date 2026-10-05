@@ -36,7 +36,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 namespace chrono {
 
 class year_month_weekday {
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
   chrono::year __y_;
   chrono::month __m_;
   chrono::weekday_indexed __wdi_;
@@ -174,7 +174,7 @@ _LIBCPP_HIDE_FROM_ABI inline constexpr year_month_weekday& year_month_weekday::o
 }
 
 class year_month_weekday_last {
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 private:
   chrono::year __y_;
   chrono::month __m_;

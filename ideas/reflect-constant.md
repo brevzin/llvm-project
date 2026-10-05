@@ -2,7 +2,7 @@ Extend support for non-type (constant) template parameters by allowing types to 
 
 ## Opting into `reflect_constant`
 
-A type `C` can opt-in by writing a `public`, `consteval` non-static member function that has to have one of the following signatures — same as the shapes from the comparison rules that you can default:
+A type `C` can opt-in by writing a `consteval` non-static member function that has to have one of the following signatures — same as the shapes from the comparison rules that you can default:
 
 ```cpp
 struct C {
@@ -12,6 +12,8 @@ struct C {
     consteval auto reflect_constant(this C) -> std::meta::info;
 };
 ```
+
+The customization point can have any access. It is only invoked by the language (when initializing a constant template parameter, or by `std::meta::reflect_constant`), which ignores its access — so it can, and typically should, be `private`. This keeps it out of the class's public interface: users go through `std::meta::reflect_constant(x)` rather than calling `x.reflect_constant()` directly.
 
 This function's job is to return a reference representing the template parameter object that is template-argument-equivalent to the object parameter. That is — this object _is_ the object that the language will use as _the_ template parameter object.
 
@@ -52,8 +54,6 @@ The former will be checked by the implementation (in the same way that the curre
 ```cpp
 class D {
     int i;
-
-public:
     consteval auto reflect_constant() const -> std::meta::info = default;
 };
 ```

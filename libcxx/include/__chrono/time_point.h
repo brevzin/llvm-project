@@ -34,7 +34,7 @@ namespace chrono {
 
 template <class _Clock, class _Duration = typename _Clock::duration>
 class time_point {
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
   static_assert(__is_duration_v<_Duration>, "Second template parameter of time_point must be a std::chrono::duration");
 
 public:

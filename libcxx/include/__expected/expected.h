@@ -211,7 +211,7 @@ inline constexpr bool __fits_in_tail_padding = []() {
 //
 template <class _Tp, class _Err>
 class __expected_base {
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
   // use named union because [[no_unique_address]] cannot be applied to an unnamed union,
   // also guaranteed elision into a potentially-overlapping subobject is unsettled (and
   // it's not clear that it's implementable, given that the function is allowed to clobber
@@ -263,8 +263,10 @@ class __expected_base {
   static constexpr bool __allow_reusing_expected_tail_padding = !__put_flag_in_tail;
 
   struct __repr {
+  private:
     _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
+  public:
     _LIBCPP_HIDE_FROM_ABI constexpr explicit __repr() = delete;
 
     template <class... _Args>
@@ -464,13 +466,12 @@ class expected : private __expected_base<_Tp, _Err> {
   friend class expected;
 
   using __base _LIBCPP_NODEBUG = __expected_base<_Tp, _Err>;
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
 public:
   using value_type      = _Tp;
   using error_type      = _Err;
   using unexpected_type = unexpected<_Err>;
-
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
   using __trivially_relocatable _LIBCPP_NODEBUG =
       __conditional_t<__libcpp_is_trivially_relocatable<_Tp>::value && __libcpp_is_trivially_relocatable<_Err>::value,
@@ -1191,7 +1192,7 @@ public:
 
 template <class _Err>
 class __expected_void_base {
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
   struct __empty_t {};
   // use named union because [[no_unique_address]] cannot be applied to an unnamed union,
   // also guaranteed elision into a potentially-overlapping subobject is unsettled (and
@@ -1237,8 +1238,10 @@ class __expected_void_base {
   static constexpr bool __allow_reusing_expected_tail_padding = !__put_flag_in_tail;
 
   struct __repr {
+  private:
     _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
+  public:
     _LIBCPP_HIDE_FROM_ABI constexpr explicit __repr() = delete;
 
     template <class... _Args>
@@ -1401,13 +1404,12 @@ class expected<_Tp, _Err> : private __expected_void_base<_Err> {
             _Not<is_constructible<unexpected<_Err>, const expected<_Up, _OtherErr>>>>;
 
   using __base _LIBCPP_NODEBUG = __expected_void_base<_Err>;
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
 public:
   using value_type      = _Tp;
   using error_type      = _Err;
   using unexpected_type = unexpected<_Err>;
-
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
   template <class _Up>
   using rebind = expected<_Up, error_type>;

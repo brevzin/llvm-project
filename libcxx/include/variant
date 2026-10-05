@@ -696,9 +696,10 @@ union __union<_DestructibleTrait, _Index> {};
 #    define _LIBCPP_VARIANT_UNION(destructible_trait, destructor_definition)                                           \
       template <size_t _Index, class _Tp, class... _Types>                                                             \
       union __union<destructible_trait, _Index, _Tp, _Types...> {                                                      \
-      public:                                                                                                          \
+      private:                                                                                                         \
         _LIBCPP_REFLECT_CONSTANT_DEFAULT                                                                               \
                                                                                                                        \
+      public:                                                                                                          \
         _LIBCPP_HIDE_FROM_ABI explicit constexpr __union(__valueless_t) noexcept : __dummy{} {}                        \
                                                                                                                        \
         template <class... _Args>                                                                                      \
@@ -1181,12 +1182,11 @@ class _LIBCPP_DECLSPEC_EMPTY_BASES _LIBCPP_NO_SPECIALIZATIONS variant
   static_assert(__all<!is_void_v<_Types>...>::value, "variant can not have a void type as an alternative.");
 
   using __first_type _LIBCPP_NODEBUG = variant_alternative_t<0, variant>;
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
 public:
   using __trivially_relocatable _LIBCPP_NODEBUG =
       conditional_t<_And<__libcpp_is_trivially_relocatable<_Types>...>::value, variant, void>;
-
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
   template <bool _Dummy                                                                               = true,
             enable_if_t<__dependent_type<is_default_constructible<__first_type>, _Dummy>::value, int> = 0>

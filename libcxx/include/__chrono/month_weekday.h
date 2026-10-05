@@ -27,7 +27,7 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 namespace chrono {
 
 class month_weekday {
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 private:
   chrono::month __m_;
   chrono::weekday_indexed __wdi_;
@@ -69,7 +69,7 @@ operator/(const weekday_indexed& __lhs, int __rhs) noexcept {
 }
 
 class month_weekday_last {
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT_PUBLIC
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
   chrono::month __m_;
   chrono::weekday_last __wdl_;
 

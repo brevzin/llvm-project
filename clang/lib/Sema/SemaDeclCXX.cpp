@@ -8023,9 +8023,6 @@ bool Sema::CheckReflectConstantCustomization(CXXMethodDecl *MD) {
   if (!Context.hasSameType(MD->getReturnType(), Context.MetaInfoTy))
     return DiagShape(5);
 
-  if (MD->getAccess() != AS_public)
-    return DiagShape(7);
-
   // A defaulted customization follows the comparison-defaulting model: if any
   // subobject is not structural, it is defaulted as deleted (which also makes
   // the class non-structural, infectiously).

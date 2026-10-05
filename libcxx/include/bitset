@@ -181,9 +181,9 @@ struct __has_storage_type<__bitset<_N_words, _Size> > {
 
 template <size_t _N_words, size_t _Size>
 class __bitset {
-public:
   _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
+public:
   typedef size_t __storage_type;
 
 protected:
@@ -408,9 +408,9 @@ inline size_t __bitset<_N_words, _Size>::__hash_code() const _NOEXCEPT {
 
 template <size_t _Size>
 class __bitset<1, _Size> {
-public:
   _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
+public:
   typedef size_t __storage_type;
 
 protected:
@@ -550,9 +550,9 @@ inline size_t __bitset<1, _Size>::__hash_code() const _NOEXCEPT {
 
 template <>
 class __bitset<0, 0> {
-public:
   _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
+public:
   typedef size_t __storage_type;
 
 protected:
@@ -620,9 +620,9 @@ struct hash<bitset<_Size> >;
 
 template <size_t _Size>
 class bitset : private __bitset<_Size == 0 ? 0 : (_Size - 1) / (sizeof(size_t) * CHAR_BIT) + 1, _Size> {
-public:
   _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
+public:
   static const unsigned __n_words = _Size == 0 ? 0 : (_Size - 1) / (sizeof(size_t) * CHAR_BIT) + 1;
   typedef __bitset<__n_words, _Size> __base;
   typedef typename __base::reference reference;

@@ -3032,8 +3032,11 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
 
     DeclarationName Name(&Context.Idents.get("reflect_constant"));
     LookupResult LR(*this, DeclarationNameInfo(Name, Loc), LookupMemberName);
-    LR.addDecl(CP);
+    // The customization point may be private: the language invokes it on the
+    // class's behalf, so access is not checked.
+    LR.addDecl(CP, AS_public);
     LR.resolveKind();
+    LR.suppressDiagnostics();
 
     ExprResult Ref = BuildMemberReferenceExpr(
         Obj, Obj->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),

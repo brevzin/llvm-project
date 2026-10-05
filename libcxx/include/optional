@@ -870,11 +870,10 @@ class _LIBCPP_DECLSPEC_EMPTY_BASES optional
       private __optional_sfinae_ctor_base_t<_Tp>,
       private __optional_sfinae_assign_base_t<_Tp> {
   using __base _LIBCPP_NODEBUG = __optional_iterator_base<_Tp>;
+  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
 public:
   using value_type = __libcpp_remove_reference_t<_Tp>;
-
-  _LIBCPP_REFLECT_CONSTANT_DEFAULT
 
   using __trivially_relocatable _LIBCPP_NODEBUG =
       conditional_t<__libcpp_is_trivially_relocatable<_Tp>::value, optional, void>;

@@ -1159,16 +1159,6 @@ public:
     __reset_internal_buffer(__rep(__uninitialized_tag()));
   }
 
-#  if __has_feature(reflection) && _LIBCPP_STD_VER >= 29
-  // P4341 ext (non-transient constexpr allocation): strings using the default
-  // allocator are usable as constant template parameters. When the constraint
-  // is not satisfied the customization point counts as absent, and
-  // basic_string is simply not structural. Defined in <meta>, which provides
-  // the machinery used to persist the contents.
-  _LIBCPP_HIDE_FROM_ABI consteval auto reflect_constant() const -> decltype(^^::)
-    requires is_same_v<_Allocator, allocator<_CharT>>;
-#  endif
-
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20 operator __self_view() const _NOEXCEPT {
     return __self_view(typename __self_view::__assume_valid(), data(), size());
   }
@@ -2084,6 +2074,16 @@ public:
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20 bool __invariants() const;
 
 private:
+#  if __has_feature(reflection) && _LIBCPP_STD_VER >= 29
+  // P4341 ext (non-transient constexpr allocation): strings using the default
+  // allocator are usable as constant template parameters. When the constraint
+  // is not satisfied the customization point counts as absent, and
+  // basic_string is simply not structural. Defined in <meta>, which provides
+  // the machinery used to persist the contents.
+  _LIBCPP_HIDE_FROM_ABI consteval auto reflect_constant() const -> decltype(^^::)
+    requires is_same_v<_Allocator, allocator<_CharT>>;
+#  endif
+
   _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_SINCE_CXX20 bool __is_long() const _NOEXCEPT {
     if (__libcpp_is_constant_evaluated() && __builtin_constant_p(__rep_.__l.__is_long_)) {
       return __rep_.__l.__is_long_;

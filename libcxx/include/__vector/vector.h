@@ -254,9 +254,6 @@ private:
     vector& __vec_;
   };
 
-public:
-  _LIBCPP_CONSTEXPR_SINCE_CXX20 _LIBCPP_HIDE_FROM_ABI ~vector() { __destroy_vector (*this)(); }
-
 #if __has_feature(reflection) && _LIBCPP_STD_VER >= 29
   // P4341 ext (non-transient constexpr allocation): vectors of structural
   // elements using the default allocator are usable as constant template
@@ -266,6 +263,9 @@ public:
   _LIBCPP_HIDE_FROM_ABI consteval auto reflect_constant() const -> decltype(^^::)
     requires is_same_v<_Allocator, allocator<_Tp>> && __is_structural(_Tp);
 #endif
+
+public:
+  _LIBCPP_CONSTEXPR_SINCE_CXX20 _LIBCPP_HIDE_FROM_ABI ~vector() { __destroy_vector (*this)(); }
 
   _LIBCPP_CONSTEXPR_SINCE_CXX20 _LIBCPP_HIDE_FROM_ABI vector(const vector& __x)
       : __alloc_(__alloc_traits::select_on_container_copy_construction(__x.__alloc_)) {

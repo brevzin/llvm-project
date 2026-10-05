@@ -74,4 +74,51 @@ struct Deleted {
 static_assert(!std::meta::is_structural_type(^^Deleted));
 static_assert(std::meta::is_structural_type(^^Frac));
 
+// The customization point may be private; the language (and so
+// std::meta::reflect_constant) invokes it regardless of access.
+class PrivFrac {
+  int numer_;
+  int denom_;
+
+  consteval auto reflect_constant() const -> std::meta::info;
+
+public:
+  constexpr PrivFrac(int n, int d) : numer_(n), denom_(d) {}
+  constexpr int numer() const { return numer_; }
+  constexpr int denom() const { return denom_; }
+};
+
+template <int N, int D>
+constexpr PrivFrac priv_frac_interned{N, D};
+
+consteval auto PrivFrac::reflect_constant() const -> std::meta::info {
+  int g = std::gcd(numer_, denom_);
+  return std::meta::substitute(
+      ^^priv_frac_interned,
+      {std::meta::reflect_constant(numer_ / g),
+       std::meta::reflect_constant(denom_ / g)});
+}
+
+template <PrivFrac F> constexpr const PrivFrac* priv_addr = &F;
+
+static_assert(std::meta::is_structural_type(^^PrivFrac));
+static_assert(priv_addr<PrivFrac{2, 4}> == &priv_frac_interned<1, 2>);
+static_assert(std::meta::reflect_constant(PrivFrac{2, 4}) ==
+              ^^priv_frac_interned<1, 2>);
+static_assert([:std::meta::reflect_constant(PrivFrac{2, 4}):].denom() == 2);
+
+// A private defaulted customization point.
+class PrivDefaulted {
+  int i_;
+  consteval auto reflect_constant() const -> std::meta::info = default;
+
+public:
+  constexpr PrivDefaulted(int i) : i_(i) {}
+  constexpr int get() const { return i_; }
+};
+template <PrivDefaulted P> constexpr int priv_get = P.get();
+static_assert(std::meta::is_structural_type(^^PrivDefaulted));
+static_assert(priv_get<PrivDefaulted{3}> == 3);
+static_assert([:std::meta::reflect_constant(PrivDefaulted{3}):].get() == 3);
+
 int main() { }
