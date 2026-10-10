@@ -3408,7 +3408,7 @@ static bool isRawMacroParameter(const ParmVarDecl *PVD) {
   return PVD->isMacroRawPack() || PVD->getType()
                                       .getNonReferenceType()
                                       .getUnqualifiedType()
-                                      ->isTokenSequenceType();
+                                      ->isTokenSequenceLikeType();
 }
 
 static MacroParamKind getMacroParamKind(const ParmVarDecl *PVD) {
@@ -3705,16 +3705,27 @@ ExprResult Sema::BuildDeclarationNameExpr(
   // of the declared type. (Not a parameter pack, which is dependent, as any
   // function parameter pack is: the parameters it expands to are named this
   // way when the macro is instantiated.)
+  // (A raw parameter is an ordinary parameter: its own type, bound to an
+  // object of it -- see EvaluateMacroExpansion -- except one declared as a
+  // reference to a token_sequence, which names a fresh one each time.)
+  bool RawMacroRefParam = false;
   if (isExpressionMacroParameter(VD) &&
       !cast<ParmVarDecl>(VD)->isParameterPack()) {
-    type = isRawMacroParameter(cast<ParmVarDecl>(VD)) ? Context.TokenSequenceTy
-                                                      : Context.MetaInfoTy;
-    valueKind = VK_PRValue;
+    if (!isRawMacroParameter(cast<ParmVarDecl>(VD))) {
+      type = Context.MetaInfoTy;
+      valueKind = VK_PRValue;
+    } else if (VD->getType()->isReferenceType()) {
+      RawMacroRefParam = true;
+      type = Context.TokenSequenceTy;
+      valueKind = VK_PRValue;
+    }
   }
 
   auto *E =
       BuildDeclRefExpr(VD, type, valueKind, NameInfo, &SS, FoundD,
                        /*FIXME: TemplateKWLoc*/ SourceLocation(), TemplateArgs);
+  if (RawMacroRefParam && E && !VD->isInvalidDecl())
+    return BuildTokenSequenceValue(E);
   // Clang AST consumers assume a DeclRefExpr refers to a valid decl. We
   // wrap a DeclRefExpr referring to an invalid decl with a dependent-type
   // RecoveryExpr to avoid follow-up semantic analysis (thus prevent bogus
@@ -7479,9 +7490,19 @@ bool Sema::ParseDeferredMacroArguments(ArrayRef<MacroParamKind> RawParams,
 }
 
 void Sema::ForgetConsumedMacroArguments(ArrayRef<Expr *> Args) {
+  // (A raw pack's arguments are token_sequence values wrapping the literal:
+  // forget the whole argument.)
+  std::function<void(Stmt *)> Forget = [&](Stmt *S) {
+    if (!S)
+      return;
+    if (auto *E = dyn_cast<Expr>(S))
+      ExprEvalContexts.back().ConstevalOnly.erase(E);
+    for (Stmt *Child : S->children())
+      Forget(Child);
+  };
   for (Expr *Arg : Args)
-    if (Arg->getType()->isTokenSequenceType())
-      ExprEvalContexts.back().ConstevalOnly.erase(Arg);
+    if (Arg->getType()->isTokenSequenceLikeType())
+      Forget(Arg);
 }
 
 void Sema::SetUnparsedMacroEnvironment(CXXMacroInvocationExpr *E, Scope *S) {
@@ -8315,6 +8336,16 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
   if (auto *DRE = dyn_cast<DeclRefExpr>(Fn->IgnoreParenImpCasts()))
     ExprEvalContexts.back().ReferenceToConsteval.erase(DRE);
 
+  // The call built below only binds the arguments; it is never part of the
+  // program, so neither are the cleanups binding them would need (a raw
+  // parameter is a std::meta::token_sequence, a class with a destructor).
+  CleanupInfo SavedCleanup = Cleanup;
+  unsigned SavedCleanupObjects = ExprCleanupObjects.size();
+  auto RestoreCleanups = llvm::make_scope_exit([&] {
+    Cleanup = SavedCleanup;
+    ExprCleanupObjects.truncate(SavedCleanupObjects);
+  });
+
   // Bind the arguments to the parameters as for a call: this applies the
   // conversions the parameter types ask for and checks the arguments.
   const auto *Proto = Macro->getType()->castAs<FunctionProtoType>();
@@ -8336,9 +8367,34 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
   }
 
   SmallVector<APValue, 4> ParamValues;
+  SmallVector<const Expr *, 4> ParamInits;
   for (unsigned I = 0, N = Macro->getNumParams(); I != N; ++I) {
     Expr *Arg = TheCall->getArg(I);
-    if (isRawMacroParameter(Macro->getParamDecl(I))) {
+    ParmVarDecl *PVD = Macro->getParamDecl(I);
+    ParamInits.push_back(nullptr);
+    if (isRawMacroParameter(PVD) &&
+        PVD->getType()->isStdMetaTokenSequenceType()) {
+      // A std::meta::token_sequence parameter is an object, constructed from
+      // the argument when the body is evaluated (it lives in that
+      // evaluation): the raw argument (already a token_sequence for a raw
+      // pack, the compiler's token array otherwise), or the default argument.
+      Expr *Init = I < Args.size() ? Args[I] : Arg;
+      if (!Init->getType()->isStdMetaTokenSequenceType()) {
+        ExprResult Built = BuildTokenSequenceValue(Init);
+        if (Built.isInvalid())
+          return true;
+        Init = Built.get();
+      }
+      ParamInits.back() = Init;
+      ParamValues.push_back(APValue());
+      continue;
+    }
+    if (isRawMacroParameter(PVD)) {
+      // Otherwise the compiler's token array, bound as such; a default
+      // argument is converted back to one.
+      if (I < Args.size())
+        Arg = Args[I];
+      Arg = ConvertToTokenArray(Arg);
       Expr::EvalResult ER;
       SmallVector<PartialDiagnosticAt, 4> Notes;
       ER.Diag = &Notes;
@@ -8374,7 +8430,7 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
       break;
     }
   if (!Expr::EvaluateMacroBody(Macro, ParamValues, Result, Context, Notes,
-                               InvocationContext) ||
+                               InvocationContext, ParamInits) ||
       !Result.isTokenSequence()) {
     // std::meta::expand_at_instantiation() in a templated context: the
     // expansion waits for instantiation, where the macro is evaluated again.
@@ -14782,8 +14838,10 @@ QualType Sema::CheckCompareOperands(ExprResult &LHS, ExprResult &RHS,
     return computeResultTy();
   }
 
-  // Token sequence equality.
-  if (LHSType->isTokenSequenceType() && RHSType->isTokenSequenceType()) {
+  // Token sequence (and token) equality. A token compares with a token array
+  // as the array of just that token.
+  if ((LHSType->isTokenSequenceType() || LHSType->isMetaTokenType()) &&
+      (RHSType->isTokenSequenceType() || RHSType->isMetaTokenType())) {
     // Only == and != are defined for token_sequence values.
     if (!BinaryOperator::isEqualityOp(Opc))
       return InvalidOperands(Loc, LHS, RHS);

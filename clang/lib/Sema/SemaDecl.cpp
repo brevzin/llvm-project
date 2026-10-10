@@ -10201,7 +10201,7 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
                            P->getType()
                                .getNonReferenceType()
                                .getUnqualifiedType()
-                               ->isTokenSequenceType())) {
+                               ->isTokenSequenceLikeType())) {
           Diag(P->getLocation(), diag::err_macro_operator_raw_parameter);
           NewFD->setInvalidDecl();
         }

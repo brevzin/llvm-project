@@ -11,10 +11,9 @@
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20
 // ADDITIONAL_COMPILE_FLAGS: -freflection -std=c++2d
 
-// token_sequence is itself a range: directly iterable with range-for
-// (begin/end/size found by ADL -- the compiler associates token_sequence
-// with std::meta) and directly indexable (ts[i] is evaluated by the
-// compiler). tokens_of() predates this and is now just a materialized copy.
+// token_sequence is a vector of tokens: directly iterable with range-for and
+// directly indexable, each element a std::meta::token. tokens_of() predates
+// this and is now just a copy.
 
 #include <meta>
 #include <algorithm>
@@ -44,9 +43,9 @@ static_assert(m::token_kind_of(ts[2]) == m::token_kind::identifier);
 static_assert(ts[0] == m::id("a"));  // id() is a single-identifier-token
 static_assert(ts[2] == m::id("b"));  // sequence; tokens compare directly
 
-// The result is an ordinary single-token sequence: it splices, compares,
-// and concatenates like any other.
-static_assert(ts[0] + ts[1] + ts[2] == ^^{ a + b });
+// The result is a token: it splices and compares, and tokens make a
+// sequence.
+static_assert(m::token_sequence{ts[0], ts[1], ts[2]} == ^^{ a + b });
 static_assert(ts[1] == ^^{ + });
 
 // ... and a prvalue: it can be selected by a conditional and bound to a
@@ -75,7 +74,7 @@ static_assert([] {
 // ----------------------------------------------------------------------------
 consteval int count_identifiers(m::token_sequence seq) {
   int n = 0;
-  for (m::token_sequence tok : seq)
+  for (m::token tok : seq)
     if (m::token_kind_of(tok) == m::token_kind::identifier)
       ++n;
   return n;
@@ -87,7 +86,7 @@ static_assert(count_identifiers(^^{ f(x, y) + z }) == 4);
 // Rebuild a sequence token by token.
 consteval m::token_sequence roundtrip(m::token_sequence seq) {
   m::token_sequence out = ^^{ };
-  for (m::token_sequence tok : seq)
+  for (m::token tok : seq)
     out += tok;
   return out;
 }
@@ -121,15 +120,13 @@ static_assert([] {
 }());
 
 // ----------------------------------------------------------------------------
-// token_sequence is a bona fide std::ranges range: the access CPOs consider
-// its ADL customizations, and it is borrowed (compilation-owned storage, so
-// iterators from an rvalue sequence cannot dangle).
+// token_sequence is a vector: a contiguous range (not a borrowed one).
 // ----------------------------------------------------------------------------
 static_assert(std::ranges::random_access_range<m::token_sequence>);
 static_assert(std::ranges::sized_range<m::token_sequence>);
-static_assert(std::ranges::borrowed_range<m::token_sequence>);
+static_assert(!std::ranges::borrowed_range<m::token_sequence>);
 static_assert(std::ranges::viewable_range<m::token_sequence>);
-static_assert(!std::ranges::contiguous_range<m::token_sequence>);  // proxy deref
+static_assert(std::ranges::contiguous_range<m::token_sequence>);
 
 static_assert([]() consteval {
   assert(std::ranges::size(ts) == 3);
@@ -137,29 +134,29 @@ static_assert([]() consteval {
   assert(!std::ranges::empty(ts));
 
   // Algorithms.
-  assert(std::ranges::count_if(ts, [](m::token_sequence tok) {
+  assert(std::ranges::count_if(ts, [](m::token tok) {
            return m::token_kind_of(tok) == m::token_kind::identifier;
          }) == 2);
-  assert(std::ranges::find(ts, ^^{ + }) - std::ranges::begin(ts) == 1);
+  assert(std::ranges::find(ts, (^^{ + })[0]) - std::ranges::begin(ts) == 1);
 
-  // Views compose; borrowed-ness lets an rvalue sequence flow in directly.
+  // Views compose (an rvalue sequence is owned by the view).
   int idents = 0;
-  for ([[maybe_unused]] m::token_sequence tok :
-       ^^{ f(x) + g(y) } | std::views::filter([](m::token_sequence t) {
+  for ([[maybe_unused]] m::token tok :
+       ^^{ f(x) + g(y) } | std::views::filter([](m::token t) {
          return m::token_kind_of(t) == m::token_kind::identifier;
        }))
     ++idents;
   assert(idents == 4);
 
   m::token_sequence reversed = ^^{ };
-  for (m::token_sequence tok : ts | std::views::reverse)
+  for (m::token tok : ts | std::views::reverse)
     reversed += tok;
   assert(reversed == ^^{ b + a });
   return true;
 }());
 
 // ----------------------------------------------------------------------------
-// tokens_of is now a materialized copy of the range.
+// tokens_of is now a copy of the sequence.
 // ----------------------------------------------------------------------------
 static_assert([]() consteval {
   auto v = m::tokens_of(ts);

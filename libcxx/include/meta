@@ -422,8 +422,11 @@ _LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
 // An opaque handle to a reflected entity.
 using info = decltype(^^int);
 
-// An opaque handle to a token sequence.
-using token_sequence = decltype(^^{ });
+// The compiler's immutable array of tokens: what a token literal is here,
+// before std::meta::token_sequence is declared below. Everywhere after, a
+// token literal ^^{ ... } is a token_sequence (a vector<token>) constructed
+// from one of these, and the compiler takes token sequences back as these.
+using __token_array = decltype(^^{ });
 
 template <typename R>
 concept reflection_range =
@@ -585,6 +588,8 @@ enum : unsigned {
   __metafn_argument_list_for,
   __metafn_expand_at_instantiation,
   __metafn_punctuator_of,
+  __metafn_tokens_join,
+  __metafn_tokens_fill,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -594,6 +599,319 @@ consteval auto __underlying_entity_of(info r) -> info {
 }
 
 }  // namespace detail
+
+// A single token: a scalar.
+using token = decltype(__metafunction(detail::__metafn_get_ith_token,
+                                      ^^{ x }, 0));
+
+namespace detail {
+// Between the compiler's token array and an array of tokens, natively
+// (the constant evaluator does these as it does __builtin_memcpy).
+constexpr auto __tokens_count(__token_array __ts) -> size_t {
+  return __metafunction(detail::__metafn_token_count, __ts);
+}
+constexpr auto __tokens_fill(token* __dst, __token_array __ts) -> size_t {
+  return __metafunction(detail::__metafn_tokens_fill, __dst, __ts);
+}
+constexpr auto __tokens_join(token const* __p, size_t __n) -> __token_array {
+  return __metafunction(detail::__metafn_tokens_join, __p, __n);
+}
+}  // namespace detail
+
+_LIBCPP_END_NAMESPACE_REFLECTION_V2
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+// std::meta::token_sequence: a vector of tokens. An explicit specialization,
+// since a token is a scalar: storage is new token[] and plain assignment,
+// element copies are __builtin_memcpy, and a token literal (the compiler's
+// token array) is filled in natively.
+template <>
+class vector<meta::token, allocator<meta::token>> {
+  using __token = meta::token;
+
+public:
+  using value_type = __token;
+  using allocator_type = allocator<__token>;
+  using size_type = size_t;
+  using difference_type = ptrdiff_t;
+  using reference = __token&;
+  using const_reference = __token const&;
+  using pointer = __token*;
+  using const_pointer = __token const*;
+  using iterator = __token*;
+  using const_iterator = __token const*;
+  using reverse_iterator = std::reverse_iterator<iterator>;
+  using const_reverse_iterator = std::reverse_iterator<const_iterator>;
+
+private:
+  // (As std::vector's: a constexpr token_sequence may keep its allocation.)
+  _LIBCPP_IMMUTABLE_IF_CONSTEXPR __token* __data_ = nullptr;
+  size_t __size_ = 0;
+  size_t __cap_ = 0;
+
+  constexpr void __reallocate(size_t __c) {
+    __token* __q = new __token[__c];
+    if (__size_)
+      __builtin_memcpy(__q, __data_, __size_ * sizeof(__token));
+    delete[] __data_;
+    __data_ = __q;
+    __cap_ = __c;
+  }
+  constexpr void __grow_for(size_t __want) {
+    if (__want <= __cap_)
+      return;
+    size_t __c = __cap_ ? __cap_ * 2 : 8;
+    __reallocate(__c < __want ? __want : __c);
+  }
+
+public:
+  constexpr vector() noexcept = default;
+  // A token literal: the compiler's token array.
+  constexpr vector(meta::__token_array __ts) {
+    size_t __n = meta::detail::__tokens_count(__ts);
+    if (__n) {
+      __data_ = new __token[__n];
+      __cap_ = __n;
+      __size_ = meta::detail::__tokens_fill(__data_, __ts);
+    }
+  }
+  constexpr vector(initializer_list<__token> __il) {
+    reserve(__il.size());
+    for (__token __t : __il)
+      __data_[__size_++] = __t;
+  }
+  constexpr explicit vector(size_type __n, __token __v = __token()) {
+    reserve(__n);
+    for (; __size_ < __n; ++__size_)
+      __data_[__size_] = __v;
+  }
+  template <class _It>
+    requires(!is_integral_v<_It>)
+  constexpr vector(_It __f, _It __l) {
+    for (; __f != __l; ++__f)
+      push_back(*__f);
+  }
+  template <class _Rp>
+  constexpr vector(from_range_t, _Rp&& __r) {
+    append_range(std::forward<_Rp>(__r));
+  }
+  constexpr vector(vector const& __o) {
+    if (__o.__size_) {
+      __data_ = new __token[__o.__size_];
+      __cap_ = __o.__size_;
+      __builtin_memcpy(__data_, __o.__data_, __o.__size_ * sizeof(__token));
+      __size_ = __o.__size_;
+    }
+  }
+  constexpr vector(vector&& __o) noexcept
+      : __data_(__o.__data_), __size_(__o.__size_), __cap_(__o.__cap_) {
+    __o.__data_ = nullptr;
+    __o.__size_ = __o.__cap_ = 0;
+  }
+  constexpr vector& operator=(vector const& __o) {
+    if (this != &__o) {
+      vector __t(__o);
+      swap(__t);
+    }
+    return *this;
+  }
+  constexpr vector& operator=(vector&& __o) noexcept {
+    vector __t(std::move(__o));
+    swap(__t);
+    return *this;
+  }
+  constexpr vector& operator=(initializer_list<__token> __il) {
+    vector __t(__il);
+    swap(__t);
+    return *this;
+  }
+  constexpr ~vector() { delete[] __data_; }
+
+  // Given to the compiler (interpolated, injected, returned from a macro) as
+  // its token array.
+  constexpr operator meta::__token_array() const {
+    return meta::detail::__tokens_join(__data_, __size_);
+  }
+
+  constexpr iterator begin() noexcept { return __data_; }
+  constexpr const_iterator begin() const noexcept { return __data_; }
+  constexpr iterator end() noexcept { return __data_ + __size_; }
+  constexpr const_iterator end() const noexcept { return __data_ + __size_; }
+  constexpr const_iterator cbegin() const noexcept { return begin(); }
+  constexpr const_iterator cend() const noexcept { return end(); }
+  constexpr reverse_iterator rbegin() noexcept { return reverse_iterator(end()); }
+  constexpr const_reverse_iterator rbegin() const noexcept {
+    return const_reverse_iterator(end());
+  }
+  constexpr reverse_iterator rend() noexcept { return reverse_iterator(begin()); }
+  constexpr const_reverse_iterator rend() const noexcept {
+    return const_reverse_iterator(begin());
+  }
+
+  constexpr size_type size() const noexcept { return __size_; }
+  constexpr bool empty() const noexcept { return __size_ == 0; }
+  constexpr size_type capacity() const noexcept { return __cap_; }
+  constexpr size_type max_size() const noexcept { return size_t(-1) / sizeof(__token); }
+  constexpr void reserve(size_type __c) {
+    if (__c > __cap_)
+      __reallocate(__c);
+  }
+  constexpr void shrink_to_fit() {}
+
+  constexpr reference operator[](size_type __i) { return __data_[__i]; }
+  constexpr const_reference operator[](size_type __i) const { return __data_[__i]; }
+  constexpr reference at(size_type __i) {
+    if (__i >= __size_)
+      std::__throw_out_of_range("vector");
+    return __data_[__i];
+  }
+  constexpr const_reference at(size_type __i) const {
+    if (__i >= __size_)
+      std::__throw_out_of_range("vector");
+    return __data_[__i];
+  }
+  constexpr reference front() { return __data_[0]; }
+  constexpr const_reference front() const { return __data_[0]; }
+  constexpr reference back() { return __data_[__size_ - 1]; }
+  constexpr const_reference back() const { return __data_[__size_ - 1]; }
+  constexpr pointer data() noexcept { return __data_; }
+  constexpr const_pointer data() const noexcept { return __data_; }
+
+  constexpr void push_back(__token __t) {
+    __grow_for(__size_ + 1);
+    __data_[__size_++] = __t;
+  }
+  template <class... _Args>
+  constexpr reference emplace_back(_Args&&... __args) {
+    push_back(__token(std::forward<_Args>(__args)...));
+    return back();
+  }
+  constexpr void pop_back() { --__size_; }
+  constexpr void clear() noexcept { __size_ = 0; }
+  constexpr void resize(size_type __n, __token __v = __token()) {
+    reserve(__n);
+    for (; __size_ < __n; ++__size_)
+      __data_[__size_] = __v;
+    __size_ = __n;
+  }
+  constexpr void swap(vector& __o) noexcept {
+    __token* __p = __data_;
+    __data_ = __o.__data_;
+    __o.__data_ = __p;
+    size_t __t = __size_;
+    __size_ = __o.__size_;
+    __o.__size_ = __t;
+    __t = __cap_;
+    __cap_ = __o.__cap_;
+    __o.__cap_ = __t;
+  }
+
+  template <class _Rp>
+  constexpr void append_range(_Rp&& __r) {
+    using _Rv = remove_cvref_t<_Rp>;
+    if constexpr (is_same_v<_Rv, meta::__token_array>) {
+      size_t __n = meta::detail::__tokens_count(__r);
+      __grow_for(__size_ + __n);
+      __size_ += meta::detail::__tokens_fill(__data_ + __size_, __r);
+    } else if constexpr (is_same_v<_Rv, vector>) {
+      size_t __n = __r.__size_;
+      __grow_for(__size_ + __n);
+      if (__n)
+        __builtin_memcpy(__data_ + __size_, __r.__data_, __n * sizeof(__token));
+      __size_ += __n;
+    } else if constexpr (ranges::contiguous_range<_Rp> && ranges::sized_range<_Rp> &&
+                         is_same_v<remove_cv_t<ranges::range_value_t<_Rp>>, __token>) {
+      size_t __n = ranges::size(__r);
+      __grow_for(__size_ + __n);
+      if (__n)
+        __builtin_memcpy(__data_ + __size_, ranges::data(__r), __n * sizeof(__token));
+      __size_ += __n;
+    } else {
+      for (auto&& __x : __r)
+        push_back(__x);
+    }
+  }
+
+  constexpr iterator insert(const_iterator __pos, __token __t) {
+    size_t __i = __pos - __data_;
+    __grow_for(__size_ + 1);
+    if (__i < __size_)
+      __builtin_memmove(__data_ + __i + 1, __data_ + __i,
+                        (__size_ - __i) * sizeof(__token));
+    __data_[__i] = __t;
+    ++__size_;
+    return __data_ + __i;
+  }
+  template <class _Rp>
+  constexpr iterator insert_range(const_iterator __pos, _Rp&& __r) {
+    size_t __i = __pos - __data_;
+    vector __tail(__data_ + __i, __data_ + __size_);
+    __size_ = __i;
+    append_range(std::forward<_Rp>(__r));
+    append_range(__tail);
+    return __data_ + __i;
+  }
+  template <class _It>
+    requires(!is_integral_v<_It>)
+  constexpr iterator insert(const_iterator __pos, _It __f, _It __l) {
+    return insert_range(__pos, vector(__f, __l));
+  }
+  constexpr iterator erase(const_iterator __f, const_iterator __l) {
+    size_t __i = __f - __data_, __j = __l - __data_;
+    if (__j < __size_)
+      __builtin_memmove(__data_ + __i, __data_ + __j,
+                        (__size_ - __j) * sizeof(__token));
+    __size_ -= __j - __i;
+    return __data_ + __i;
+  }
+  constexpr iterator erase(const_iterator __pos) { return erase(__pos, __pos + 1); }
+
+  // Compared token by token, natively.
+  // (consteval: comparing token arrays is an immediate operation.)
+  friend consteval bool operator==(vector const& __a, vector const& __b) {
+    return meta::__token_array(__a) == meta::__token_array(__b);
+  }
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+_LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
+
+// A sequence of tokens: a ^^{ ... } literal, or anything built from them.
+using token_sequence = vector<token>;
+
+// Appending, as the built-in token sequence operators did.
+constexpr auto operator+=(token_sequence& __a, token_sequence const& __b)
+    -> token_sequence& {
+  __a.append_range(__b);
+  return __a;
+}
+constexpr auto operator+=(token_sequence& __a, token __t) -> token_sequence& {
+  __a.push_back(__t);
+  return __a;
+}
+constexpr auto operator+(token_sequence __a, token_sequence const& __b)
+    -> token_sequence {
+  __a.append_range(__b);
+  return __a;
+}
+constexpr auto operator+(token_sequence __a, token __t) -> token_sequence {
+  __a.push_back(__t);
+  return __a;
+}
+constexpr auto operator+(token __t, token_sequence const& __b)
+    -> token_sequence {
+  token_sequence __r;
+  __r.reserve(__b.size() + 1);
+  __r.push_back(__t);
+  __r.append_range(__b);
+  return __r;
+}
+// A token against a single-token sequence: tok == ^^{ + }.
+consteval bool operator==(token __t, token_sequence const& __s) {
+  return __s.size() == 1 && __s[0] == __t;
+}
 
 namespace __range_of_infos {
 
@@ -845,12 +1163,12 @@ consteval auto u8identifier_of(info r) -> u8string_view {
 // other operand -- a keyword, literal or punctuator, or an empty or
 // multi-token sequence -- is not a constant expression; test with
 // token_kind_of(tok) == token_kind::identifier first.
-consteval auto identifier_of(token_sequence tok) -> string_view {
+consteval auto identifier_of(token tok) -> string_view {
   return __metafunction(detail::__metafn_identifier_of_token, ^^const char *,
                         tok, /*UTF8=*/false);
 }
 
-consteval auto u8identifier_of(token_sequence tok) -> u8string_view {
+consteval auto u8identifier_of(token tok) -> u8string_view {
   return __metafunction(detail::__metafn_identifier_of_token,
                         ^^const char8_t *, tok, /*UTF8=*/true);
 }
@@ -3146,16 +3464,16 @@ consteval auto u8display_string_of(info R) -> u8string_view {
 
 // helper for building up delimited lists of token sequences
 class list_builder {
-  token_sequence body = ^^{};
+  token_sequence body;
   token_sequence delim;
   bool first = true;
 
 public:
   // default to no delimiter
-  consteval explicit list_builder(token_sequence delim = ^^{ }) : delim(delim) { }
+  consteval explicit list_builder(token_sequence delim = {}) : delim(delim) { }
 
-  consteval auto operator+=(token_sequence tok) -> void {
-    if (tok != ^^{ }) {
+  consteval auto operator+=(token_sequence const& tok) -> void {
+    if (!tok.empty()) {
       if (not first) {
         body += delim;
       }
@@ -3167,16 +3485,21 @@ public:
   consteval operator token_sequence() const {
     return body;
   }
+  // Interpolated as raw tokens: \(builder). (Directly to the compiler's
+  // token array, which via token_sequence would be two conversions.)
+  consteval operator __token_array() const {
+    return body;
+  }
 };
 
 // A single identifier token assembled from the arguments (strings and
 // integers), the identifier sibling of str_lit(). Compare against a token
 // directly: ts[0] == id("a").
 template <class... Ts>
-consteval auto id(Ts const&...) -> token_sequence;
+consteval auto id(Ts const&...) -> token;
 
 template <class... Ts>
-consteval auto str_lit(Ts const&...) -> token_sequence;
+consteval auto str_lit(Ts const&...) -> token;
 
 // Tokenize strings into a token_sequence.
 // Arguments are concatenated and then lexed as C++ source code.
@@ -3187,6 +3510,7 @@ consteval auto tokenize(Ts const&...) -> token_sequence;
 // Convert a token_sequence back into a string.
 // Preserves whitespace between tokens.
 consteval auto stringize(token_sequence) -> char const*;
+consteval auto stringize(token) -> char const*;
 
 // Queue token injection into the current or specified namespace.
 // Accepts any type convertible to token_sequence.
@@ -3233,11 +3557,11 @@ enum class token_kind {
 // Token classification. To match a specific identifier, compare the token
 // against id(...) directly: tok == id("name"); to read its spelling, use
 // identifier_of(tok).
-consteval auto token_kind_of(token_sequence tok) -> token_kind {
+consteval auto token_kind_of(token tok) -> token_kind {
   return token_kind(__metafunction(detail::__metafn_token_kind_of, tok));
 }
 
-consteval auto operator_of(token_sequence tok) -> operators {
+consteval auto operator_of(token tok) -> operators {
   return operators(__metafunction(detail::__metafn_operator_of_token, tok));
 }
 
@@ -3265,7 +3589,7 @@ enum class punctuator {
 };
 
 // The punctuator a single token is.
-consteval auto punctuator_of(token_sequence tok) -> punctuator {
+consteval auto punctuator_of(token tok) -> punctuator {
   return punctuator(__metafunction(detail::__metafn_punctuator_of, tok));
 }
 
@@ -3309,7 +3633,8 @@ consteval auto is_constant_expression(info r) -> bool {
 //   if (auto r = test_expression(^^{ (\(e).begin()) }))
 //     return ^^{ \(*r) };
 consteval auto test_expression(token_sequence tokens) -> optional<info> {
-  info __r = __metafunction(detail::__metafn_test_expression, tokens);
+  info __r = __metafunction(detail::__metafn_test_expression,
+                            __token_array(tokens));
   if (__r == info{})
     return nullopt;
   return __r;
@@ -3395,7 +3720,8 @@ struct clone_naming {
 //
 // Reusing the description in another class creates fresh declarations.
 consteval auto declaration_of(info fn, clone_naming naming = {}) -> info {
-  return __metafunction(detail::__metafn_declaration_of, fn, naming.name,
+  return __metafunction(detail::__metafn_declaration_of, fn,
+                        __token_array(naming.name),
                         naming.template_parameter_prefix.size(),
                         naming.template_parameter_prefix.data(),
                         naming.parameter_prefix.size(),
@@ -3536,129 +3862,14 @@ consteval auto argument_list_for(info d, argument_list_options opts = {})
 consteval auto forwarding_call_for(info d, token_sequence receiver,
                                    argument_list_options opts = {})
     -> token_sequence {
-  return __metafunction(detail::__metafn_forwarding_call_for, d, receiver,
-                        opts.forward);
+  return __metafunction(detail::__metafn_forwarding_call_for, d,
+                        __token_array(receiver), opts.forward);
 }
 
-// A token_sequence is itself an iterable, indexable range: begin/end and
-// size below are found by ADL and token_sequence is directly iterable:
-//
-//   token_sequence ts = ^^{ a + b };
-//   for (token_sequence tok : ts) ...   // each token, as a single-token
-//                                       // sequence
-//   ts[0]                               // ^^{ a }
-//   size(ts)                            // 3
-//
-// An out-of-range ts[i] is not a constant expression (diagnosed with the
-// index and the sequence's size).
-//
-struct token_iterator {
-  using value_type = token_sequence;
-  using difference_type = ptrdiff_t;
-  using iterator_concept = random_access_iterator_tag;
-
-  token_sequence __seq_ = ^^{ };
-  size_t __index_ = 0;
-
-  consteval auto operator*() const -> token_sequence {
-    return __metafunction(detail::__metafn_get_ith_token, __seq_, __index_);
-  }
-  consteval auto operator[](difference_type __n) const -> token_sequence {
-    return __metafunction(detail::__metafn_get_ith_token, __seq_,
-                          __index_ + __n);
-  }
-  consteval auto operator++() -> token_iterator& {
-    ++__index_;
-    return *this;
-  }
-  consteval auto operator++(int) -> token_iterator {
-    auto __tmp = *this;
-    ++__index_;
-    return __tmp;
-  }
-  consteval auto operator--() -> token_iterator& {
-    --__index_;
-    return *this;
-  }
-  consteval auto operator--(int) -> token_iterator {
-    auto __tmp = *this;
-    --__index_;
-    return __tmp;
-  }
-  consteval auto operator+=(difference_type __n) -> token_iterator& {
-    __index_ += __n;
-    return *this;
-  }
-  consteval auto operator-=(difference_type __n) -> token_iterator& {
-    __index_ -= __n;
-    return *this;
-  }
-  friend consteval auto operator+(token_iterator __it, difference_type __n)
-      -> token_iterator {
-    __it += __n;
-    return __it;
-  }
-  friend consteval auto operator+(difference_type __n, token_iterator __it)
-      -> token_iterator {
-    __it += __n;
-    return __it;
-  }
-  friend consteval auto operator-(token_iterator __it, difference_type __n)
-      -> token_iterator {
-    __it -= __n;
-    return __it;
-  }
-  friend consteval auto operator-(token_iterator __lhs, token_iterator __rhs)
-      -> difference_type {
-    return static_cast<difference_type>(__lhs.__index_) -
-           static_cast<difference_type>(__rhs.__index_);
-  }
-  friend consteval auto operator==(token_iterator __lhs, token_iterator __rhs)
-      -> bool {
-    return __lhs.__index_ == __rhs.__index_;
-  }
-  friend consteval auto operator<=>(token_iterator __lhs, token_iterator __rhs)
-      -> strong_ordering {
-    return __lhs.__index_ <=> __rhs.__index_;
-  }
-};
-
-consteval auto size(token_sequence __ts) -> size_t {
-  return __metafunction(detail::__metafn_token_count, __ts);
-}
-
-consteval auto empty(token_sequence __ts) -> bool {
-  return size(__ts) == 0;
-}
-
-consteval auto begin(token_sequence __ts) -> token_iterator {
-  return {__ts, 0};
-}
-
-consteval auto end(token_sequence __ts) -> token_iterator {
-  return {__ts, size(__ts)};
-}
-
-_LIBCPP_END_NAMESPACE_REFLECTION_V2
-
-// A token_sequence's storage is owned by the compilation itself, so
-// iterators obtained from an rvalue sequence never dangle.
-template <>
-inline constexpr bool std::ranges::enable_borrowed_range<
-    std::meta::token_sequence> = true;
-
-_LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
-
-// Each token of the sequence as its own single-token sequence. Predates
-// token_sequence being directly iterable (above); prefer iterating or
-// indexing the sequence itself.
-consteval auto tokens_of(token_sequence tokens) -> vector<token_sequence> {
-  vector<token_sequence> result;
-  size_t n = size(tokens);
-  result.reserve(n);
-  for (token_sequence tok : tokens)
-    result.push_back(tok);
-  return result;
+// Each token of the sequence. (A token_sequence is a vector of tokens, so
+// this is the sequence itself; it predates that.)
+consteval auto tokens_of(token_sequence tokens) -> token_sequence {
+  return tokens;
 }
 
 _LIBCPP_END_NAMESPACE_REFLECTION_V2

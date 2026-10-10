@@ -16434,9 +16434,23 @@ public:
 
   /// A token sequence written in scope \p S. Identifiers that name template
   /// parameters there are recorded (see TokenSequenceParamBinding).
+  /// A token literal, ^^{ ... }. \p AsValue: as a std::meta::token_sequence
+  /// (see BuildTokenSequenceValue); a raw macro argument is not.
   ExprResult ActOnCXXTokenSequenceReflection(Scope *S, SourceLocation OpLoc,
                                              SourceRange OperandRange,
-                                             ArrayRef<Token> Tokens);
+                                             ArrayRef<Token> Tokens,
+                                             bool AsValue = true);
+  /// std::meta::token_sequence (std::vector<std::meta::token>), once <meta>
+  /// has declared it; null before (in particular, inside <meta> itself,
+  /// where a token literal is the compiler's token array).
+  QualType getStdMetaTokenSequenceType();
+  QualType StdMetaTokenSequenceTy;
+  /// \p E, of the compiler's token array type, as a std::meta::token_sequence
+  /// (constructed from it), or \p E itself before <meta> declares one.
+  ExprResult BuildTokenSequenceValue(Expr *E);
+  /// \p E converted to the compiler's token array type (from a
+  /// std::meta::token_sequence, by its conversion function), or \p E itself.
+  Expr *ConvertToTokenArray(Expr *E);
 
   ExprResult ActOnTokenSequenceInterpolation(Expr *E);
 

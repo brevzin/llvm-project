@@ -1371,7 +1371,7 @@ public:
   CanQualType BFloat16Ty;
   CanQualType Float16Ty; // C11 extension ISO/IEC TS 18661-3
   CanQualType VoidPtrTy, NullPtrTy;
-  CanQualType MetaInfoTy, TokenSequenceTy;
+  CanQualType MetaInfoTy, TokenSequenceTy, MetaTokenTy;
   CanQualType NoReturnTy; // std::noreturn_t (P3549)
   CanQualType DependentTy, OverloadTy, BoundMemberTy, UnresolvedTemplateTy,
       UnknownAnyTy;

@@ -786,11 +786,15 @@ public:
   /// macro invocation (e.g. the function it appears in), so that reflection
   /// queries such as std::meta::current_function() resolve against the call
   /// site rather than the macro definition.
+  /// \p ParamInits, where non-null, initializes the parameter (an object of
+  /// its declared type, e.g. a raw parameter's std::meta::token_sequence)
+  /// within the body's evaluation, instead of ParamValues[I].
   static bool EvaluateMacroBody(const FunctionDecl *Macro,
                                 ArrayRef<APValue> ParamValues, APValue &Result,
                                 const ASTContext &Ctx,
                                 SmallVectorImpl<PartialDiagnosticAt> &Diags,
-                                Decl *InvocationContext = nullptr);
+                                Decl *InvocationContext = nullptr,
+                                ArrayRef<const Expr *> ParamInits = {});
 
   /// EvaluateWithSubstitution - Evaluate an expression as if from the context
   /// of a call to the given function with the given arguments, inside an

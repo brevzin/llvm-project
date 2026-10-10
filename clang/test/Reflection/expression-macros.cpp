@@ -866,13 +866,14 @@ static_assert(c == 4);
 
 namespace N20 {
 
-// In the body a parameter is a prvalue naming what was bound to it, and its
-// classification says so. Contexts that classify the operand (reference
-// binding -- which is also what range-for's '__range' is -- and a
-// parenthesized decltype) therefore work on a parameter directly. (Binding
-// a reference to a parameter used to assert in ExprClassification.)
+// In the body an expression parameter is a prvalue naming the reflection
+// bound to it, and its classification says so; a raw parameter is an
+// ordinary parameter, an lvalue naming one object. Contexts that classify the
+// operand (reference binding -- which is also what range-for's '__range' is
+// -- and a parenthesized decltype) therefore work on a parameter directly.
+// (Binding a reference to a parameter used to assert in ExprClassification.)
 __macro first_plus(token_sequence body, int x) {
-  static_assert(__is_same(decltype((body)), token_sequence));
+  static_assert(__is_same(decltype((body)), token_sequence&));
   static_assert(__is_same(decltype((x)), decltype(^^int)));
   auto&& r = body;
   auto const& cx = x;

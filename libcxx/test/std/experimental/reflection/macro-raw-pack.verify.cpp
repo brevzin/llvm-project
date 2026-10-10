@@ -25,5 +25,5 @@ struct S {};
 __macro operator+(S const&, token_sequence... rhs); // expected-error {{an operator expression macro cannot have a token sequence parameter}}
 
 // Only a pack of token sequences themselves, in a macro.
-__macro by_reference(token_sequence&... args); // expected-error {{type 'token_sequence &' (aka 'meta::token_sequence &') of function parameter pack does not contain any unexpanded parameter packs}}
-void not_a_macro(token_sequence... args); // expected-error {{type 'token_sequence' (aka 'meta::token_sequence') of function parameter pack does not contain any unexpanded parameter packs}}
+__macro by_reference(token_sequence&... args); // expected-error {{type 'token_sequence &' (aka 'vector<meta::token> &') of function parameter pack does not contain any unexpanded parameter packs}}
+void not_a_macro(token_sequence... args); // expected-error {{type 'token_sequence' (aka 'vector<meta::token>') of function parameter pack does not contain any unexpanded parameter packs}}

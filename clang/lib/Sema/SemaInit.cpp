@@ -5936,7 +5936,8 @@ static void TryDefaultInitialization(Sema &S,
     return;
   }
 
-  if (DestType->isReflectionType() || DestType->isTokenSequenceType()) {
+  if (DestType->isReflectionType() || DestType->isTokenSequenceType() ||
+      DestType->isMetaTokenType()) {
     Sequence.AddZeroInitializationStep(Entity.getType());
     return;
   }

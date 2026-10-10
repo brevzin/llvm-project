@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20 || c++23
-// ADDITIONAL_COMPILE_FLAGS: -freflection
+// ADDITIONAL_COMPILE_FLAGS: -freflection -std=c++2d
 
 // Test interpolating base specifier reflections into token sequences.
 // This used to crash in CodeGen when trying to emit a TokenSequence APValue.

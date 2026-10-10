@@ -11,28 +11,26 @@
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20 || c++23
 // ADDITIONAL_COMPILE_FLAGS: -freflection -std=c++2d
 
-// Indexing a token_sequence out of range is not a constant expression, and
-// the diagnostic names the index and the sequence's size.
+// Indexing a token_sequence (a vector of tokens) out of range is not a
+// constant expression: it reads outside the vector's allocation.
 
 #include <meta>
 
 constexpr std::meta::token_sequence ts = ^^{ a + b };
 
-constexpr std::meta::token_sequence past_end = ts[3];
+constexpr std::meta::token past_end = ts[3];
 // expected-error@-1 {{constexpr variable 'past_end' must be initialized by a constant expression}}
-// expected-note@-2 {{token index 3 is out of range for a token sequence of 3 tokens}}
 
-constexpr std::meta::token_sequence negative = ts[-1];
+constexpr std::meta::token negative = ts[-1];
 // expected-error@-1 {{constexpr variable 'negative' must be initialized by a constant expression}}
-// expected-note@-2 {{token index -1 is out of range for a token sequence of 3 tokens}}
 
-constexpr std::meta::token_sequence from_empty = (^^{ })[0];
+constexpr std::meta::token from_empty = (^^{ })[0];
 // expected-error@-1 {{constexpr variable 'from_empty' must be initialized by a constant expression}}
-// expected-note@-2 {{token index 0 is out of range for a token sequence of 0 tokens}}
 
-// An indexed token is a prvalue, so it is not assignable -- diagnosed as
-// such, not misclassified.
-consteval void assign() {
+// An element is an lvalue: a token_sequence can be modified in place.
+consteval bool assign() {
   auto seq = ^^{ a b };
-  seq[0] = seq[1];  // expected-error {{expression is not assignable}}
+  seq[0] = seq[1];
+  return seq == ^^{ b b };
 }
+static_assert(assign());

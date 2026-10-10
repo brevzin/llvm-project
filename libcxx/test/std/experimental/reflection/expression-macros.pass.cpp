@@ -260,17 +260,17 @@ static_assert([] {
 // multi-token sequences are `unknown`.
 static_assert([] {
   using std::meta::token_kind;
-  return token_kind_of(^^{ int }) == token_kind::keyword &&
-         token_kind_of(^^{ , }) == token_kind::punctuator &&
-         token_kind_of(^^{ or }) == token_kind::punctuator &&
-         token_kind_of(^^{ a b }) == token_kind::unknown &&
-         token_kind_of(^^{}) == token_kind::unknown;
+  return token_kind_of((^^{ int })[0]) == token_kind::keyword &&
+         token_kind_of((^^{ , })[0]) == token_kind::punctuator &&
+         token_kind_of((^^{ or })[0]) == token_kind::punctuator &&
+         token_kind_of(std::meta::token{}) == token_kind::unknown &&
+         token_kind_of(std::meta::token{}) == token_kind::unknown;
 }());
 
 // Alternative tokens keep their spelling, so token identity distinguishes them
 // even though both are punctuators spelling the same operator.
 static_assert(^^{ or } != ^^{ || });
-static_assert(operator_of(^^{ or }) == operator_of(^^{ || }));
+static_assert(operator_of((^^{ or })[0]) == operator_of((^^{ || })[0]));
 
 // ------------------------------------------------------------------ λ! -----
 
@@ -284,7 +284,7 @@ __macro λ(std::meta::token_sequence body) {
   // The parameter is itself the range of its tokens; only identifiers can be
   // placeholders, and identifier_of reads one's spelling.
   int arity = 0;
-  for (std::meta::token_sequence tok : body)
+  for (std::meta::token tok : body)
     if (token_kind_of(tok) == std::meta::token_kind::identifier)
       if (auto n = placeholder_index(identifier_of(tok)))
         arity = std::max(arity, *n);

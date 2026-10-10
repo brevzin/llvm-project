@@ -625,6 +625,10 @@ namespace {
 
     /// Allocate storage for a parameter of a function call made in this frame.
     APValue &createParam(CallRef Args, const ParmVarDecl *PVD, LValue &LV);
+    /// A macro body's parameter slot, of type \p SlotTy (what the parameter
+    /// names in the body) rather than the parameter's declared type.
+    APValue &createMacroParam(CallRef Args, const ParmVarDecl *PVD,
+                              QualType SlotTy);
 
     void describe(llvm::raw_ostream &OS) const override;
 
@@ -2063,6 +2067,13 @@ APValue &CallStackFrame::createTemporary(const KeyT *Key, QualType T,
 }
 
 /// Allocate storage for a parameter of a function call made in this frame.
+APValue &CallStackFrame::createMacroParam(CallRef Args,
+                                          const ParmVarDecl *PVD,
+                                          QualType SlotTy) {
+  APValue::LValueBase Base(PVD, Args.CallIndex, Args.Version);
+  return createLocal(Base, PVD, SlotTy, ScopeKind::Call);
+}
+
 APValue &CallStackFrame::createParam(CallRef Args, const ParmVarDecl *PVD,
                                      LValue &LV) {
   assert(Args.CallIndex == Index && "creating parameter in wrong frame");
@@ -10088,6 +10099,72 @@ bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
         return false;
       }
     }
+  }
+
+  // EXPERIMENTAL: the token-array metafunctions, done natively on the array,
+  // as __builtin_memcpy is (one element at a time, but without interpreting
+  // anything).
+  if (Metafn && Metafn->getTokenArrayOp() != Metafunction::TokenArrayOp::None) {
+    // The arguments are as written (often lvalues, e.g. a parameter); read
+    // their values. (Not via Evaluator above: it insists on a constant
+    // expression, which a pointer into a transient allocation is not.)
+    auto ReadArg = [&](const Expr *Arg, APValue &V) {
+      if (!::Evaluate(V, Info, Arg))
+        return false;
+      if (Arg->isGLValue()) {
+        LValue LV;
+        LV.setFrom(Info.Ctx, V);
+        return handleLValueToRValueConversion(Info, Arg, Arg->getType(), LV, V);
+      }
+      return true;
+    };
+    APValue PtrVal;
+    if (!ReadArg(Args[0], PtrVal))
+      return false;
+    LValue Ptr;
+    Ptr.setFrom(Info.Ctx, PtrVal);
+    QualType ElemTy = Args[0]->getType()->getPointeeType().getUnqualifiedType();
+
+    if (Metafn->getTokenArrayOp() == Metafunction::TokenArrayOp::Join) {
+      // tokens_join(const token_sequence* p, size_t n): their concatenation.
+      APValue NVal;
+      if (!ReadArg(Args[1], NVal))
+        return false;
+      APSInt N = NVal.getInt();
+      SmallVector<Token, 64> Toks;
+      for (uint64_t I = 0, Count = N.getZExtValue(); I != Count; ++I) {
+        if (I && !HandleLValueArrayAdjustment(Info, E, Ptr, ElemTy, 1))
+          return false;
+        APValue V;
+        if (!handleLValueToRValueConversion(Info, E, ElemTy, Ptr, V))
+          return false;
+        if (!V.isTokenSequence())
+          return Error(E);
+        TokenSequenceData TSD = V.getTokenSequence();
+        Toks.append(TSD.begin(), TSD.end());
+      }
+      return DerivedSuccess(APValue(CreateTokenSequenceData(Info.Ctx, Toks)),
+                            E);
+    }
+
+    // tokens_fill(token_sequence* p, token_sequence ts): write each token of
+    // ts, as a single-token sequence, to p[0], p[1], ...; the count written.
+    APValue TS;
+    if (!ReadArg(Args[1], TS) || !TS.isTokenSequence())
+      return false;
+    TokenSequenceData TSD = TS.getTokenSequence();
+    for (size_t I = 0; I != TSD.size(); ++I) {
+      if (I && !HandleLValueArrayAdjustment(Info, E, Ptr, ElemTy, 1))
+        return false;
+      Token One[] = {TSD[I]};
+      APValue Elem(CreateTokenSequenceData(Info.Ctx, One));
+      if (!handleAssignment(Info, E, Ptr, ElemTy, Elem))
+        return false;
+    }
+    llvm::APSInt Count(llvm::APInt(Info.Ctx.getTypeSize(E->getType()),
+                                   TSD.size()),
+                       /*isUnsigned=*/true);
+    return DerivedSuccess(APValue(Count), E);
   }
 
   // Evaluate the metafunction.
@@ -20109,7 +20186,8 @@ EvaluateComparisonBinaryOperator(EvalInfo &Info, const BinaryOperator *E,
   }
 
   if ((LHSTy->isReflectionType() && RHSTy->isReflectionType()) ||
-      (LHSTy->isTokenSequenceType() && RHSTy->isTokenSequenceType())) {
+      ((LHSTy->isTokenSequenceType() || LHSTy->isMetaTokenType()) &&
+       (RHSTy->isTokenSequenceType() || RHSTy->isMetaTokenType()))) {
     APValue LHSValue, RHSValue;
     llvm::FoldingSetNodeID LID, RID;
     if (!Evaluate(LHSValue, Info, E->getLHS()))
@@ -22746,7 +22824,7 @@ public:
   }
 
   bool ZeroInitialization(const Expr *E) {
-    if (E->getType()->isTokenSequenceType()) {
+    if (E->getType()->isTokenSequenceType() || E->getType()->isMetaTokenType()) {
       Result = APValue(CreateEmptyTokenSequenceData(Info.Ctx));
     } else {
       // Zero-init for info is the null reflection.
@@ -22862,8 +22940,8 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
           // Evaluate the expression in the current constexpr context.
           APValue Val;
           QualType ExprTy = SubExpr->getType();
-          if (ExprTy->isTokenSequenceType()) {
-            // Token sequence interpolation: splice tokens inline.
+          if (ExprTy->isTokenSequenceType() || ExprTy->isMetaTokenType()) {
+            // Token sequence (or token) interpolation: splice tokens inline.
             if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
               return false;
             assert(Val.isTokenSequence());
@@ -23372,7 +23450,8 @@ bool ReflectionEvaluator::VisitArraySubscriptExpr(
 static bool EvaluateReflection(const Expr *E, APValue &Result, EvalInfo &Info) {
   assert(E->isPRValue() &&
          (E->getType()->isReflectionType() ||
-          E->getType()->isTokenSequenceType()));
+          E->getType()->isTokenSequenceType() ||
+          E->getType()->isMetaTokenType()));
   return ReflectionEvaluator(Info, Result).Visit(E);
 }
 
@@ -23399,7 +23478,8 @@ static bool Evaluate(APValue &Result, EvalInfo &Info, const Expr *E) {
   } else if (T->isIntegralOrEnumerationType()) {
     if (!IntExprEvaluator(Info, Result).Visit(E))
       return false;
-  } else if (T->isReflectionType() || T->isTokenSequenceType()) {
+  } else if (T->isReflectionType() || T->isTokenSequenceType() ||
+             T->isMetaTokenType()) {
     if (!EvaluateReflection(E, Result, Info))
       return false;
   } else if (T->hasPointerRepresentation()) {
@@ -25016,7 +25096,8 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
                              ArrayRef<APValue> ParamValues, APValue &Result,
                              const ASTContext &Ctx,
                              SmallVectorImpl<PartialDiagnosticAt> &Diags,
-                             Decl *InvocationContext) {
+                             Decl *InvocationContext,
+                             ArrayRef<const Expr *> ParamInits) {
   Expr::EvalStatus Status;
   Status.Diag = &Diags;
   EvalInfo Info(Ctx, Status, EvaluationMode::ConstantExpression);
@@ -25032,26 +25113,49 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
     if (V.isReflectedExpression() &&
         V.getReflectedExpression()->isValueDependent())
       Info.MacroArgsValueDependent = true;
+  // As for a call: the parameters (a raw parameter's token_sequence is an
+  // object) are destroyed at the end of it.
+  CallScopeRAII CallScope(Info);
   CallRef Call = Info.CurrentCall->createCall(Macro);
   for (unsigned I = 0, N = std::min<unsigned>(ParamValues.size(),
                                               Macro->getNumParams());
        I != N; ++I) {
-    LValue LV;
-    Info.CurrentCall->createParam(Call, Macro->getParamDecl(I), LV) =
-        ParamValues[I];
+    const ParmVarDecl *PVD = Macro->getParamDecl(I);
+    if (I < ParamInits.size() && ParamInits[I]) {
+      // A real object of the declared type (a raw parameter's
+      // token_sequence), constructed here, as an argument would be, and
+      // destroyed at the end of the call: every mention of the parameter in
+      // the body is this one object.
+      LValue LV;
+      APValue &Slot = Info.CurrentCall->createParam(Call, PVD, LV);
+      FullExpressionRAII Scope(Info);
+      if (!EvaluateInPlace(Slot, Info, LV, ParamInits[I]) || !Scope.destroy())
+        return false;
+      continue;
+    }
+    // Otherwise the slot holds what the parameter names in the body -- a
+    // reflection, or the compiler's token array -- with that type.
+    QualType SlotTy = ParamValues[I].isTokenSequence() ? Ctx.TokenSequenceTy
+                                                       : Ctx.MetaInfoTy;
+    Info.CurrentCall->createMacroParam(Call, PVD, SlotTy) = ParamValues[I];
   }
 
-  CallStackFrame Frame(Info, Macro->getSourceRange(), Macro, /*This=*/nullptr,
-                       /*CallExpr=*/nullptr, Call);
-  StmtResult Ret = {Result, nullptr};
-  Info.CurrentCall->FunctionReturnValue = &Result;
-  EvalStmtResult ESR = EvaluateStmt(Ret, Info, Macro->getBody());
+  EvalStmtResult ESR;
+  {
+    CallStackFrame Frame(Info, Macro->getSourceRange(), Macro,
+                         /*This=*/nullptr, /*CallExpr=*/nullptr, Call);
+    StmtResult Ret = {Result, nullptr};
+    Info.CurrentCall->FunctionReturnValue = &Result;
+    ESR = EvaluateStmt(Ret, Info, Macro->getBody());
+  }
   if (ESR == ESR_Succeeded) {
     Info.FFDiag(Macro->getEndLoc(), diag::note_constexpr_no_return);
     return false;
   }
+  if (ESR != ESR_Returned || !CallScope.destroy())
+    return false;
   Info.discardCleanups();
-  return ESR == ESR_Returned && !Info.EvalStatus.HasSideEffects;
+  return !Info.EvalStatus.HasSideEffects;
 }
 
 bool Expr::isPotentialConstantExpr(const FunctionDecl *FD,

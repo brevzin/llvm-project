@@ -8004,7 +8004,7 @@ void Parser::ParseParameterDeclarationClause(
           ParmDeclarator.getNumTypeObjects() == 0 &&
           DS.getTypeSpecType() == DeclSpec::TST_typename) {
         QualType T = Actions.GetTypeFromParser(DS.getRepAsType());
-        if (!T.isNull() && !T.hasQualifiers() && T->isTokenSequenceType()) {
+        if (!T.isNull() && !T.hasQualifiers() && T->isTokenSequenceLikeType()) {
           SourceLocation Loc = DS.getTypeSpecTypeLoc();
           const char *PrevSpec = nullptr;
           unsigned DiagID = 0;

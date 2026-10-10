@@ -1146,6 +1146,9 @@ enum PredefinedTypeIDs {
   /// \brief The 'std::noreturn_t' type (P3549)
   PREDEF_TYPE_NORETURN_ID = 77,
 
+  /// \brief The 'std::meta::token' type
+  PREDEF_TYPE_META_TOKEN_ID = 78,
+
 /// OpenCL image types with auto numeration
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
   PREDEF_TYPE_##Id##_ID,
@@ -1183,7 +1186,7 @@ enum PredefinedTypeIDs {
 ///
 /// Type IDs for non-predefined types will start at
 /// NUM_PREDEF_TYPE_IDs.
-const unsigned NUM_PREDEF_TYPE_IDS = 532;
+const unsigned NUM_PREDEF_TYPE_IDS = 533;
 
 // Ensure we do not overrun the predefined types we reserved
 // in the enum PredefinedTypeIDs above.

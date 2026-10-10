@@ -3469,6 +3469,12 @@ void CXXNameMangler::mangleType(const BuiltinType *T) {
     Out << "Dm";
     break;
   }
+  case BuiltinType::MetaToken: {
+    // A vendor extended type (consteval-only, so in practice only in the
+    // names of compile-time entities).
+    Out << "u5token";
+    break;
+  }
   case BuiltinType::NoReturn: {
     // A vendor extended type until the ABI assigns one.
     Out << "u10noreturn_t";

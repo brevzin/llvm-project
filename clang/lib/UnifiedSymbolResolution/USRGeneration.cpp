@@ -782,6 +782,9 @@ void USRGenerator::VisitType(QualType T) {
       case BuiltinType::TokenSequence:
         Out << 't';
         break;
+      case BuiltinType::MetaToken:
+        Out << "@BT@token";
+        break;
       case BuiltinType::NoReturn:
         Out << "@BT@noreturn_t";
         break;

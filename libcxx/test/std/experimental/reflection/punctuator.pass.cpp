@@ -20,6 +20,7 @@
 #include <vector>
 
 using std::meta::punctuator;
+using std::meta::token;
 using std::meta::token_sequence;
 
 consteval bool round_trips() {
@@ -28,7 +29,7 @@ consteval bool round_trips() {
     token_sequence t = ^^{ \(p) };
     if (tokens_of(t).size() != 1)
       return false;
-    if (punctuator_of(t) != p)
+    if (punctuator_of(t[0]) != p)
       return false;
     if (std::string_view(stringize(t)) != symbol_of(p))
       return false;
@@ -41,13 +42,13 @@ static_assert(round_trips());
 static_assert(enumerators_of(^^std::meta::punctuator).size() == 55);
 
 // Tokens from source.
-static_assert(punctuator_of(^^{ ; }) == punctuator::semicolon);
-static_assert(punctuator_of(^^{ :: }) == punctuator::colon_colon);
-static_assert(punctuator_of(^^{ ... }) == punctuator::ellipsis);
-static_assert(punctuator_of(^^{ ->* }) == punctuator::arrow_star);
-static_assert(punctuator_of(^^{ <=> }) == punctuator::spaceship);
-static_assert(punctuator_of(^^{ ^^ }) == punctuator::caret_caret);
-static_assert(punctuator_of(^^{ ## }) == punctuator::hash_hash);
+static_assert(punctuator_of((^^{ ; })[0]) == punctuator::semicolon);
+static_assert(punctuator_of((^^{ :: })[0]) == punctuator::colon_colon);
+static_assert(punctuator_of((^^{ ... })[0]) == punctuator::ellipsis);
+static_assert(punctuator_of((^^{ ->* })[0]) == punctuator::arrow_star);
+static_assert(punctuator_of((^^{ <=> })[0]) == punctuator::spaceship);
+static_assert(punctuator_of((^^{ ^^ })[0]) == punctuator::caret_caret);
+static_assert(punctuator_of((^^{ ## })[0]) == punctuator::hash_hash);
 static_assert(punctuator_of(tokens_of(^^{ [: :] })[0]) == punctuator::left_splice);
 static_assert(punctuator_of(tokens_of(^^{ [: :] })[1]) == punctuator::right_splice);
 static_assert(punctuator_of(tokens_of(^^{ { } })[0]) == punctuator::left_brace);
@@ -56,9 +57,9 @@ static_assert(punctuator_of(tokens_of(^^{ { } })[1]) == punctuator::right_brace)
 // A digraph or alternative token is its primary spelling's punctuator.
 static_assert(punctuator_of(tokens_of(^^{ <% %> })[0]) == punctuator::left_brace);
 static_assert(punctuator_of(tokens_of(^^{ <% %> })[1]) == punctuator::right_brace);
-static_assert(punctuator_of(^^{ and }) == punctuator::ampersand_ampersand);
-static_assert(punctuator_of(^^{ bitor }) == punctuator::pipe);
-static_assert(punctuator_of(^^{ not_eq }) == punctuator::exclamation_equals);
+static_assert(punctuator_of((^^{ and })[0]) == punctuator::ampersand_ampersand);
+static_assert(punctuator_of((^^{ bitor })[0]) == punctuator::pipe);
+static_assert(punctuator_of((^^{ not_eq })[0]) == punctuator::exclamation_equals);
 
 // A lone brace, which a token literal cannot spell.
 static_assert(^^{ \(punctuator::left_brace) } == tokens_of(^^{ { } })[0]);
@@ -101,7 +102,7 @@ static_assert(u8symbol_of(std::meta::op_caret_equals) == u8"^=");
 consteval auto split(token_sequence ts) -> std::vector<token_sequence> {
   std::vector<token_sequence> out(1, ^^{});
   int depth = 0;
-  for (token_sequence t : tokens_of(ts)) {
+  for (token t : tokens_of(ts)) {
     if (token_kind_of(t) == std::meta::token_kind::punctuator) {
       switch (punctuator_of(t)) {
       case punctuator::left_paren:

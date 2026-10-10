@@ -7172,9 +7172,7 @@ bool Sema::SubstAndEvaluateMacroInvocation(
   // and never reaches the enclosing declaration, so it is not a
   // consteval-only value escaping into it.
   auto ForgetRawArgs = [&](ArrayRef<Expr *> Args) {
-    for (Expr *Arg : Args)
-      if (Arg->getType()->isTokenSequenceType())
-        ExprEvalContexts.back().ConstevalOnly.erase(Arg);
+    ForgetConsumedMacroArguments(Args);
   };
 
   // The explicit template arguments of 'name!<Args>(...)', if any: the

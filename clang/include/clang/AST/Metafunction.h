@@ -34,6 +34,7 @@ public:
     MFRK_bool,
     MFRK_metaInfo,
     MFRK_tokenSequence,
+    MFRK_token,
     MFRK_sizeT,
     MFRK_sourceLoc,
     MFRK_spliceFromArg,
@@ -88,6 +89,13 @@ public:
   // spelling, location, type, or operator structure), never what it
   // evaluates to -- so it can answer for a value-dependent expression.
   bool isSafeOnValueDependentExpressions() const;
+
+  // EXPERIMENTAL (benchmarking a vector<token> model): metafunctions the
+  // constant evaluator implements natively on an array of token sequences,
+  // as it does __builtin_memcpy -- reading the array (Join) or writing a
+  // token sequence's tokens into it (Fill).
+  enum class TokenArrayOp { None, Join, Fill };
+  TokenArrayOp getTokenArrayOp() const;
 
   unsigned getMinArgs() const {
     return MinArgs;

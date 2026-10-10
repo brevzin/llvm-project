@@ -1111,12 +1111,43 @@ static void collectTokenSequenceParamBindings(
 
 ExprResult Sema::ActOnCXXTokenSequenceReflection(Scope *S, SourceLocation OpLoc,
                                                  SourceRange OperandRange,
-                                                 ArrayRef<Token> Tokens) {
+                                                 ArrayRef<Token> Tokens,
+                                                 bool AsValue) {
   TokenSequenceData TSD = CreateTokenSequenceData(Context, Tokens);
   SmallVector<TokenSequenceParamBinding, 4> Bindings;
   collectTokenSequenceParamBindings(*this, S, Tokens, Bindings);
-  return CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD,
-                                      Bindings);
+  Expr *E = CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD,
+                                         Bindings);
+  return AsValue ? BuildTokenSequenceValue(E) : E;
+}
+
+QualType Sema::getStdMetaTokenSequenceType() {
+  if (!StdMetaTokenSequenceTy.isNull())
+    return StdMetaTokenSequenceTy;
+  NamespaceDecl *Meta = lookupStdMetaNamespace();
+  if (!Meta)
+    return QualType();
+  LookupResult R(*this, &PP.getIdentifierTable().get("token_sequence"),
+                 SourceLocation(), LookupOrdinaryName);
+  R.suppressDiagnostics();
+  if (!LookupQualifiedName(R, Meta) || !R.isSingleResult())
+    return QualType();
+  auto *TND = dyn_cast<TypedefNameDecl>(R.getFoundDecl());
+  if (!TND || !TND->getUnderlyingType()->isStdMetaTokenSequenceType())
+    return QualType();
+  StdMetaTokenSequenceTy = Context.getTypeDeclType(TND);
+  return StdMetaTokenSequenceTy;
+}
+
+ExprResult Sema::BuildTokenSequenceValue(Expr *E) {
+  QualType T = getStdMetaTokenSequenceType();
+  if (T.isNull() || RequireCompleteType(E->getBeginLoc(), T,
+                                        diag::err_incomplete_type))
+    return E;
+  TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(T, E->getBeginLoc());
+  return BuildCXXTypeConstructExpr(TSI, E->getBeginLoc(), MultiExprArg(E),
+                                   E->getEndLoc(),
+                                   /*ListInitialization=*/false);
 }
 
 enum class TokenOpTarget { MetaInfo, TokenSequence };
@@ -1147,6 +1178,10 @@ static Expr *TryConvertTo(Sema &S, Expr *E, TokenOpTarget Target) {
   }
 
   return E;
+}
+
+Expr *Sema::ConvertToTokenArray(Expr *E) {
+  return TryConvertTo(*this, E, TokenOpTarget::TokenSequence);
 }
 
 // Try to convert to token_sequence first; if that fails, try meta::info.
@@ -1374,7 +1409,7 @@ ExprResult Sema::ActOnCXXBuiltinId(SourceLocation KwLoc,
     DataCalls[I] = DataConv.get();
   }
 
-  return CXXBuiltinIdExpr::Create(Context, Context.TokenSequenceTy,
+  return CXXBuiltinIdExpr::Create(Context, Context.MetaTokenTy,
                                   ArrayRef<Expr *>(Args), SizeCalls, DataCalls,
                                   KwLoc, LParenLoc, RParenLoc);
 }
@@ -1466,7 +1501,7 @@ ExprResult Sema::ActOnCXXBuiltinStrLiteral(SourceLocation KwLoc,
     DataCalls[I] = DataConv.get();
   }
 
-  return CXXBuiltinStrLiteralExpr::Create(Context, Context.TokenSequenceTy,
+  return CXXBuiltinStrLiteralExpr::Create(Context, Context.MetaTokenTy,
                                           ArrayRef<Expr *>(Args), SizeCalls,
                                           DataCalls, KwLoc, LParenLoc,
                                           RParenLoc);
@@ -1567,10 +1602,9 @@ ExprResult Sema::ActOnCXXBuiltinTokenize(SourceLocation KwLoc,
     DataCalls[I] = DataConv.get();
   }
 
-  return CXXBuiltinTokenizeExpr::Create(Context, Context.TokenSequenceTy,
-                                        ArrayRef<Expr *>(Args), SizeCalls,
-                                        DataCalls, KwLoc, LParenLoc,
-                                        RParenLoc);
+  return BuildTokenSequenceValue(CXXBuiltinTokenizeExpr::Create(
+      Context, Context.TokenSequenceTy, ArrayRef<Expr *>(Args), SizeCalls,
+      DataCalls, KwLoc, LParenLoc, RParenLoc));
 }
 
 ExprResult Sema::ActOnCXXBuiltinStringize(SourceLocation KwLoc,
@@ -2515,6 +2549,9 @@ ExprResult Sema::BuildCXXMetafunctionExpr(
       return false;
     case Metafunction::MFRK_tokenSequence:
       Result = Context.TokenSequenceTy;
+      return false;
+    case Metafunction::MFRK_token:
+      Result = Context.MetaTokenTy;
       return false;
     case Metafunction::MFRK_sizeT:
       Result = Context.getSizeType();
@@ -3517,7 +3554,10 @@ bool Sema::EvaluateInjectMembersAnnotation(Decl *TagDecl, unsigned Index,
   Expr::EvalResult ER;
   ER.Diag = &Diags;
   ConstantExprKind Kind = ConstantExprKind::PlainlyConstantEvaluated;
-  if (!Call.get()->EvaluateAsConstantExpr(ER, Context, Kind, RD)) {
+  // A std::meta::token_sequence result is converted to the compiler's token
+  // array (the vector does not outlive the evaluation).
+  Expr *ToEvaluate = ConvertToTokenArray(Call.get());
+  if (!ToEvaluate->EvaluateAsConstantExpr(ER, Context, Kind, RD)) {
     Diag(Loc, diag::err_consteval_block_not_constexpr);
     for (auto &PD : Diags)
       Diag(PD.first, PD.second);

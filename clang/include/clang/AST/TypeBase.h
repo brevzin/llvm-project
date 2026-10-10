@@ -2652,6 +2652,14 @@ public:
   bool isVoidType() const;         // C99 6.2.5p19
   bool isReflectionType() const;     // C++2c reflection [P2996]
   bool isTokenSequenceType() const;  // C++2c token sequences
+  bool isMetaTokenType() const;      // std::meta::token
+  /// std::meta::token_sequence: the explicit specialization
+  /// std::vector<std::meta::token> declared by <meta>.
+  bool isStdMetaTokenSequenceType() const;
+  /// The compiler's token array or std::meta::token_sequence.
+  bool isTokenSequenceLikeType() const {
+    return isTokenSequenceType() || isStdMetaTokenSequenceType();
+  }
   bool isNoReturnType() const;       // std::noreturn_t (P3549)
   bool isScalarType() const;         // C99 6.2.5p21 (arithmetic + pointers)
   bool isAggregateType() const;
@@ -8713,6 +8721,7 @@ inline bool Type::isFundamentalType() const {
   return isVoidType() ||
          isNullPtrType() ||
          isTokenSequenceType() ||
+         isMetaTokenType() ||
          isNoReturnType() ||
          // FIXME: It's really annoying that we don't have an
          // 'isArithmeticType()' which agrees with the standard definition.
@@ -9128,6 +9137,12 @@ inline bool Type::isTokenSequenceType() const {
   if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType)) {
     return BT->getKind() == BuiltinType::TokenSequence;
   }
+  return false;
+}
+
+inline bool Type::isMetaTokenType() const {
+  if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType))
+    return BT->getKind() == BuiltinType::MetaToken;
   return false;
 }
 

@@ -522,6 +522,7 @@ llvm::Type *CodeGenTypes::ConvertType(QualType T) {
 
     case BuiltinType::MetaInfo:
     case BuiltinType::TokenSequence:
+    case BuiltinType::MetaToken:
       // Model meta::info/token_sequence as an opaque integer whose width tracks
       // the AST type size (128 bits in the value model; 1 byte in the
       // consteval-only operations model, where it persists to runtime empty).

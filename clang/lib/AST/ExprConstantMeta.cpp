@@ -833,6 +833,15 @@ static bool expand_at_instantiation(APValue &Result, ASTContext &C,
                                     ArrayRef<Expr *> Args,
                                     Decl *ContainingDecl);
 
+static bool tokens_join(APValue &Result, ASTContext &C, MetaActions &Meta,
+                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                        QualType ResultTy, SourceRange Range,
+                        ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool tokens_fill(APValue &Result, ASTContext &C, MetaActions &Meta,
+                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                        QualType ResultTy, SourceRange Range,
+                        ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
 static bool punctuator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                           EvalFn Evaluator, DiagFn Diagnoser,
                           bool AllowInjection, QualType ResultTy,
@@ -1013,7 +1022,7 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_bool, 1, 1, is_binary_operation },
   { Metafunction::MFRK_metaInfo, 2, 2, get_ith_operand_of },
   { Metafunction::MFRK_sizeT, 1, 1, token_count },
-  { Metafunction::MFRK_tokenSequence, 2, 2, get_ith_token },
+  { Metafunction::MFRK_token, 2, 2, get_ith_token },
   { Metafunction::MFRK_sizeT, 1, 1, token_kind_of },
   { Metafunction::MFRK_sizeT, 1, 1, operator_of_token },
   { Metafunction::MFRK_spliceFromArg, 3, 3, identifier_of_token },
@@ -1033,6 +1042,8 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_bool, 0, 0, expand_at_instantiation,
     /*WantsMacroExpansionContext=*/true },
   { Metafunction::MFRK_sizeT, 1, 1, punctuator_of },
+  { Metafunction::MFRK_tokenSequence, 2, 2, tokens_join },
+  { Metafunction::MFRK_sizeT, 2, 2, tokens_fill },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -1055,6 +1066,14 @@ bool Metafunction::isSafeOnValueDependentExpressions() const {
   return ImplFn == source_text_of || ImplFn == source_location_of ||
          ImplFn == type_of || ImplFn == is_binary_operation ||
          ImplFn == operator_of || ImplFn == get_ith_operand_of;
+}
+
+Metafunction::TokenArrayOp Metafunction::getTokenArrayOp() const {
+  if (ImplFn == tokens_join)
+    return TokenArrayOp::Join;
+  if (ImplFn == tokens_fill)
+    return TokenArrayOp::Fill;
+  return TokenArrayOp::None;
 }
 
 bool Metafunction::Lookup(unsigned ID, const Metafunction *&result) {
@@ -2515,6 +2534,44 @@ bool operator_of_token(APValue &Result, ASTContext &C, MetaActions &Meta,
   return SetAndSucceed(
       Result, APValue(C.MakeIntValue(getMetaIndexForOverloadedOperator(OO),
                                      C.getSizeType())));
+}
+
+// EXPERIMENTAL (benchmarking a vector<token> model): concatenate the
+// token_sequence elements of an array, given as (pointer, count), in one
+// step -- standing in for the compiler consuming a vector<token> directly
+// (interpolating it, or taking it as a macro's result).
+bool tokens_join(APValue &Result, ASTContext &C, MetaActions &Meta,
+                 EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                 QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                 Decl *ContainingDecl) {
+  APValue Count;
+  if (!Evaluator(Count, Args[1], true))
+    return true;
+  uint64_t N = Count.getInt().getZExtValue();
+  QualType ElemTy = Args[0]->getType()->getPointeeType().getUnqualifiedType();
+  SmallVector<Token, 64> Toks;
+  for (uint64_t K = 0; K < N; ++K) {
+    llvm::APInt Idx(C.getTypeSize(C.getSizeType()), K, false);
+    Expr *Elem = new (C) ArraySubscriptExpr(
+        Args[0],
+        IntegerLiteral::Create(C, Idx, C.getSizeType(), Args[1]->getExprLoc()),
+        ElemTy, VK_LValue, OK_Ordinary, Range.getBegin());
+    APValue V;
+    if (!Evaluator(V, Elem, true) || !V.isTokenSequence())
+      return true;
+    TokenSequenceData TSD = V.getTokenSequence();
+    Toks.append(TSD.begin(), TSD.end());
+  }
+  return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
+}
+
+// EXPERIMENTAL: implemented natively by the constant evaluator (see
+// Metafunction::getTokenArrayOp); never reached.
+bool tokens_fill(APValue &Result, ASTContext &C, MetaActions &Meta,
+                 EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                 QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                 Decl *ContainingDecl) {
+  return true;
 }
 
 bool punctuator_of(APValue &Result, ASTContext &C, MetaActions &Meta,

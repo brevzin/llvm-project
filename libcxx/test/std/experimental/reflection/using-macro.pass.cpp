@@ -28,9 +28,10 @@
 namespace using_detail {
 using std::meta::punctuator;
 using std::meta::token_kind;
+using std::meta::token;
 using std::meta::token_sequence;
 
-consteval bool is(token_sequence t, punctuator p) {
+consteval bool is(token t, punctuator p) {
   return token_kind_of(t) == token_kind::punctuator && punctuator_of(t) == p;
 }
 
@@ -43,7 +44,7 @@ consteval token_sequence join(auto&& r) {
 consteval auto split_commas(auto&& r) -> std::vector<token_sequence> {
   std::vector<token_sequence> out(1);
   int depth = 0;
-  for (token_sequence t : r) {
+  for (token t : r) {
     if (is(t, punctuator::left_paren) || is(t, punctuator::left_square) ||
         is(t, punctuator::left_brace))
       ++depth;
@@ -61,7 +62,7 @@ consteval auto split_commas(auto&& r) -> std::vector<token_sequence> {
 
 consteval void expand(token_sequence item, token_sequence prefix,
                       std::vector<token_sequence>& out) {
-  auto lb = std::ranges::find_if(item, [](token_sequence t) {
+  auto lb = std::ranges::find_if(item, [](token t) {
     return is(t, punctuator::left_brace);
   });
   if (lb == end(item)) {

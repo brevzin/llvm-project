@@ -232,7 +232,14 @@ BUILTIN_TYPE(NullPtr, NullPtrTy)
 // internal compiler objects reflected by a value.
 BUILTIN_TYPE(MetaInfo, MetaInfoTy)
 
-// This is the type for C++2c token sequences (^^{ tokens }).
+// std::meta::token: a single token, a scalar. (Before TokenSequence, so that
+// the scalar range in Type::isScalarType covers it.)
+BUILTIN_TYPE(MetaToken, MetaTokenTy)
+
+// The compiler's immutable array of tokens: the type of a token literal
+// inside <meta> before std::meta::token_sequence (a vector<token>) is
+// declared, spelled std::meta::__token_array there. Elsewhere a literal is a
+// std::meta::token_sequence, constructed from one of these.
 BUILTIN_TYPE(TokenSequence, TokenSequenceTy)
 
 // The bottom type, std::noreturn_t (P3549): the type of a diverging

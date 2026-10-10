@@ -330,10 +330,11 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
       return isa<FunctionDecl>(D) ? Cl::CL_PRValue : Cl::CL_LValue;
     // Inside an expression-macro body a parameter is not a variable: it names
     // the reflection or token sequence bound to it, and Sema builds the
-    // reference as a prvalue of that type (see BuildDeclarationNameExpr).
+    // reference as a prvalue of that type (see BuildDeclarationNameExpr) --
+    // except a raw token_sequence parameter, which is an object.
     if (const auto *PVD = dyn_cast<ParmVarDecl>(D))
       if (const auto *FD = dyn_cast<FunctionDecl>(PVD->getDeclContext());
-          FD && FD->isExpressionMacro())
+          FD && FD->isExpressionMacro() && E->isPRValue())
         return Cl::CL_PRValue;
     return ClassifyDecl(Ctx, D);
   }
