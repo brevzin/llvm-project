@@ -474,6 +474,148 @@ to take a sub-run of a sequence. Seconds over baseline:
   bug, now fixed. The numbers above were measured after the fix, and the fix
   barely changed the other workloads.)
 
+## Stage 6: a token-literal view type (`token_view`)
+
+A middle ground between the two models (branch `token-vector-model`, on top of
+the full vector implementation):
+
+- **`^^{ … }` is a `std::meta::token_view`:** a library class with a
+  `const token*` and a size, viewing the literal's tokens in static storage
+  (an unnamed global constant, like a string literal's array).
+  - `begin()`/`end()` return pointers, and it has indexing, `size()` and so on.
+  - It has `consteval operator token_sequence()` and `to_vec()`.
+  - It's trivially copyable, borrowed and a view.
+  - Users can't construct one; it's the same idea as `std::initializer_list`.
+- **`token_sequence` is still `vector<token>`,** the builder.
+- **Raw macro parameters** are `token_view` when the body only reads them, and
+  `token_sequence` when it modifies them.
+- **Interpolation** accepts any contiguous range of tokens (views, vectors,
+  `std::span<const token>`).
+
+Three things had to be fixed before the comparison was fair:
+- **`token_view`'s operators** were first constrained templates in
+  `std::meta`, found by argument-dependent lookup for every operator applied
+  to any `std::meta` type (every `info == info`). That cost about 7% on tests
+  with no tokens at all. They're now hidden friends, and the `token_sequence`
+  operators take concrete types.
+- **`<meta>`'s own non-template members** (`to_vec`, the operators,
+  `list_builder`) instantiated `vector::append_range` and the `ranges`
+  concepts in every translation unit, about 60 ms. They now use a plain
+  `__append(ptr, n)`.
+- **Literal storage was first deduplicated by value.** Literals that compare
+  equal but differ (interpolated constants of different enum types) then
+  shared one array, which was wrong. Each token array now gets its own
+  storage, cached by the array's identity.
+
+Literal costs (one literal of 16 tokens with an interpolation):
+
+| | make | make + hand to the compiler |
+|---|---|---|
+| current handle | 3.5 µs | 7.3 µs |
+| `vector<token>` | 38 µs | 92 µs |
+| `token_view`, first version | 17.5 µs | 50 µs |
+| `token_view` with native construction and read-back | 11.8 µs | 22.5 µs |
+| plus tokens referring to their slot (no allocation per token) | **8.9 µs** | **18.3 µs** |
+
+The native paths:
+- constructing a `token_view` from the internal array is intercepted in the
+  evaluator;
+- converting a view back to the internal array is intercepted, and reads a
+  side table mapping each materialized array to the token array it came from:
+  O(1) for a whole view, a native slice otherwise.
+
+Tests and examples (90 cases compiled by all three):
+
+| | current | vector | view |
+|---|---|---|---|
+| total | 119.44 s | 119.24 s (−0.2%) | 120.00 s (+0.5%) |
+| 14 token- and macro-heavy tests, above `<meta>` | 10.40 s | 10.47 s | 10.69 s |
+| 10 examples | 14.72 s | 14.77 s | 14.89 s |
+
+Stress workloads, seconds over baseline:
+
+| workload | current | vector | view |
+|---|---|---|---|
+| small × 1000 | 0.11 | 0.23 (2.0×) | 0.22 (2.0×) |
+| enum 200 × 10 | 0.40 | 0.52 | 0.49 |
+| enum 20 × 100 | 0.22 | 0.29 | 0.27 |
+| enum 2 × 1000 | 0.28 | 0.30 | 0.26 |
+| split 200 × 10 | 0.10 | 0.42 (4.3×) | 0.32 (3.3×) |
+| split 20 × 100 | 0.10 | 0.39 | 0.31 |
+| split, hoisted, 200 × 10 | 0.10 | 0.25 | 0.29 |
+| split, block + loop, 200 × 10 | 0.10 | 0.21 | 0.24 |
+| split, block + loop, 20 × 100 | 0.10 | 0.17 | 0.19 |
+| scan 200 × 30 | 0.15 | 0.15 | 0.17 |
+| scan 20 × 300 | 0.12 | 0.08 | 0.10 |
+| pass, `const&` (view model: `std::span<const token>`) | 0.02 | 0.07 | 0.11 |
+| pass, by value (view model: `token_view`) | 0.02 | 0.13 | **0.05** |
+
+- **On real code, all three models are the same.**
+- **On stress code, the view model is about on par with the vector model.**
+  - Literals made inside loops (`split` comparing against `^^{,}`) and passing
+    views by value are better.
+  - Spans are slower than views. Converting a view to `std::span` goes through
+    `span`'s interpreted range constructor, and interpolating a span through a
+    library call.
+  - The rest is a few percent either way.
+- **Building is identical:** the `vector`. Small macros that build (`check!`
+  appends two pieces) cost the same as in the vector model. Written naturally
+  for this model, as a single literal, they wouldn't build at all.
+- **A literal is still ~2.5× a handle literal,** from materializing storage for
+  every evaluation of a literal that contains interpolations.
+
+### Lazy materialization
+
+`token_view` then changed representation, but not API. It now holds the
+compiler's token-array handle and its size, and gets static storage only when
+it's asked for (`data()`, `begin()`/`end()`, indexing), made once per token
+array and cached:
+- making a literal is a handle and a size, built natively;
+- copying one copies two scalars;
+- handing it to the compiler returns the handle;
+- `to_vec()` and concatenation fill from the handle natively;
+- `==` is the built-in comparison of handles.
+
+| one 16-token literal | make | make + hand to the compiler |
+|---|---|---|
+| current handle | 3.5 µs | 7.3 µs |
+| `vector<token>` | 38 µs | 92 µs |
+| eager `token_view` | 8.9 µs | 18.3 µs |
+| **lazy `token_view`** | **2.3 µs** | **6.7 µs** |
+
+Tests and examples (90 cases): current 120.93 s, vector 120.48 s, **view
+121.20 s**. The 14 token-heavy tests above the `<meta>` cost: 10.81 s, 10.77 s,
+11.05 s. Examples: 15.26 s, 14.90 s, 15.13 s.
+
+Stress workloads, seconds over baseline:
+
+| workload | current | vector | lazy view |
+|---|---|---|---|
+| small × 1000 | 0.13 | 0.24 (1.75×) | 0.22 (1.6×) |
+| enum 200 × 10 | 0.41 | 0.53 | 0.49 (1.2×) |
+| enum 20 × 100 | 0.22 | 0.32 | 0.26 (1.2×) |
+| enum 2 × 1000 | 0.28 | 0.29 | 0.25 (0.9×) |
+| split 200 × 10 | 0.10 | 0.44 (4.3×) | 0.31 (3.0×) |
+| split 20 × 100 | 0.11 | 0.42 (4.0×) | 0.28 (2.6×) |
+| split, hoisted, 200 × 10 | 0.10 | 0.27 | 0.30 |
+| split, block + loop, 200 × 10 | 0.10 | 0.23 | 0.24 |
+| split, block + loop, 20 × 100 | 0.12 | 0.20 | 0.20 |
+| scan 200 × 30 | 0.16 | 0.17 | 0.17 |
+| scan 20 × 300 | 0.13 | 0.09 | 0.10 |
+| pass, `std::span<const token>` / `const&` | 0.01 | 0.09 | 0.11 |
+| pass, `token_view` by value / by value | 0.03 | 0.13 | **0.02** |
+
+- **Literals and passing views now cost what handles cost.** Passing views by
+  value matches the current model, and the workloads dominated by literals
+  improved (small 1.6×, enum 0.9–1.2×, token-at-a-time split 2.6–3.0×).
+- **What remains is building,** which is identical in the vector and view
+  models: `push_back` (interpreted), appending, and converting a vector back
+  to the compiler. Small macros that build (`check!` appends two pieces) and
+  splitting are those workloads.
+- **Passing as `std::span` is slower than passing a view.** A span needs the
+  view's storage (`data()`) and goes through `span`'s interpreted range
+  constructor.
+
 ## Conclusions
 
 1. **Compile time is not a reason to reject `vector<token>`.** With a dedicated
@@ -508,7 +650,9 @@ to take a sub-run of a sequence. Seconds over baseline:
 | vector implementations | `~/tmp/leanvec/` (`lean_vector.h`, `scalar_vector.h`, `bulk_vector.h`, `native_vector.h`) |
 | microbenchmarks | `~/tmp/tokbench/lit_*.cpp`, `vint_*.cpp`, `pv_*.cpp`, `iter_*.cpp`, `nv_*.cpp`, `e{A..E}.cpp` |
 | full implementation, tests and examples | `~/tmp/tvbench/run.py` (results in `results.json`); migrated example copies in `~/tmp/tvbench/examples-new/` |
-| full implementation, stress workloads | `~/tmp/tvbench/gen2.py` (models `ts` and `tv`), `stress.sh`, `stress-split.sh`, `stress-block.sh` (block-at-a-time splitting) |
+| full implementation, stress workloads | `~/tmp/tvbench/gen2.py` (models `ts`, `tv` and `vw`), `stress.sh`, `stress-split.sh`, `stress-block.sh` (block-at-a-time splitting), `stress3.sh` (all three models) |
+| view model, tests and examples | `~/tmp/vwbench/run3.py` (results in `results.json`); migrated example copies in `~/tmp/vwbench/examples-new/`; literal microbenchmarks in `~/tmp/vwbench/micro/` |
+| the vector-model compiler | saved in `~/tmp/clang-tv-model/` with its sources; flags in `~/tmp/flags-tv-model` |
 | the previous compiler | saved in `~/tmp/clang-ts-model/` (compiler, headers, libraries, and the original test and example sources), with flags in `~/tmp/flags-ts-model` |
 
 Stages 1–4 depend on the experimental `fill` and `join` metafunctions

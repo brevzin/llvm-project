@@ -76,7 +76,7 @@ consteval void expand(token_sequence item, token_sequence prefix,
 }
 }  // namespace using_detail
 
-__macro using_(std::meta::token_sequence names) {
+__macro using_(std::meta::token_view names) {
   std::vector<std::meta::token_sequence> declared;
   for (auto item : using_detail::split_commas(names))
     using_detail::expand(item, ^^{}, declared);

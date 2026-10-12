@@ -18,7 +18,7 @@
 
 #include <meta>
 
-__macro maybe(bool cond, std::meta::token_sequence decl) {
+__macro maybe(bool cond, std::meta::token_view decl) {
   if (extract<bool>(constant_of(cond)))
     return decl;
   return ^^{};

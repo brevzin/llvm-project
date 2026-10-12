@@ -31,8 +31,8 @@ constexpr m::token_sequence ts = ^^{ a + b };
 // ----------------------------------------------------------------------------
 static_assert(size(ts) == 3);
 static_assert(!empty(ts));
-static_assert(empty(^^{ }));
-static_assert(size(^^{ }) == 0);
+static_assert(std::empty(^^{ }));
+static_assert(std::size(^^{ }) == 0);
 
 // ----------------------------------------------------------------------------
 // Direct indexing.

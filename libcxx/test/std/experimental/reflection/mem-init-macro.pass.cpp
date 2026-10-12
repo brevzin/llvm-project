@@ -22,7 +22,7 @@
 
 // Keep 'init' if the class being constructed has a non-static data member
 // named by its first token; otherwise expand to nothing.
-__macro init_if_member(std::meta::token_sequence init) {
+__macro init_if_member(std::meta::token_view init) {
   std::meta::info ctor = std::meta::macro_expansion_context();
   if (!std::meta::is_constructor(ctor))
     std::constexpr_error_str("init-if-member",
@@ -107,7 +107,7 @@ struct F {
 static_assert(F(4).a == 4);
 
 // A macro expanding to several mem-initializers.
-__macro both(std::meta::token_sequence v) {
+__macro both(std::meta::token_view v) {
   return ^^{ x(\(v)), y(\(v) + 1) };
 }
 struct G {

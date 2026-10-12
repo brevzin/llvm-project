@@ -174,7 +174,7 @@ struct counter {
   template <class Self>
   __macro bump(this Self&& self, int by) { return ^^{ (\(self).n += \(by)) }; }
   __macro get(this counter const& self) { return ^^{ \(self).n }; }
-  __macro add_tokens(this counter& self, std::meta::token_sequence t) {
+  __macro add_tokens(this counter& self, std::meta::token_view t) {
     return ^^{ (\(self).n += (\(t))) };
   }
   int twice() { return bump!(1), bump!(1); }

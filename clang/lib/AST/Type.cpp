@@ -3210,6 +3210,18 @@ bool Type::isStdMetaTokenSequenceType() const {
          Args[0].getAsType()->isMetaTokenType();
 }
 
+bool Type::isStdMetaTokenViewType() const {
+  const CXXRecordDecl *RD = getAsCXXRecordDecl();
+  if (!RD || !RD->getIdentifier() || RD->getName() != "token_view")
+    return false;
+  const DeclContext *DC = RD->getDeclContext();
+  while (DC && DC->isInlineNamespace())
+    DC = DC->getParent();
+  const auto *NS = dyn_cast_or_null<NamespaceDecl>(DC);
+  return NS && NS->getIdentifier() && NS->getName() == "meta" &&
+         NS->isInStdNamespace();
+}
+
 bool Type::isStructuralType() const {
   // A token sequence is a scalar type, but it has no mangling, so two
   // specializations chosen by distinct token sequences would share a mangled

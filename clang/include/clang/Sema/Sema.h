@@ -16445,6 +16445,10 @@ public:
   /// where a token literal is the compiler's token array).
   QualType getStdMetaTokenSequenceType();
   QualType StdMetaTokenSequenceTy;
+  /// std::meta::token_view, the type of a token literal, once <meta> has
+  /// declared it; null before.
+  QualType getStdMetaTokenViewType();
+  QualType StdMetaTokenViewTy;
   /// \p E, of the compiler's token array type, as a std::meta::token_sequence
   /// (constructed from it), or \p E itself before <meta> declares one.
   ExprResult BuildTokenSequenceValue(Expr *E);

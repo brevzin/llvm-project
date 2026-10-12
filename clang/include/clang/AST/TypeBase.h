@@ -2656,9 +2656,14 @@ public:
   /// std::meta::token_sequence: the explicit specialization
   /// std::vector<std::meta::token> declared by <meta>.
   bool isStdMetaTokenSequenceType() const;
-  /// The compiler's token array or std::meta::token_sequence.
+  /// std::meta::token_view: the type of a token literal, ^^{ ... } (a view of
+  /// tokens the compiler owns).
+  bool isStdMetaTokenViewType() const;
+  /// The compiler's token array, std::meta::token_view, or
+  /// std::meta::token_sequence.
   bool isTokenSequenceLikeType() const {
-    return isTokenSequenceType() || isStdMetaTokenSequenceType();
+    return isTokenSequenceType() || isStdMetaTokenViewType() ||
+           isStdMetaTokenSequenceType();
   }
   bool isNoReturnType() const;       // std::noreturn_t (P3549)
   bool isScalarType() const;         // C99 6.2.5p21 (arithmetic + pointers)

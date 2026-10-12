@@ -8345,6 +8345,11 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
     Cleanup = SavedCleanup;
     ExprCleanupObjects.truncate(SavedCleanupObjects);
   });
+  // Nor are the conversions it applies immediate invocations: binding a raw
+  // argument to a token_sequence parameter goes through token_view's
+  // consteval conversion, which is evaluated with the body.
+  EnterExpressionEvaluationContext BindingContext(
+      *this, ExpressionEvaluationContext::ImmediateFunctionContext);
 
   // Bind the arguments to the parameters as for a call: this applies the
   // conversions the parameter types ask for and checks the arguments.
@@ -8373,17 +8378,25 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
     ParmVarDecl *PVD = Macro->getParamDecl(I);
     ParamInits.push_back(nullptr);
     if (isRawMacroParameter(PVD) &&
-        PVD->getType()->isStdMetaTokenSequenceType()) {
-      // A std::meta::token_sequence parameter is an object, constructed from
-      // the argument when the body is evaluated (it lives in that
-      // evaluation): the raw argument (already a token_sequence for a raw
-      // pack, the compiler's token array otherwise), or the default argument.
+        (PVD->getType()->isStdMetaTokenSequenceType() ||
+         PVD->getType()->isStdMetaTokenViewType())) {
+      // A std::meta::token_view or token_sequence parameter is an object,
+      // initialized from the argument (as a token literal: a token_view)
+      // when the body is evaluated: every mention of it is that object.
       Expr *Init = I < Args.size() ? Args[I] : Arg;
-      if (!Init->getType()->isStdMetaTokenSequenceType()) {
+      if (Init->getType()->isTokenSequenceType()) {
         ExprResult Built = BuildTokenSequenceValue(Init);
         if (Built.isInvalid())
           return true;
         Init = Built.get();
+      }
+      if (!Context.hasSameUnqualifiedType(Init->getType(), PVD->getType())) {
+        ExprResult Conv = PerformCopyInitialization(
+            InitializedEntity::InitializeParameter(Context, PVD),
+            Init->getBeginLoc(), Init);
+        if (Conv.isInvalid())
+          return true;
+        Init = Conv.get();
       }
       ParamInits.back() = Init;
       ParamValues.push_back(APValue());
