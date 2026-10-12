@@ -179,6 +179,16 @@ inline TokenSequenceData CreateEmptyTokenSequenceData(ASTContext &Ctx) {
   return CreateTokenSequenceData(Ctx, {});
 }
 
+/// The tokens of \p TSD as an array of std::meta::token in static storage
+/// (what a std::meta::token_view views): a pointer to its first element, of
+/// type \p PtrTy, or a null pointer for no tokens. The storage for a token
+/// array is made once (keyed by its storage), and remembers its tokens (see
+/// getMaterializedTokens).
+APValue MaterializeTokens(ASTContext &C, TokenSequenceData TSD, QualType PtrTy);
+
+/// The tokens of an array made by MaterializeTokens, or null.
+const TokenSequenceData *getMaterializedTokens(const Decl *Storage);
+
 /// \brief Representation of a hypothetical data member, which could be used to
 /// complete an incomplete class definition using the 'std::meta::define_class'
 /// standard library function.

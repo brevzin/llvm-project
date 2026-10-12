@@ -1139,8 +1139,30 @@ QualType Sema::getStdMetaTokenSequenceType() {
   return StdMetaTokenSequenceTy;
 }
 
+QualType Sema::getStdMetaTokenViewType() {
+  if (!StdMetaTokenViewTy.isNull())
+    return StdMetaTokenViewTy;
+  NamespaceDecl *Meta = lookupStdMetaNamespace();
+  if (!Meta)
+    return QualType();
+  LookupResult R(*this, &PP.getIdentifierTable().get("token_view"),
+                 SourceLocation(), LookupOrdinaryName);
+  R.suppressDiagnostics();
+  if (!LookupQualifiedName(R, Meta) || !R.isSingleResult())
+    return QualType();
+  auto *RD = dyn_cast<CXXRecordDecl>(R.getFoundDecl());
+  if (!RD || !RD->isCompleteDefinition())
+    return QualType();
+  StdMetaTokenViewTy = Context.getCanonicalTagType(RD);
+  return StdMetaTokenViewTy;
+}
+
 ExprResult Sema::BuildTokenSequenceValue(Expr *E) {
-  QualType T = getStdMetaTokenSequenceType();
+  // A token literal is a std::meta::token_view, viewing the literal's tokens
+  // in static storage; (without one, a std::meta::token_sequence).
+  QualType T = getStdMetaTokenViewType();
+  if (T.isNull())
+    T = getStdMetaTokenSequenceType();
   if (T.isNull() || RequireCompleteType(E->getBeginLoc(), T,
                                         diag::err_incomplete_type))
     return E;
@@ -1205,7 +1227,43 @@ ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
   // If the expression is convertible to std::meta::token_sequence or
   // std::meta::info, insert that conversion. token_sequence is preferred so
   // a list_builder or similar wrapper can be expanded as raw tokens.
-  return TryConvertToTokenSequenceOrMetaInfo(*this, E);
+  Expr *Converted = TryConvertToTokenSequenceOrMetaInfo(*this, E);
+  if (Converted != E || !E->getType()->isRecordType() ||
+      E->getType()->isDependentType())
+    return Converted;
+
+  // Any other contiguous range of tokens (a std::span<const token>, say):
+  // std::meta::detail::__tokens_of_range(E), the compiler's token array of
+  // its data() and size().
+  if (NamespaceDecl *Meta = lookupStdMetaNamespace()) {
+    LookupResult DR(*this, &PP.getIdentifierTable().get("detail"),
+                    E->getBeginLoc(), LookupNamespaceName);
+    DR.suppressDiagnostics();
+    if (LookupQualifiedName(DR, Meta) && !DR.empty())
+      if (auto *Detail = dyn_cast<NamespaceDecl>(DR.getRepresentativeDecl())) {
+        LookupResult R(*this, &PP.getIdentifierTable().get("__tokens_of_range"),
+                       E->getBeginLoc(), LookupOrdinaryName);
+        R.suppressDiagnostics();
+        if (LookupQualifiedName(R, Detail) && !R.empty()) {
+          UnresolvedSet<4> Fns;
+          for (NamedDecl *D : R)
+            Fns.addDecl(D);
+          ExprResult Callee = CreateUnresolvedLookupExpr(
+              /*NamingClass=*/nullptr, NestedNameSpecifierLoc(),
+              R.getLookupNameInfo(), Fns, /*PerformADL=*/false);
+          if (!Callee.isInvalid()) {
+            SFINAETrap Trap(*this);
+            ExprResult Call = BuildCallExpr(nullptr, Callee.get(),
+                                            E->getBeginLoc(), {E},
+                                            E->getEndLoc());
+            if (!Call.isInvalid() && !Trap.hasErrorOccurred() &&
+                Call.get()->getType()->isTokenSequenceType())
+              return Call.get();
+          }
+        }
+      }
+  }
+  return E;
 }
 
 ExprResult Sema::ActOnCXXBuiltinInject(SourceLocation KwLoc,
@@ -2552,6 +2610,9 @@ ExprResult Sema::BuildCXXMetafunctionExpr(
       return false;
     case Metafunction::MFRK_token:
       Result = Context.MetaTokenTy;
+      return false;
+    case Metafunction::MFRK_tokenPtr:
+      Result = Context.getPointerType(Context.MetaTokenTy.withConst());
       return false;
     case Metafunction::MFRK_sizeT:
       Result = Context.getSizeType();

@@ -38,7 +38,7 @@ scope_guard(F) -> scope_guard<F>;
 
 // The guard lives to the end of the enclosing block. Its name is the
 // placeholder '_', so any number of them can share a block.
-__macro defer(std::meta::token_sequence body) {
+__macro defer(std::meta::token_view body) {
   return ^^{ scope_guard _{[&] { \(body) }} };
 }
 
@@ -90,7 +90,7 @@ __macro bump_both(int& x, int& y) {
 }
 
 // An 'if' without an 'else': the source's 'else' must not attach to it.
-__macro when_positive(int x, std::meta::token_sequence then) {
+__macro when_positive(int x, std::meta::token_view then) {
   return ^^{ if (\(x) > 0) { \(then) } };
 }
 
@@ -161,7 +161,7 @@ void do_forms() {
 // --------------------------------------------------- scope-transparent -----
 
 // A declaration whose name the user wrote is visible after the invocation.
-__macro let(std::meta::token_sequence name, int init) {
+__macro let(std::meta::token_view name, int init) {
   return ^^{ auto \(name) = \(init) };
 }
 
@@ -196,12 +196,12 @@ void generic_lambda() {
 
 // A statement macro that waits for instantiation although its arguments are
 // not dependent.
-__macro declare_late(std::meta::token_sequence name) {
+__macro declare_late(std::meta::token_view name) {
   std::meta::expand_at_instantiation();
   return ^^{ int \(name) = 42 };
 }
 
-__macro id(std::meta::token_sequence name) {
+__macro id(std::meta::token_view name) {
   std::meta::expand_at_instantiation();
   return name;
 }
@@ -240,7 +240,7 @@ int deferred_in_lambda() {
 
 // An expansion that itself invokes statement macros: they join the same
 // block, so the inner guard lives to the end of the invoking block.
-__macro traced_scope(std::meta::token_sequence name) {
+__macro traced_scope(std::meta::token_view name) {
   return ^^{
     trace += "<" \(name);
     defer!{ trace += ">"; };

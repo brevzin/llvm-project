@@ -28,7 +28,7 @@
 
 // Names a local by its token, looked up in the instantiated function: it can
 // name a local that only an instantiation-time injection declares.
-__macro id(std::meta::token_sequence name) {
+__macro id(std::meta::token_view name) {
   std::meta::expand_at_instantiation();
   return name;
 }

@@ -280,7 +280,7 @@ consteval std::optional<int> placeholder_index(std::string_view s) {
   return std::nullopt;
 }
 
-__macro λ(std::meta::token_sequence body) {
+__macro λ(std::meta::token_view body) {
   // The parameter is itself the range of its tokens; only identifiers can be
   // placeholders, and identifier_of reads one's spelling.
   int arity = 0;
@@ -313,8 +313,8 @@ void test_lambda() {
 // queue_injection wrapping. The pattern is one of `x op y` (binary), `op x`
 // (prefix), or `x op` (postfix); which one it is falls out of token_kind_of
 // on the first token.
-__macro define_op(std::meta::token_sequence name,
-                  std::meta::token_sequence pattern) {
+__macro define_op(std::meta::token_view name,
+                  std::meta::token_view pattern) {
   auto toks = tokens_of(pattern);
 
   if (toks.size() == 3) {  // id op id
@@ -367,7 +367,7 @@ void test_define_op() {
 // A declaration macro invoked at class scope injects members, with full
 // control over access; the access specifier in force before the invocation
 // is restored afterwards.
-__macro observable(std::meta::token_sequence counter) {
+__macro observable(std::meta::token_view counter) {
   return ^^{
    private:
     int \(counter) = 0;

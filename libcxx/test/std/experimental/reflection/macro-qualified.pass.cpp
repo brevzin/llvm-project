@@ -21,11 +21,11 @@
 #include <type_traits>
 
 namespace lib {
-  template <class T> __macro declare(std::meta::token_sequence name) {
+  template <class T> __macro declare(std::meta::token_view name) {
     return ^^{ \(^^T) \(name) {}; };
   }
-  __macro make_int(std::meta::token_sequence name) { return ^^{ constexpr int \(name) = 1; }; }
-  namespace inner { __macro make_long(std::meta::token_sequence name) { return ^^{ constexpr long \(name) = 2; }; } }
+  __macro make_int(std::meta::token_view name) { return ^^{ constexpr int \(name) = 1; }; }
+  namespace inner { __macro make_long(std::meta::token_view name) { return ^^{ constexpr long \(name) = 2; }; } }
   __macro add(auto&& x, auto&& y) { return ^^{ \(x) += \(y) }; }
   __macro twice(auto&& x) { return ^^{ (\(x) * 2) }; }
   template <class T> struct Holder { static __macro value_member() { return ^^{ \(^^T) held{}; }; } };

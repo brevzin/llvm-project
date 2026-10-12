@@ -24,26 +24,26 @@
 #include <meta>
 
 // Declare 'decl' only if 'c' holds; no ';' of its own.
-__macro maybe(bool c, std::meta::token_sequence decl) {
+__macro maybe(bool c, std::meta::token_view decl) {
   if (extract<bool>(constant_of(c)))
     return decl;
   return ^^{};
 }
 
 // The older style, which supplies the ';' itself.
-__macro maybe_terminated(bool c, std::meta::token_sequence decl) {
+__macro maybe_terminated(bool c, std::meta::token_view decl) {
   if (extract<bool>(constant_of(c)))
     return ^^{ \(decl); };
   return ^^{};
 }
 
 // A class definition: the invocation's ';' completes it.
-__macro make_struct(std::meta::token_sequence name, int v) {
+__macro make_struct(std::meta::token_view name, int v) {
   return ^^{ struct \(name) { static constexpr int value = \(v); } };
 }
 
 // Several declarations, the last one terminated by the invocation.
-__macro two_ints(std::meta::token_sequence a, std::meta::token_sequence b) {
+__macro two_ints(std::meta::token_view a, std::meta::token_view b) {
   return ^^{ int \(a) = 1; int \(b) = 2 };
 }
 

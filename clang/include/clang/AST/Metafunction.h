@@ -35,6 +35,7 @@ public:
     MFRK_metaInfo,
     MFRK_tokenSequence,
     MFRK_token,
+    MFRK_tokenPtr,
     MFRK_sizeT,
     MFRK_sourceLoc,
     MFRK_spliceFromArg,

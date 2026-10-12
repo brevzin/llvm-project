@@ -18,6 +18,54 @@
 
 namespace clang {
 
+namespace {
+struct MaterializedTokens {
+  llvm::DenseMap<std::pair<const Token *, size_t>, UnnamedGlobalConstantDecl *>
+      StorageFor;
+  llvm::DenseMap<const Decl *, TokenSequenceData> TokensOf;
+};
+MaterializedTokens &materializedTokens() {
+  static MaterializedTokens M;
+  return M;
+}
+} // namespace
+
+APValue MaterializeTokens(ASTContext &C, TokenSequenceData TSD,
+                          QualType PtrTy) {
+  size_t N = TSD.size();
+  if (N == 0)
+    return APValue(static_cast<const Expr *>(nullptr),
+                   CharUnits::fromQuantity(C.getTargetNullPointerValue(PtrTy)),
+                   APValue::NoLValuePath(), /*IsNullPtr=*/true);
+  MaterializedTokens &M = materializedTokens();
+  UnnamedGlobalConstantDecl *&Storage = M.StorageFor[{TSD.data(), N}];
+  if (!Storage) {
+    // Its own storage: tokens that compare equal may still differ (e.g.
+    // interpolated constants of different types), so equal arrays are not
+    // shared -- but the same array (the same storage) always is.
+    // Each token refers to its slot in the token array (immutable, and
+    // living as long as the compilation): no storage of its own.
+    APValue Elems(APValue::UninitArray(), N, N);
+    for (size_t I = 0; I != N; ++I)
+      Elems.getArrayInitializedElt(I) =
+          APValue(TokenSequenceData(TSD.data() + I, 1));
+    QualType ArrTy = C.getConstantArrayType(
+        C.MetaTokenTy.withConst(), llvm::APInt(64, N), nullptr,
+        ArraySizeModifier::Normal, /*IndexTypeQuals=*/0);
+    Storage = C.createUniqueUnnamedGlobalConstantDecl(ArrTy, Elems);
+    M.TokensOf[Storage] = TSD;
+  }
+  APValue::LValuePathEntry Path[] = {APValue::LValuePathEntry::ArrayIndex(0)};
+  return APValue(APValue::LValueBase(Storage), CharUnits::Zero(), Path,
+                 /*OnePastTheEnd=*/false);
+}
+
+const TokenSequenceData *getMaterializedTokens(const Decl *Storage) {
+  MaterializedTokens &M = materializedTokens();
+  auto It = M.TokensOf.find(Storage);
+  return It == M.TokensOf.end() ? nullptr : &It->second;
+}
+
 TokenSequenceData CreateTokenSequenceData(ASTContext &Ctx,
                                           ArrayRef<Token> Tokens) {
   Token *StoredTokens = nullptr;

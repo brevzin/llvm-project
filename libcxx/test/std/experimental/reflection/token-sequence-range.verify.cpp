@@ -27,9 +27,10 @@ constexpr std::meta::token negative = ts[-1];
 constexpr std::meta::token from_empty = (^^{ })[0];
 // expected-error@-1 {{constexpr variable 'from_empty' must be initialized by a constant expression}}
 
-// An element is an lvalue: a token_sequence can be modified in place.
+// An element is an lvalue: a token_sequence can be modified in place. (A
+// token literal itself is a read-only token_view.)
 consteval bool assign() {
-  auto seq = ^^{ a b };
+  std::meta::token_sequence seq = ^^{ a b };
   seq[0] = seq[1];
   return seq == ^^{ b b };
 }

@@ -3666,6 +3666,11 @@ public:
   UnnamedGlobalConstantDecl *
   getUnnamedGlobalConstantDecl(QualType Ty, const APValue &Value) const;
 
+  /// A new unnamed global constant of type \p Ty with value \p Value, not
+  /// shared with any other (getUnnamedGlobalConstantDecl interns by value).
+  UnnamedGlobalConstantDecl *
+  createUniqueUnnamedGlobalConstantDecl(QualType Ty, const APValue &Value) const;
+
   /// Return the template parameter object of the given type with the given
   /// value.
   TemplateParamObjectDecl *getTemplateParamObjectDecl(QualType T,

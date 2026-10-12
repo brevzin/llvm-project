@@ -841,6 +841,11 @@ static bool tokens_fill(APValue &Result, ASTContext &C, MetaActions &Meta,
                         EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                         QualType ResultTy, SourceRange Range,
                         ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool tokens_materialize(APValue &Result, ASTContext &C,
+                               MetaActions &Meta, EvalFn Evaluator,
+                               DiagFn Diagnoser, bool AllowInjection,
+                               QualType ResultTy, SourceRange Range,
+                               ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
 static bool punctuator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                           EvalFn Evaluator, DiagFn Diagnoser,
@@ -1044,6 +1049,7 @@ static constexpr Metafunction Metafunctions[] = {
   { Metafunction::MFRK_sizeT, 1, 1, punctuator_of },
   { Metafunction::MFRK_tokenSequence, 2, 2, tokens_join },
   { Metafunction::MFRK_sizeT, 2, 2, tokens_fill },
+  { Metafunction::MFRK_tokenPtr, 1, 1, tokens_materialize },
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -2563,6 +2569,22 @@ bool tokens_join(APValue &Result, ASTContext &C, MetaActions &Meta,
     Toks.append(TSD.begin(), TSD.end());
   }
   return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
+}
+
+// The tokens of a token array as an array of std::meta::token in static
+// storage (an unnamed global constant of its own: tokens that compare equal
+// may still differ, e.g. interpolated constants of different types, so it is
+// not shared): a pointer to its first element, or null for an empty array.
+// This is the storage a token literal (a std::meta::token_view) views.
+bool tokens_materialize(APValue &Result, ASTContext &C, MetaActions &Meta,
+                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                        QualType ResultTy, SourceRange Range,
+                        ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  APValue TS;
+  if (!Evaluator(TS, Args[0], true) || !TS.isTokenSequence())
+    return true;
+  return SetAndSucceed(Result,
+                       MaterializeTokens(C, TS.getTokenSequence(), ResultTy));
 }
 
 // EXPERIMENTAL: implemented natively by the constant evaluator (see

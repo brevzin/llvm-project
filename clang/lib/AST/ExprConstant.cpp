@@ -10010,6 +10010,63 @@ public:
 
 /// EvaluateAsRValue - Try to evaluate this expression, performing an implicit
 /// lvalue-to-rvalue cast if it is an lvalue.
+/// The concatenation of \p N tokens (std::meta::token, or single-token
+/// sequences) starting at \p Ptr: for storage made by MaterializeTokens, a
+/// slice of the token array it was made from (the array itself if whole);
+/// otherwise read element by element.
+static bool ReadTokenArray(EvalInfo &Info, const Expr *E, LValue Ptr,
+                           QualType ElemTy, uint64_t N,
+                           TokenSequenceData &Out) {
+  if (N == 0) {
+    Out = CreateEmptyTokenSequenceData(Info.Ctx);
+    return true;
+  }
+  if (const auto *D = Ptr.Base.dyn_cast<const ValueDecl *>())
+    if (const TokenSequenceData *TSD = getMaterializedTokens(D)) {
+      ArrayRef<APValue::LValuePathEntry> Path = Ptr.Designator.Entries;
+      uint64_t Idx = Path.size() == 1 ? Path[0].getAsArrayIndex() : 0;
+      if (Path.size() <= 1 && Idx + N <= TSD->size()) {
+        Out = (Idx == 0 && N == TSD->size())
+                  ? *TSD
+                  : CreateTokenSequenceData(Info.Ctx, TSD->slice(Idx, N));
+        return true;
+      }
+    }
+  SmallVector<Token, 64> Toks;
+  for (uint64_t I = 0; I != N; ++I) {
+    if (I && !HandleLValueArrayAdjustment(Info, E, Ptr, ElemTy, 1))
+      return false;
+    APValue V;
+    if (!handleLValueToRValueConversion(Info, E, ElemTy, Ptr, V))
+      return false;
+    if (!V.isTokenSequence())
+      return false;
+    TokenSequenceData One = V.getTokenSequence();
+    Toks.append(One.begin(), One.end());
+  }
+  Out = CreateTokenSequenceData(Info.Ctx, Toks);
+  return true;
+}
+
+/// A std::meta::token_view's tokens, given the view's value.
+static bool ReadTokenView(EvalInfo &Info, const Expr *E, const APValue &View,
+                          QualType ElemTy, TokenSequenceData &Out) {
+  if (!View.isStruct() || View.getStructNumFields() != 2)
+    return false;
+  const APValue &P = View.getStructField(0);
+  const APValue &Sz = View.getStructField(1);
+  // A view that holds its token array: that array.
+  if (P.isTokenSequence()) {
+    Out = P.getTokenSequence();
+    return true;
+  }
+  if (!P.isLValue() || !Sz.isInt())
+    return false;
+  LValue Ptr;
+  Ptr.setFrom(Info.Ctx, P);
+  return ReadTokenArray(Info, E, Ptr, ElemTy, Sz.getInt().getZExtValue(), Out);
+}
+
 template <typename Derived>
 bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
                                                  const CXXMetafunctionExpr *E) {
@@ -10130,21 +10187,11 @@ bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
       APValue NVal;
       if (!ReadArg(Args[1], NVal))
         return false;
-      APSInt N = NVal.getInt();
-      SmallVector<Token, 64> Toks;
-      for (uint64_t I = 0, Count = N.getZExtValue(); I != Count; ++I) {
-        if (I && !HandleLValueArrayAdjustment(Info, E, Ptr, ElemTy, 1))
-          return false;
-        APValue V;
-        if (!handleLValueToRValueConversion(Info, E, ElemTy, Ptr, V))
-          return false;
-        if (!V.isTokenSequence())
-          return Error(E);
-        TokenSequenceData TSD = V.getTokenSequence();
-        Toks.append(TSD.begin(), TSD.end());
-      }
-      return DerivedSuccess(APValue(CreateTokenSequenceData(Info.Ctx, Toks)),
-                            E);
+      TokenSequenceData Joined;
+      if (!ReadTokenArray(Info, E, Ptr, ElemTy, NVal.getInt().getZExtValue(),
+                          Joined))
+        return Error(E);
+      return DerivedSuccess(APValue(Joined), E);
     }
 
     // tokens_fill(token_sequence* p, token_sequence ts): write each token of
@@ -10156,8 +10203,8 @@ bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
     for (size_t I = 0; I != TSD.size(); ++I) {
       if (I && !HandleLValueArrayAdjustment(Info, E, Ptr, ElemTy, 1))
         return false;
-      Token One[] = {TSD[I]};
-      APValue Elem(CreateTokenSequenceData(Info.Ctx, One));
+      // (Refers to its slot in the token array: no storage of its own.)
+      APValue Elem(TokenSequenceData(TSD.data() + I, 1));
       if (!handleAssignment(Info, E, Ptr, ElemTy, Elem))
         return false;
     }
@@ -12641,6 +12688,42 @@ bool RecordExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E,
   // be initializing an array element instead.
   const CXXConstructorDecl *FD = E->getConstructor();
   if (FD->isInvalidDecl() || FD->getParent()->isInvalidDecl()) return false;
+
+  // A std::meta::token_view from the compiler's token array (a token literal):
+  // made directly -- the token array (or a pointer to its tokens in static
+  // storage) and a size -- rather than by evaluating the constructor.
+  if (E->getNumArgs() == 1 && FD->getNumParams() == 1 &&
+      FD->getParamDecl(0)->getType()->isTokenSequenceType() &&
+      Info.Ctx.getCanonicalTagType(FD->getParent()).getTypePtr()->isStdMetaTokenViewType()) {
+    const CXXRecordDecl *RD = FD->getParent();
+    SmallVector<const FieldDecl *, 2> Fields(RD->fields());
+    if (Fields.size() == 2 &&
+        (Fields[0]->getType()->isPointerType() ||
+         Fields[0]->getType()->isTokenSequenceType()) &&
+        Fields[1]->getType()->isIntegerType()) {
+      APValue TS;
+      const Expr *Arg = E->getArg(0);
+      if (!Evaluate(TS, Info, Arg))
+        return false;
+      if (Arg->isGLValue()) {
+        LValue LV;
+        LV.setFrom(Info.Ctx, TS);
+        if (!handleLValueToRValueConversion(Info, Arg, Arg->getType(), LV, TS))
+          return false;
+      }
+      if (!TS.isTokenSequence())
+        return Error(E);
+      TokenSequenceData TSD = TS.getTokenSequence();
+      Result = APValue(APValue::UninitStruct(), 0, 2);
+      Result.getStructField(0) =
+          Fields[0]->getType()->isTokenSequenceType()
+              ? APValue(TSD)
+              : MaterializeTokens(Info.Ctx, TSD, Fields[0]->getType());
+      Result.getStructField(1) = APValue(Info.Ctx.MakeIntValue(
+          TSD.size(), Fields[1]->getType()));
+      return true;
+    }
+  }
 
   bool ZeroInit = E->requiresZeroInitialization();
   if (CheckTrivialDefaultConstructor(Info, E->getExprLoc(), FD, ZeroInit)) {
@@ -22840,6 +22923,7 @@ public:
   bool VisitCXXReflectExpr(const CXXReflectExpr *E);
   bool VisitCXXTokenSequenceExpr(const CXXTokenSequenceExpr *E);
   bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
+  bool VisitCXXMemberCallExpr(const CXXMemberCallExpr *E);
   bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
   bool VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E);
   bool VisitCXXBuiltinStrLiteralExpr(const CXXBuiltinStrLiteralExpr *E);
@@ -23220,6 +23304,27 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
   }
 
   return Success(Refl, E);
+}
+
+bool ReflectionEvaluator::VisitCXXMemberCallExpr(const CXXMemberCallExpr *E) {
+  // A std::meta::token_view given to the compiler as its token array: read
+  // the view directly (for a token literal, the token array it was made
+  // from) rather than by evaluating the conversion function.
+  if (const auto *Conv = dyn_cast_or_null<CXXConversionDecl>(E->getMethodDecl());
+      Conv && Conv->getConversionType()->isTokenSequenceType() &&
+      Info.Ctx.getCanonicalTagType(Conv->getParent()).getTypePtr()
+          ->isStdMetaTokenViewType()) {
+    const Expr *Obj = E->getImplicitObjectArgument();
+    LValue LV;
+    APValue View;
+    if (Obj->isGLValue() && EvaluateLValue(Obj, LV, Info) &&
+        handleLValueToRValueConversion(Info, Obj, Obj->getType(), LV, View)) {
+      TokenSequenceData TSD;
+      if (ReadTokenView(Info, E, View, Info.Ctx.MetaTokenTy.withConst(), TSD))
+        return Success(APValue(TSD), E);
+    }
+  }
+  return BaseType::VisitCXXMemberCallExpr(E);
 }
 
 bool ReflectionEvaluator::VisitCXXMetafunctionExpr(
