@@ -616,6 +616,126 @@ Stress workloads, seconds over baseline:
   view's storage (`data()`) and goes through `span`'s interpreted range
   constructor.
 
+### Native read-back of a `token_sequence`
+
+Interpolating a `token_sequence`, or returning one from a macro, converted it
+to the compiler's token array through the vector's (interpreted) conversion
+function and a `join` that read the heap buffer element by element, each
+element through the evaluator's full lvalue lookup. Two changes:
+- the vector's conversion is intercepted, as `token_view`'s is;
+- reading a run of tokens out of a heap allocation copies them straight out
+  of the allocation's array, in a plain C++ loop.
+
+Interpolating a 16-token `token_sequence` went from **54.5 µs to 6.4 µs**.
+
+Stress workloads after it, with doubled sizes and the best of 5 runs (seconds
+over baseline):
+
+| workload | current | vector | view | view / current |
+|---|---|---|---|---|
+| small × 2000 | 0.24 | 0.46 | 0.41 | 1.7× |
+| enum 200 × 10 | 0.40 | 0.51 | 0.47 | 1.18× |
+| enum 20 × 100 | 0.23 | 0.30 | 0.25 | 1.09× |
+| enum 2 × 1000 | 0.28 | 0.29 | 0.24 | 0.86× |
+| split 400 × 10 | 0.20 | 0.87 | 0.58 | 2.95× |
+| split 40 × 100 | 0.23 | 0.81 | 0.53 | 2.35× |
+| split, hoisted, 400 × 10 | 0.21 | 0.56 | 0.56 | 2.65× |
+| split, block + loop, 400 × 10 | 0.21 | 0.41 | 0.47 | 2.2× |
+| split, block + loop, 40 × 100 | 0.24 | 0.36 | 0.35 | 1.45× |
+| scan 400 × 30 | 0.33 | 0.33 | 0.32 | 0.97× |
+| scan 40 × 300 | 0.25 | 0.18 | 0.20 | 0.80× |
+| pass, `std::span` / `const&`, 200 × 20 | 0.10 | 0.38 | 0.24 | 2.5× |
+| pass, by value, 200 × 20 | 0.08 | 0.53 | 0.12 | 1.6× |
+
+Tests and examples (90 cases) remained level: 119.84 s, 119.31 s, 120.00 s.
+
+What remains above the current model is building one token at a time
+(`cur += t`, an interpreted `push_back`, and resetting `cur` per name), small
+macros that build a vector, and passing `std::span`.
+
+### Native `push_back` and token operators
+
+A native `push_back` alone barely moved the workloads: building one token at
+a time was dominated by the interpreted call to the *operator* wrapping it.
+Per token, in a loop of 64:
+
+| operation | before | native `push_back` | native operators |
+|---|---|---|---|
+| `cur.push_back(t)` | (12.6 in the vector model) | 1.7 µs | 1.8 µs |
+| `cur += t` | 7.1 µs | 7.1 µs | 2.0 µs |
+| `t == ^^{,}` | 8.2 µs | 8.2 µs | 3.3 µs |
+| `t == comma` (two tokens) | 0.4 µs | — | — |
+
+These are now evaluated natively:
+- **`push_back(token)`:** when there is room in the buffer, the token is stored
+  straight into the heap array and the size bumped. A full buffer runs the
+  function itself, which grows it, so that path is rare.
+- **`+=` on a `token_sequence`** (with a token, a view, or another sequence).
+  Once its operands are evaluated it must not fall back, since that would
+  evaluate them twice. So a full buffer is grown by calling the class's own
+  `__grow_for` from the evaluator.
+- **`==` between tokens, views, and sequences:** the token arrays are compared
+  as the built-in operator compares tokens.
+
+Stress workloads after this, with doubled sizes and the best of 5 runs:
+
+| workload | current | vector | view | view / current |
+|---|---|---|---|---|
+| small × 2000 | 0.24 | 0.47 | 0.43 | 1.76× |
+| enum 200 × 10 | 0.43 | 0.55 | 0.48 | 1.10× |
+| enum 20 × 100 | 0.23 | 0.32 | 0.24 | 1.06× |
+| enum 2 × 1000 | 0.28 | 0.29 | 0.22 | 0.78× |
+| split 400 × 10 | 0.20 | 0.88 | 0.44 | 2.24× |
+| split 40 × 100 | 0.21 | 0.81 | 0.39 | 1.86× |
+| split, hoisted, 400 × 10 | 0.20 | 0.53 | 0.45 | 2.27× |
+| split, block + loop, 400 × 10 | 0.20 | 0.42 | 0.41 | 2.03× |
+| split, block + loop, 40 × 100 | 0.21 | 0.34 | 0.33 | 1.57× |
+| scan 400 × 30 | 0.31 | 0.33 | 0.32 | 1.05× |
+| scan 40 × 300 | 0.26 | 0.17 | 0.18 | 0.68× |
+| pass, `std::span` / `const&`, 200 × 20 | 0.05 | 0.36 | 0.23 | 4.6× |
+| pass, by value, 200 × 20 | 0.07 | 0.51 | 0.09 | 1.4× |
+
+Tests and examples (90 cases) remained level: 119.84 s, 119.33 s, 120.40 s.
+
+### Memory
+
+Peak RSS (`/usr/bin/time -f %M`, one run per case; `~/tmp/vwbench/mem.py`).
+
+The tests and examples are the same in every model. Their total is
+13,854 MB (current) and 13,897 MB (view), with a median ratio of 1.000; no
+case differs by more than 5 MB.
+
+Stress workloads, MB above a 148 MB baseline:
+
+| workload | current | vector | view |
+|---|---|---|---|
+| small × 2000 | 5.4 | 6.5 | 5.3 |
+| enum 200 × 10 | 6.0 | 6.4 | 5.0 |
+| enum 20 × 100 | 16.5 | 4.3 | 3.0 |
+| enum 2 × 1000 | **141.5** | 6.6 | 5.3 |
+| split 400 × 10 | 6.5 | 5.0 | 5.0 |
+| split 40 × 100 | 26.7 | 4.6 | 4.3 |
+| split, block + loop, 40 × 100 | 26.7 | 5.6 | 6.3 |
+| scan 400 × 30 | 6.2 | 7.2 | 8.8 |
+| scan 40 × 300 | 3.1 | 3.8 | 5.3 |
+| pass, `std::span` / `const&` | 7.9 | 20.6 | 30.4 |
+| pass, by value | 7.9 | 20.7 | 8.0 |
+
+The current model's memory grows with the *square* of a sequence built by
+repeated `+=`. Every `+=` makes a new immutable sequence in the AST
+context's arena, and that arena is never freed. Building a
+1000-enumerator `enum_to_string` costs 141 MB.
+
+A vector's buffer is evaluator heap, freed when the evaluation ends, so the
+view model stays flat. Its outlier is passing `std::span` (+30 MB, not yet
+investigated).
+
+The pattern is that every interpreted call into `<meta>` costs about 5 µs,
+whatever its body does. So the remaining gaps are the calls still left:
+- small macros construct a `token_sequence` from a view;
+- splitting resets `cur` by assigning to it;
+- `std::span` has its constructor.
+
 ## Conclusions
 
 1. **Compile time is not a reason to reject `vector<token>`.** With a dedicated
@@ -650,7 +770,7 @@ Stress workloads, seconds over baseline:
 | vector implementations | `~/tmp/leanvec/` (`lean_vector.h`, `scalar_vector.h`, `bulk_vector.h`, `native_vector.h`) |
 | microbenchmarks | `~/tmp/tokbench/lit_*.cpp`, `vint_*.cpp`, `pv_*.cpp`, `iter_*.cpp`, `nv_*.cpp`, `e{A..E}.cpp` |
 | full implementation, tests and examples | `~/tmp/tvbench/run.py` (results in `results.json`); migrated example copies in `~/tmp/tvbench/examples-new/` |
-| full implementation, stress workloads | `~/tmp/tvbench/gen2.py` (models `ts`, `tv` and `vw`), `stress.sh`, `stress-split.sh`, `stress-block.sh` (block-at-a-time splitting), `stress3.sh` (all three models) |
+| full implementation, stress workloads | `~/tmp/tvbench/gen2.py` (models `ts`, `tv` and `vw`), `stress.sh`, `stress-split.sh`, `stress-block.sh` (block-at-a-time splitting), `stress3.sh` (all three models), `stress3-big.sh` (doubled sizes, best of 5) |
 | view model, tests and examples | `~/tmp/vwbench/run3.py` (results in `results.json`); migrated example copies in `~/tmp/vwbench/examples-new/`; literal microbenchmarks in `~/tmp/vwbench/micro/` |
 | the vector-model compiler | saved in `~/tmp/clang-tv-model/` with its sources; flags in `~/tmp/flags-tv-model` |
 | the previous compiler | saved in `~/tmp/clang-ts-model/` (compiler, headers, libraries, and the original test and example sources), with flags in `~/tmp/flags-ts-model` |
