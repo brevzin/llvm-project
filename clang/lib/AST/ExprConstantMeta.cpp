@@ -837,6 +837,12 @@ static bool tokens_join(APValue &Result, ASTContext &C, MetaActions &Meta,
                         EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                         QualType ResultTy, SourceRange Range,
                         ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
+                           EvalFn Evaluator, DiagFn Diagnoser,
+                           bool AllowInjection, QualType ResultTy,
+                           SourceRange Range, ArrayRef<Expr *> Args,
+                           Decl *ContainingDecl);
+
 static bool tokens_fill(APValue &Result, ASTContext &C, MetaActions &Meta,
                         EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                         QualType ResultTy, SourceRange Range,
@@ -892,164 +898,165 @@ static bool get_ith_token(APValue &Result, ASTContext &C, MetaActions &Meta,
                           Decl *ContainingDecl);
 
 static constexpr Metafunction Metafunctions[] = {
-  // Kind, MinArgs, MaxArgs, Impl
+    // Kind, MinArgs, MaxArgs, Impl
 
-  // non-exposed metafunctions
-  { Metafunction::MFRK_metaInfo, 2, 2, get_begin_enumerator_decl_of },
-  { Metafunction::MFRK_metaInfo, 2, 2, get_next_enumerator_decl_of },
-  { Metafunction::MFRK_metaInfo, 3, 3, get_ith_base_of },
-  { Metafunction::MFRK_metaInfo, 3, 3, get_ith_template_argument_of },
-  { Metafunction::MFRK_metaInfo, 2, 2, get_begin_member_decl_of },
-  { Metafunction::MFRK_metaInfo, 2, 2, get_next_member_decl_of },
-  { Metafunction::MFRK_bool, 1, 1, is_structural_type },
-  { Metafunction::MFRK_metaInfo, 1, 1, map_decl_to_entity },
+    // non-exposed metafunctions
+    {Metafunction::MFRK_metaInfo, 2, 2, get_begin_enumerator_decl_of},
+    {Metafunction::MFRK_metaInfo, 2, 2, get_next_enumerator_decl_of},
+    {Metafunction::MFRK_metaInfo, 3, 3, get_ith_base_of},
+    {Metafunction::MFRK_metaInfo, 3, 3, get_ith_template_argument_of},
+    {Metafunction::MFRK_metaInfo, 2, 2, get_begin_member_decl_of},
+    {Metafunction::MFRK_metaInfo, 2, 2, get_next_member_decl_of},
+    {Metafunction::MFRK_bool, 1, 1, is_structural_type},
+    {Metafunction::MFRK_metaInfo, 1, 1, map_decl_to_entity},
 
-  // exposed metafunctions
-  { Metafunction::MFRK_spliceFromArg, 4, 4, identifier_of },
-  { Metafunction::MFRK_bool, 1, 1, has_identifier },
-  { Metafunction::MFRK_sizeT, 1, 1, operator_of },
-  { Metafunction::MFRK_sourceLoc, 1, 1, source_location_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, type_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, parent_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, underlying_entity_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, proxied_entity_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, object_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, constant_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, template_of },
-  { Metafunction::MFRK_metaInfo, 4, 4, substitute },
-  { Metafunction::MFRK_spliceFromArg, 2, 2, extract },
-  { Metafunction::MFRK_bool, 1, 1, is_public },
-  { Metafunction::MFRK_bool, 1, 1, is_protected },
-  { Metafunction::MFRK_bool, 1, 1, is_private },
-  { Metafunction::MFRK_bool, 1, 1, is_virtual },
-  { Metafunction::MFRK_bool, 1, 1, is_pure_virtual },
-  { Metafunction::MFRK_bool, 1, 1, is_override },
-  { Metafunction::MFRK_bool, 1, 1, is_deleted },
-  { Metafunction::MFRK_bool, 1, 1, is_defaulted },
-  { Metafunction::MFRK_bool, 1, 1, is_explicit },
-  { Metafunction::MFRK_bool, 1, 1, is_noexcept },
-  { Metafunction::MFRK_bool, 1, 1, is_bit_field },
-  { Metafunction::MFRK_bool, 1, 1, is_enumerator },
-  { Metafunction::MFRK_bool, 1, 1, is_final },
-  { Metafunction::MFRK_bool, 1, 1, is_const },
-  { Metafunction::MFRK_bool, 1, 1, is_volatile },
-  { Metafunction::MFRK_bool, 1, 1, is_mutable_member },
-  { Metafunction::MFRK_bool, 1, 1, is_lvalue_reference_qualified },
-  { Metafunction::MFRK_bool, 1, 1, is_rvalue_reference_qualified },
-  { Metafunction::MFRK_bool, 1, 1, has_static_storage_duration },
-  { Metafunction::MFRK_bool, 1, 1, has_thread_storage_duration },
-  { Metafunction::MFRK_bool, 1, 1, has_automatic_storage_duration },
-  { Metafunction::MFRK_bool, 1, 1, has_internal_linkage },
-  { Metafunction::MFRK_bool, 1, 1, has_module_linkage },
-  { Metafunction::MFRK_bool, 1, 1, has_external_linkage },
-  { Metafunction::MFRK_bool, 1, 1, has_linkage },
-  { Metafunction::MFRK_bool, 1, 1, is_class_member },
-  { Metafunction::MFRK_bool, 1, 1, is_namespace_member },
-  { Metafunction::MFRK_bool, 1, 1, is_nonstatic_data_member },
-  { Metafunction::MFRK_bool, 1, 1, is_static_member },
-  { Metafunction::MFRK_bool, 1, 1, is_base },
-  { Metafunction::MFRK_bool, 1, 1, is_data_member_spec },
-  { Metafunction::MFRK_bool, 1, 1, is_namespace },
-  { Metafunction::MFRK_bool, 1, 1, is_function },
-  { Metafunction::MFRK_bool, 1, 1, is_variable },
-  { Metafunction::MFRK_bool, 1, 1, is_type },
-  { Metafunction::MFRK_bool, 1, 1, is_alias },
-  { Metafunction::MFRK_bool, 1, 1, is_entity_proxy },
-  { Metafunction::MFRK_bool, 1, 1, is_complete_type },
-  { Metafunction::MFRK_bool, 1, 1, has_complete_definition },
-  { Metafunction::MFRK_bool, 1, 1, is_enumerable_type },
-  { Metafunction::MFRK_bool, 1, 1, is_template },
-  { Metafunction::MFRK_bool, 1, 1, is_function_template },
-  { Metafunction::MFRK_bool, 1, 1, is_variable_template },
-  { Metafunction::MFRK_bool, 1, 1, is_class_template },
-  { Metafunction::MFRK_bool, 1, 1, is_alias_template },
-  { Metafunction::MFRK_bool, 1, 1, is_conversion_function_template },
-  { Metafunction::MFRK_bool, 1, 1, is_operator_function_template },
-  { Metafunction::MFRK_bool, 1, 1, is_literal_operator_template },
-  { Metafunction::MFRK_bool, 1, 1, is_constructor_template },
-  { Metafunction::MFRK_bool, 1, 1, is_concept },
-  { Metafunction::MFRK_bool, 1, 1, is_structured_binding },
-  { Metafunction::MFRK_bool, 1, 1, is_value },
-  { Metafunction::MFRK_bool, 1, 1, is_object },
-  { Metafunction::MFRK_bool, 1, 1, has_template_arguments },
-  { Metafunction::MFRK_bool, 1, 1, has_default_member_initializer },
-  { Metafunction::MFRK_bool, 1, 1, is_conversion_function },
-  { Metafunction::MFRK_bool, 1, 1, is_operator_function },
-  { Metafunction::MFRK_bool, 1, 1, is_literal_operator },
-  { Metafunction::MFRK_bool, 1, 1, is_constructor },
-  { Metafunction::MFRK_bool, 1, 1, is_default_constructor },
-  { Metafunction::MFRK_bool, 1, 1, is_copy_constructor },
-  { Metafunction::MFRK_bool, 1, 1, is_move_constructor },
-  { Metafunction::MFRK_bool, 1, 1, is_assignment },
-  { Metafunction::MFRK_bool, 1, 1, is_copy_assignment },
-  { Metafunction::MFRK_bool, 1, 1, is_move_assignment },
-  { Metafunction::MFRK_bool, 1, 1, is_destructor },
-  { Metafunction::MFRK_bool, 1, 1, is_special_member_function },
-  { Metafunction::MFRK_bool, 1, 1, is_user_provided },
-  { Metafunction::MFRK_bool, 1, 1, is_user_declared },
-  { Metafunction::MFRK_metaInfo, 2, 2, reflect_result },
-  { Metafunction::MFRK_metaInfo, 10, 10, data_member_spec },
-  { Metafunction::MFRK_metaInfo, 3, 3, define_aggregate },
-  { Metafunction::MFRK_spliceFromArg, 2, 2, offset_of },
-  { Metafunction::MFRK_sizeT, 1, 1, size_of },
-  { Metafunction::MFRK_spliceFromArg, 2, 2, bit_offset_of },
-  { Metafunction::MFRK_sizeT, 1, 1, bit_size_of },
-  { Metafunction::MFRK_sizeT, 1, 1, alignment_of },
+    // exposed metafunctions
+    {Metafunction::MFRK_spliceFromArg, 4, 4, identifier_of},
+    {Metafunction::MFRK_bool, 1, 1, has_identifier},
+    {Metafunction::MFRK_sizeT, 1, 1, operator_of},
+    {Metafunction::MFRK_sourceLoc, 1, 1, source_location_of},
+    {Metafunction::MFRK_metaInfo, 1, 1, type_of},
+    {Metafunction::MFRK_metaInfo, 1, 1, parent_of},
+    {Metafunction::MFRK_metaInfo, 1, 1, underlying_entity_of},
+    {Metafunction::MFRK_metaInfo, 1, 1, proxied_entity_of},
+    {Metafunction::MFRK_metaInfo, 1, 1, object_of},
+    {Metafunction::MFRK_metaInfo, 1, 1, constant_of},
+    {Metafunction::MFRK_metaInfo, 1, 1, template_of},
+    {Metafunction::MFRK_metaInfo, 4, 4, substitute},
+    {Metafunction::MFRK_spliceFromArg, 2, 2, extract},
+    {Metafunction::MFRK_bool, 1, 1, is_public},
+    {Metafunction::MFRK_bool, 1, 1, is_protected},
+    {Metafunction::MFRK_bool, 1, 1, is_private},
+    {Metafunction::MFRK_bool, 1, 1, is_virtual},
+    {Metafunction::MFRK_bool, 1, 1, is_pure_virtual},
+    {Metafunction::MFRK_bool, 1, 1, is_override},
+    {Metafunction::MFRK_bool, 1, 1, is_deleted},
+    {Metafunction::MFRK_bool, 1, 1, is_defaulted},
+    {Metafunction::MFRK_bool, 1, 1, is_explicit},
+    {Metafunction::MFRK_bool, 1, 1, is_noexcept},
+    {Metafunction::MFRK_bool, 1, 1, is_bit_field},
+    {Metafunction::MFRK_bool, 1, 1, is_enumerator},
+    {Metafunction::MFRK_bool, 1, 1, is_final},
+    {Metafunction::MFRK_bool, 1, 1, is_const},
+    {Metafunction::MFRK_bool, 1, 1, is_volatile},
+    {Metafunction::MFRK_bool, 1, 1, is_mutable_member},
+    {Metafunction::MFRK_bool, 1, 1, is_lvalue_reference_qualified},
+    {Metafunction::MFRK_bool, 1, 1, is_rvalue_reference_qualified},
+    {Metafunction::MFRK_bool, 1, 1, has_static_storage_duration},
+    {Metafunction::MFRK_bool, 1, 1, has_thread_storage_duration},
+    {Metafunction::MFRK_bool, 1, 1, has_automatic_storage_duration},
+    {Metafunction::MFRK_bool, 1, 1, has_internal_linkage},
+    {Metafunction::MFRK_bool, 1, 1, has_module_linkage},
+    {Metafunction::MFRK_bool, 1, 1, has_external_linkage},
+    {Metafunction::MFRK_bool, 1, 1, has_linkage},
+    {Metafunction::MFRK_bool, 1, 1, is_class_member},
+    {Metafunction::MFRK_bool, 1, 1, is_namespace_member},
+    {Metafunction::MFRK_bool, 1, 1, is_nonstatic_data_member},
+    {Metafunction::MFRK_bool, 1, 1, is_static_member},
+    {Metafunction::MFRK_bool, 1, 1, is_base},
+    {Metafunction::MFRK_bool, 1, 1, is_data_member_spec},
+    {Metafunction::MFRK_bool, 1, 1, is_namespace},
+    {Metafunction::MFRK_bool, 1, 1, is_function},
+    {Metafunction::MFRK_bool, 1, 1, is_variable},
+    {Metafunction::MFRK_bool, 1, 1, is_type},
+    {Metafunction::MFRK_bool, 1, 1, is_alias},
+    {Metafunction::MFRK_bool, 1, 1, is_entity_proxy},
+    {Metafunction::MFRK_bool, 1, 1, is_complete_type},
+    {Metafunction::MFRK_bool, 1, 1, has_complete_definition},
+    {Metafunction::MFRK_bool, 1, 1, is_enumerable_type},
+    {Metafunction::MFRK_bool, 1, 1, is_template},
+    {Metafunction::MFRK_bool, 1, 1, is_function_template},
+    {Metafunction::MFRK_bool, 1, 1, is_variable_template},
+    {Metafunction::MFRK_bool, 1, 1, is_class_template},
+    {Metafunction::MFRK_bool, 1, 1, is_alias_template},
+    {Metafunction::MFRK_bool, 1, 1, is_conversion_function_template},
+    {Metafunction::MFRK_bool, 1, 1, is_operator_function_template},
+    {Metafunction::MFRK_bool, 1, 1, is_literal_operator_template},
+    {Metafunction::MFRK_bool, 1, 1, is_constructor_template},
+    {Metafunction::MFRK_bool, 1, 1, is_concept},
+    {Metafunction::MFRK_bool, 1, 1, is_structured_binding},
+    {Metafunction::MFRK_bool, 1, 1, is_value},
+    {Metafunction::MFRK_bool, 1, 1, is_object},
+    {Metafunction::MFRK_bool, 1, 1, has_template_arguments},
+    {Metafunction::MFRK_bool, 1, 1, has_default_member_initializer},
+    {Metafunction::MFRK_bool, 1, 1, is_conversion_function},
+    {Metafunction::MFRK_bool, 1, 1, is_operator_function},
+    {Metafunction::MFRK_bool, 1, 1, is_literal_operator},
+    {Metafunction::MFRK_bool, 1, 1, is_constructor},
+    {Metafunction::MFRK_bool, 1, 1, is_default_constructor},
+    {Metafunction::MFRK_bool, 1, 1, is_copy_constructor},
+    {Metafunction::MFRK_bool, 1, 1, is_move_constructor},
+    {Metafunction::MFRK_bool, 1, 1, is_assignment},
+    {Metafunction::MFRK_bool, 1, 1, is_copy_assignment},
+    {Metafunction::MFRK_bool, 1, 1, is_move_assignment},
+    {Metafunction::MFRK_bool, 1, 1, is_destructor},
+    {Metafunction::MFRK_bool, 1, 1, is_special_member_function},
+    {Metafunction::MFRK_bool, 1, 1, is_user_provided},
+    {Metafunction::MFRK_bool, 1, 1, is_user_declared},
+    {Metafunction::MFRK_metaInfo, 2, 2, reflect_result},
+    {Metafunction::MFRK_metaInfo, 10, 10, data_member_spec},
+    {Metafunction::MFRK_metaInfo, 3, 3, define_aggregate},
+    {Metafunction::MFRK_spliceFromArg, 2, 2, offset_of},
+    {Metafunction::MFRK_sizeT, 1, 1, size_of},
+    {Metafunction::MFRK_spliceFromArg, 2, 2, bit_offset_of},
+    {Metafunction::MFRK_sizeT, 1, 1, bit_size_of},
+    {Metafunction::MFRK_sizeT, 1, 1, alignment_of},
 
-  // P3096 metafunction extensions
-  { Metafunction::MFRK_metaInfo, 3, 3, get_ith_parameter_of },
-  { Metafunction::MFRK_bool, 1, 1, has_ellipsis_parameter },
-  { Metafunction::MFRK_bool, 1, 1, has_default_argument },
-  { Metafunction::MFRK_bool, 1, 1, is_explicit_object_parameter },
-  { Metafunction::MFRK_bool, 1, 1, is_function_parameter },
-  { Metafunction::MFRK_metaInfo, 1, 1, return_type_of },
-  { Metafunction::MFRK_metaInfo, 1, 1, variable_of },
+    // P3096 metafunction extensions
+    {Metafunction::MFRK_metaInfo, 3, 3, get_ith_parameter_of},
+    {Metafunction::MFRK_bool, 1, 1, has_ellipsis_parameter},
+    {Metafunction::MFRK_bool, 1, 1, has_default_argument},
+    {Metafunction::MFRK_bool, 1, 1, is_explicit_object_parameter},
+    {Metafunction::MFRK_bool, 1, 1, is_function_parameter},
+    {Metafunction::MFRK_metaInfo, 1, 1, return_type_of},
+    {Metafunction::MFRK_metaInfo, 1, 1, variable_of},
 
-  // P3394 annotation metafunction extensions
-  { Metafunction::MFRK_metaInfo, 3, 3, get_ith_annotation_of },
-  { Metafunction::MFRK_bool, 1, 1, is_annotation },
-  { Metafunction::MFRK_metaInfo, 2, 2, annotate },
+    // P3394 annotation metafunction extensions
+    {Metafunction::MFRK_metaInfo, 3, 3, get_ith_annotation_of},
+    {Metafunction::MFRK_bool, 1, 1, is_annotation},
+    {Metafunction::MFRK_metaInfo, 2, 2, annotate},
 
-  // P3493 accessibility extensions
-  { Metafunction::MFRK_metaInfo, 0, 0, current_access_context },
-  { Metafunction::MFRK_bool, 3, 3, is_accessible },
+    // P3493 accessibility extensions
+    {Metafunction::MFRK_metaInfo, 0, 0, current_access_context},
+    {Metafunction::MFRK_bool, 3, 3, is_accessible},
 
-  // Other bespoke functions (not proposed at this time)
-  { Metafunction::MFRK_bool, 1, 1, is_access_specified },
-  { Metafunction::MFRK_metaInfo, 5, 5, reflect_invoke },
+    // Other bespoke functions (not proposed at this time)
+    {Metafunction::MFRK_bool, 1, 1, is_access_specified},
+    {Metafunction::MFRK_metaInfo, 5, 5, reflect_invoke},
 
-  // P3491 string literal manipulation
-  { Metafunction::MFRK_bool, 1, 1, is_string_literal },
-  { Metafunction::MFRK_charPtr, 1, 1, string_literal_from },
+    // P3491 string literal manipulation
+    {Metafunction::MFRK_bool, 1, 1, is_string_literal},
+    {Metafunction::MFRK_charPtr, 1, 1, string_literal_from},
 
-  // Expression macros
-  { Metafunction::MFRK_spliceFromArg, 2, 2, source_text_of },
-  { Metafunction::MFRK_bool, 1, 1, is_binary_operation },
-  { Metafunction::MFRK_metaInfo, 2, 2, get_ith_operand_of },
-  { Metafunction::MFRK_sizeT, 1, 1, token_count },
-  { Metafunction::MFRK_token, 2, 2, get_ith_token },
-  { Metafunction::MFRK_sizeT, 1, 1, token_kind_of },
-  { Metafunction::MFRK_sizeT, 1, 1, operator_of_token },
-  { Metafunction::MFRK_spliceFromArg, 3, 3, identifier_of_token },
-  { Metafunction::MFRK_bool, 1, 1, is_constant_expression },
-  { Metafunction::MFRK_metaInfo, 1, 1, test_expression },
-  { Metafunction::MFRK_metaInfo, 1, 1, as_lvalue },
-  { Metafunction::MFRK_metaInfo, 0, 0, macro_expansion_context,
-    /*WantsMacroExpansionContext=*/true },
-  { Metafunction::MFRK_metaInfo, 6, 6, declaration_of },
-  { Metafunction::MFRK_tokenSequence, 3, 3, forwarding_call_for },
-  { Metafunction::MFRK_bool, 1, 1, is_declaration_spec },
-  { Metafunction::MFRK_metaInfo, 1, 1, make_override },
-  { Metafunction::MFRK_metaInfo, 1, 1, make_noexcept },
-  { Metafunction::MFRK_tokenSequence, 2, 2, template_parameter_list_for },
-  { Metafunction::MFRK_tokenSequence, 1, 1, template_argument_list_for },
-  { Metafunction::MFRK_tokenSequence, 2, 2, argument_list_for },
-  { Metafunction::MFRK_bool, 0, 0, expand_at_instantiation,
-    /*WantsMacroExpansionContext=*/true },
-  { Metafunction::MFRK_sizeT, 1, 1, punctuator_of },
-  { Metafunction::MFRK_tokenSequence, 2, 2, tokens_join },
-  { Metafunction::MFRK_sizeT, 2, 2, tokens_fill },
-  { Metafunction::MFRK_tokenPtr, 1, 1, tokens_materialize },
+    // Expression macros
+    {Metafunction::MFRK_spliceFromArg, 2, 2, source_text_of},
+    {Metafunction::MFRK_bool, 1, 1, is_binary_operation},
+    {Metafunction::MFRK_metaInfo, 2, 2, get_ith_operand_of},
+    {Metafunction::MFRK_sizeT, 1, 1, token_count},
+    {Metafunction::MFRK_token, 2, 2, get_ith_token},
+    {Metafunction::MFRK_sizeT, 1, 1, token_kind_of},
+    {Metafunction::MFRK_sizeT, 1, 1, operator_of_token},
+    {Metafunction::MFRK_spliceFromArg, 3, 3, identifier_of_token},
+    {Metafunction::MFRK_bool, 1, 1, is_constant_expression},
+    {Metafunction::MFRK_metaInfo, 1, 1, test_expression},
+    {Metafunction::MFRK_metaInfo, 1, 1, as_lvalue},
+    {Metafunction::MFRK_metaInfo, 0, 0, macro_expansion_context,
+     /*WantsMacroExpansionContext=*/true},
+    {Metafunction::MFRK_metaInfo, 6, 6, declaration_of},
+    {Metafunction::MFRK_tokenSequence, 3, 3, forwarding_call_for},
+    {Metafunction::MFRK_bool, 1, 1, is_declaration_spec},
+    {Metafunction::MFRK_metaInfo, 1, 1, make_override},
+    {Metafunction::MFRK_metaInfo, 1, 1, make_noexcept},
+    {Metafunction::MFRK_tokenSequence, 2, 2, template_parameter_list_for},
+    {Metafunction::MFRK_tokenSequence, 1, 1, template_argument_list_for},
+    {Metafunction::MFRK_tokenSequence, 2, 2, argument_list_for},
+    {Metafunction::MFRK_bool, 0, 0, expand_at_instantiation,
+     /*WantsMacroExpansionContext=*/true},
+    {Metafunction::MFRK_sizeT, 1, 1, punctuator_of},
+    {Metafunction::MFRK_tokenSequence, 2, 2, tokens_join},
+    {Metafunction::MFRK_sizeT, 2, 2, tokens_fill},
+    {Metafunction::MFRK_tokenPtr, 1, 1, tokens_materialize},
+    {Metafunction::MFRK_sizeT, 6, 6, members_gather},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -1081,6 +1088,8 @@ Metafunction::TokenArrayOp Metafunction::getTokenArrayOp() const {
     return TokenArrayOp::Fill;
   return TokenArrayOp::None;
 }
+
+bool Metafunction::isMemberGather() const { return ImplFn == members_gather; }
 
 bool Metafunction::Lookup(unsigned ID, const Metafunction *&result) {
   if (ID >= NumMetafunctions)
@@ -2594,6 +2603,152 @@ bool tokens_fill(APValue &Result, ASTContext &C, MetaActions &Meta,
                  QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
                  Decl *ContainingDecl) {
   return true;
+}
+
+// members_gather(info* dst, info r, size_t kind, info scope,
+//                info designating_class, size_t capacity)
+//
+// The reflections that members_of (kind 0), bases_of (1),
+// static_data_members_of (2), nonstatic_data_members_of (3), or subobjects_of
+// (4: the bases, then the non-static data members) give for 'r' in the access
+// context (scope, designating_class), as an array. The constant evaluator
+// writes them to 'dst' (see Metafunction::isMemberGather); 'dst' and
+// 'capacity' are not read here.
+//
+// Each step is the metafunction the library would call, called directly:
+// the same walk (get_begin_member_decl_of / get_next_member_decl_of /
+// map_decl_to_entity, or get_ith_base_of), the same access check (only class
+// members, bases and enumerators are checked, by is_accessible), and the same
+// kind predicates -- without the interpreted iterator, the intermediate
+// vectors, and the call through the constant evaluator for each.
+bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
+                    EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                    QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                    Decl *ContainingDecl) {
+  APValue R, KindV, Scope, Designating;
+  if (!Evaluator(R, Args[1], true) || !Evaluator(KindV, Args[2], true) ||
+      !Evaluator(Scope, Args[3], true) ||
+      !Evaluator(Designating, Args[4], true))
+    return true;
+  uint64_t Kind = KindV.getInt().getZExtValue();
+
+  // A metafunction's arguments are expressions: wrap each value in one.
+  auto ArgOf = [&](const APValue &V, QualType T) -> Expr * {
+    auto *OVE = new (C) OpaqueValueExpr(Range.getBegin(), T, VK_PRValue);
+    return ConstantExpr::Create(C, OVE, V);
+  };
+  auto Call = [&](decltype(&members_gather) Fn, QualType RT,
+                  ArrayRef<Expr *> As, APValue &Out) {
+    return Fn(Out, C, Meta, Evaluator, Diagnoser, AllowInjection, RT, Range, As,
+              ContainingDecl);
+  };
+  auto IsTrue = [](const APValue &B) { return B.getInt().getBoolValue(); };
+
+  APValue Sentinel = makeReflection(C.VoidTy);
+  auto IsSentinel = [&](const APValue &V) {
+    return V.isReflectedType() && C.hasSameType(V.getReflectedType(), C.VoidTy);
+  };
+  Expr *RE = ArgOf(R, C.MetaInfoTy);
+  Expr *SentinelE = ArgOf(Sentinel, C.MetaInfoTy);
+  Expr *ScopeE = ArgOf(Scope, C.MetaInfoTy);
+  Expr *DesignatingE = ArgOf(Designating, C.MetaInfoTy);
+
+  // is_accessible(m, ctx), as the library has it.
+  auto Accessible = [&](const APValue &M, bool &Acc) {
+    Expr *ME = ArgOf(M, C.MetaInfoTy);
+    APValue B;
+    bool Checked = false;
+    for (auto *Pred : {&is_class_member, &is_base, &is_enumerator}) {
+      if (Call(Pred, C.BoolTy, {ME}, B))
+        return true;
+      if (IsTrue(B)) {
+        Checked = true;
+        break;
+      }
+    }
+    if (!Checked) {
+      Acc = true;
+      return false;
+    }
+    if (Call(is_accessible, C.BoolTy, {ME, ScopeE, DesignatingE}, B))
+      return true;
+    Acc = IsTrue(B);
+    return false;
+  };
+
+  SmallVector<APValue, 16> Out;
+  auto Bases = [&]() {
+    for (uint64_t I = 0;; ++I) {
+      APValue B;
+      Expr *IdxE =
+          ArgOf(APValue(C.MakeIntValue(I, C.getSizeType())), C.getSizeType());
+      if (Call(get_ith_base_of, C.MetaInfoTy, {RE, SentinelE, IdxE}, B))
+        return true;
+      if (IsSentinel(B))
+        return false;
+      bool Acc;
+      if (Accessible(B, Acc))
+        return true;
+      if (Acc)
+        Out.push_back(B);
+    }
+  };
+  // Members, kept if accessible and (when given) the predicate holds.
+  auto Members = [&](decltype(&members_gather) Pred) {
+    APValue Cur;
+    if (Call(get_begin_member_decl_of, C.MetaInfoTy, {RE, SentinelE}, Cur))
+      return true;
+    while (!IsSentinel(Cur)) {
+      Expr *CurE = ArgOf(Cur, C.MetaInfoTy);
+      APValue M;
+      if (Call(map_decl_to_entity, C.MetaInfoTy, {CurE}, M))
+        return true;
+      bool Acc;
+      if (Accessible(M, Acc))
+        return true;
+      if (Acc && Pred) {
+        APValue B;
+        if (Call(Pred, C.BoolTy, {ArgOf(M, C.MetaInfoTy)}, B))
+          return true;
+        Acc = IsTrue(B);
+      }
+      if (Acc)
+        Out.push_back(M);
+      APValue Next;
+      if (Call(get_next_member_decl_of, C.MetaInfoTy, {CurE, SentinelE}, Next))
+        return true;
+      Cur = Next;
+    }
+    return false;
+  };
+
+  bool Failed = false;
+  switch (Kind) {
+  case 0:
+    Failed = Members(nullptr);
+    break;
+  case 1:
+    Failed = Bases();
+    break;
+  case 2:
+    Failed = Members(&is_variable);
+    break;
+  case 3:
+    Failed = Members(&is_nonstatic_data_member);
+    break;
+  case 4:
+    Failed = Bases() || Members(&is_nonstatic_data_member);
+    break;
+  default:
+    llvm_unreachable("unknown member query");
+  }
+  if (Failed)
+    return true;
+
+  APValue Arr(APValue::UninitArray(), Out.size(), Out.size());
+  for (unsigned I = 0; I != Out.size(); ++I)
+    Arr.getArrayInitializedElt(I) = Out[I];
+  return SetAndSucceed(Result, Arr);
 }
 
 bool punctuator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
