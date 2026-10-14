@@ -591,6 +591,7 @@ enum : unsigned {
   __metafn_tokens_join,
   __metafn_tokens_fill,
   __metafn_tokens_materialize,
+  __metafn_members_gather,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1549,6 +1550,23 @@ consteval auto is_accessible(info r, access_context ctx) -> bool {
                         r, ctx.scope(), ctx.designating_class());
 }
 
+// The member queries, gathered natively (see Metafunction::isMemberGather):
+// the count, then the reflections written into the vector.
+enum class __member_query : size_t {
+  members, bases, static_data_members, nonstatic_data_members, subobjects
+};
+consteval auto __gather_members(info r, access_context ctx,
+                                __member_query q) -> vector<info> {
+  size_t n = __metafunction(detail::__metafn_members_gather,
+                            static_cast<info*>(nullptr), r, size_t(q),
+                            ctx.scope(), ctx.designating_class(), size_t(0));
+  vector<info> v(n);
+  if (n)
+    (void)__metafunction(detail::__metafn_members_gather, v.data(), r,
+                         size_t(q), ctx.scope(), ctx.designating_class(), n);
+  return v;
+}
+
 template <class P>
 consteval auto __filtered(vector<info> v, P pred) -> vector<info> {
   erase_if(v, [=](info i) { return !pred(i); });
@@ -1556,13 +1574,7 @@ consteval auto __filtered(vector<info> v, P pred) -> vector<info> {
 }
 
 consteval auto members_of(info r, access_context ctx) -> vector<info> {
-  using iterator =
-      __range_of_infos::iterator<__range_of_infos::front_member_of_fn,
-                                 __range_of_infos::next_member_of_fn,
-                                 __range_of_infos::map_decl_to_entity_fn>;
-  using range = __range_of_infos::range<iterator>;
-
-  return __filtered(range(r).to_vec(), [=](info r) { return is_accessible(r, ctx); });
+  return __gather_members(r, ctx, __member_query::members);
 }
 
 // Returns whether the reflected entity is a namespace.
@@ -1574,13 +1586,7 @@ consteval auto bases_of(info r, access_context ctx) -> vector<info> {
   if (is_namespace(r))
     throw "Namespaces cannot have base classes";
 
-  using iterator =
-    __range_of_infos::iterator<__range_of_infos::front_base_of_fn,
-                                __range_of_infos::next_base_of_fn,
-                                __range_of_infos::map_identity_fn>;
-  using range = __range_of_infos::range<iterator>;
-
-  return __filtered(range(r).to_vec(), [=](info r) { return is_accessible(r, ctx); });
+  return __gather_members(r, ctx, __member_query::bases);
 }
 
 // Returns whether the reflected entity is a variable.
@@ -1593,7 +1599,7 @@ consteval auto static_data_members_of(info r,
   if (is_namespace(r))
     throw "Namespaces cannot have static data members";
 
-  return __filtered(members_of(r, ctx), is_variable);
+  return __gather_members(r, ctx, __member_query::static_data_members);
 }
 
 consteval auto nonstatic_data_members_of(info r,
@@ -1601,14 +1607,14 @@ consteval auto nonstatic_data_members_of(info r,
   if (is_namespace(r))
     throw "Namespaces cannot have non-static data members";
 
-  return __filtered(members_of(r, ctx), is_nonstatic_data_member);
+  return __gather_members(r, ctx, __member_query::nonstatic_data_members);
 }
 
 consteval auto subobjects_of(info r, access_context ctx) -> vector<info> {
-  auto result = bases_of(r, ctx);
-  auto nsdms = nonstatic_data_members_of(r, ctx);
-  result.insert(result.end(), nsdms.begin(), nsdms.end());
-  return result;
+  if (is_namespace(r))
+    throw "Namespaces cannot have base classes";
+
+  return __gather_members(r, ctx, __member_query::subobjects);
 }
 
 // Returns true if the reflected entity is an enumerable type.

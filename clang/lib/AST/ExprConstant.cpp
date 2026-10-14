@@ -10543,6 +10543,53 @@ bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
     return DerivedSuccess(APValue(Count), E);
   }
 
+  // The member queries, gathered natively and written straight to the
+  // caller's buffer: members_gather(info* dst, r, kind, scope, designating,
+  // capacity) gives the count; with a non-null 'dst', it also writes the
+  // reflections there (and 'capacity' must be that count).
+  if (Metafn && Metafn->isMemberGather()) {
+    auto ReadArg = [&](const Expr *Arg, APValue &V) {
+      if (!::Evaluate(V, Info, Arg))
+        return false;
+      if (Arg->isGLValue()) {
+        LValue LV;
+        LV.setFrom(Info.Ctx, V);
+        return handleLValueToRValueConversion(Info, Arg, Arg->getType(), LV, V);
+      }
+      return true;
+    };
+    APValue PtrVal, CapVal;
+    if (!ReadArg(Args[0], PtrVal) || !ReadArg(Args[5], CapVal))
+      return false;
+    APValue Gathered;
+    if (E->getImpl()(Gathered, Evaluator, Diagnoser, AllowInjection,
+                     E->getResultType(), Info.CurrentCall->CallRange, Args,
+                     ContextDecl)) {
+      bool Failed = Error(E);
+      Info.addNotes(Diagnostics);
+      return Failed;
+    }
+    unsigned N = Gathered.getArraySize();
+    LValue Ptr;
+    Ptr.setFrom(Info.Ctx, PtrVal);
+    if (!Ptr.isNullPointer()) {
+      if (CapVal.getInt().getZExtValue() != N)
+        return Error(E);
+      QualType ElemTy =
+          Args[0]->getType()->getPointeeType().getUnqualifiedType();
+      for (unsigned I = 0; I != N; ++I) {
+        if (I && !HandleLValueArrayAdjustment(Info, E, Ptr, ElemTy, 1))
+          return false;
+        if (!handleAssignment(Info, E, Ptr, ElemTy,
+                              Gathered.getArrayInitializedElt(I)))
+          return false;
+      }
+    }
+    llvm::APSInt Count(llvm::APInt(Info.Ctx.getTypeSize(E->getType()), N),
+                       /*isUnsigned=*/true);
+    return DerivedSuccess(APValue(Count), E);
+  }
+
   // Evaluate the metafunction.
   APValue Result;
   const CXXMetafunctionExpr::ImplFn &Implementation = E->getImpl();
