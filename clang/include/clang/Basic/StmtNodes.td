@@ -201,6 +201,7 @@ def CXXMetafunctionExpr : StmtNode<Expr>;
 def CXXSpliceExpr : StmtNode<Expr>;
 def CXXBuiltinInjectExpr : StmtNode<Expr>;
 def CXXBuiltinReportTokensExpr : StmtNode<Expr>;
+def CXXTokenInterpolationListExpr : StmtNode<Expr>;
 def CXXBuiltinIdExpr : StmtNode<Expr>;
 def CXXBuiltinStrLiteralExpr : StmtNode<Expr>;
 def CXXBuiltinTokenizeExpr : StmtNode<Expr>;

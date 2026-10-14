@@ -3260,6 +3260,28 @@ bool object_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   llvm_unreachable("unknown reflection kind");
 }
 
+/// The value of a macro's argument as a constant expression. It is evaluated
+/// as a template argument would be: manifestly constant-evaluated. That
+/// matters for a converted argument (a string literal bound to a
+/// std::string_view parameter), whose conversion may take a different path
+/// when constant-evaluated. A glvalue argument's value is read from the
+/// object it names.
+static bool evaluateMacroArgument(const Expr *E, ASTContext &C, APValue *Out) {
+  if (E->isValueDependent())
+    return false;
+  if (!E->isPRValue()) {
+    APValue Scratch;
+    return E->isCXX11ConstantExpr(C, Out ? Out : &Scratch);
+  }
+  Expr::EvalResult ER;
+  SmallVector<PartialDiagnosticAt, 4> Notes;
+  ER.Diag = &Notes;
+  if (!E->EvaluateAsConstantExpr(ER, C) || ER.HasSideEffects || !Notes.empty())
+    return false;
+  if (Out)
+    *Out = std::move(ER.Val);
+  return true;
+}
 
 bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                  EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -3371,7 +3393,7 @@ bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     // argument (e.g. 'elems[0]' expanding to 'get<0>(elems)').
     const Expr *E = RV.getReflectedExpression();
     APValue Constant;
-    if (E->isValueDependent() || !E->isCXX11ConstantExpr(C, &Constant))
+    if (!evaluateMacroArgument(E, C, &Constant))
       return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
           << 2 << "an expression that is not a constant expression" << Range;
 
@@ -3416,7 +3438,7 @@ bool is_constant_expression(APValue &Result, ASTContext &C, MetaActions &Meta,
   bool IsConstant = false;
   if (RV.getReflectionKind() == ReflectionKind::Expression) {
     const Expr *E = RV.getReflectedExpression();
-    IsConstant = !E->isValueDependent() && E->isCXX11ConstantExpr(C);
+    IsConstant = evaluateMacroArgument(E, C, nullptr);
   }
   return SetAndSucceed(Result, makeBool(C, IsConstant));
 }

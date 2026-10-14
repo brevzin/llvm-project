@@ -9327,6 +9327,27 @@ TreeTransform<Derived>::TransformCXXBuiltinReportTokensExpr(
 }
 
 template <typename Derived>
+ExprResult TreeTransform<Derived>::TransformCXXTokenInterpolationListExpr(
+    CXXTokenInterpolationListExpr *E) {
+  // TransformExprs expands any pack expansion among the elements, as for the
+  // arguments of a call.
+  SmallVector<Expr *, 4> Elements;
+  if (getDerived().TransformExprs(const_cast<Expr **>(E->getElements().data()),
+                                  E->getNumElements(),
+                                  /*IsCall=*/true, Elements))
+    return ExprError();
+  Expr *Separator = nullptr;
+  if (Expr *Sep = E->getSeparator()) {
+    ExprResult S = getDerived().TransformExpr(Sep);
+    if (S.isInvalid())
+      return ExprError();
+    Separator = S.get();
+  }
+  return getSema().BuildTokenInterpolationList(E->getBeginLoc(), Elements,
+                                               Separator, E->getEndLoc());
+}
+
+template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
   // Transform only the original arguments (slot 0). The size()/data() calls

@@ -92,9 +92,37 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
           ConsumeToken();  // consume the '\'s
         ConsumeParen();  // consume '('
 
-        ExprResult Expr = ParseAssignmentExpression();
-        if (Expr.isInvalid()) {
-          SkipUntil(tok::r_paren, StopAtSemi | StopBeforeMatch);
+        // '\(e)', or a list: '\(e1, e2, ...)', whose elements may be pack
+        // expansions ('\(a...)'), optionally followed by '; separator'.
+        SmallVector<Expr *, 4> Elements;
+        bool IsList = false, Invalid = false;
+        while (true) {
+          ExprResult Elt = ParseAssignmentExpression();
+          if (!Elt.isInvalid() && Tok.is(tok::ellipsis)) {
+            IsList = true;
+            Elt = Actions.ActOnPackExpansion(Elt.get(), ConsumeToken());
+          }
+          if (Elt.isInvalid()) {
+            Invalid = true;
+            break;
+          }
+          Elements.push_back(Elt.get());
+          if (!TryConsumeToken(tok::comma))
+            break;
+          IsList = true;
+        }
+        Expr *Separator = nullptr;
+        if (!Invalid && Tok.is(tok::semi)) {
+          ConsumeToken();
+          IsList = true;
+          ExprResult Sep = ParseAssignmentExpression();
+          if (Sep.isInvalid())
+            Invalid = true;
+          else
+            Separator = Sep.get();
+        }
+        if (Invalid) {
+          SkipUntil(tok::r_paren, StopBeforeMatch);
           if (Tok.is(tok::r_paren))
             ConsumeParen();
           continue;
@@ -105,7 +133,10 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
           continue;
         }
 
-        ExprResult CE = Actions.ActOnTokenSequenceInterpolation(Expr.get());
+        ExprResult CE =
+            IsList ? Actions.BuildTokenInterpolationList(BackslashLoc, Elements,
+                                                         Separator, RParenLoc)
+                   : Actions.ActOnTokenSequenceInterpolation(Elements[0]);
         if (CE.isInvalid())
           continue;
 
