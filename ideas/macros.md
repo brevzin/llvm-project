@@ -1173,20 +1173,188 @@ inject the question or use `on_complete` instead. And the callback that owns
 a phase should do that phase's work: mutate in `inject_members`, measure in
 `on_complete`.
 
-## Future directions
+## Open questions
+
+Five questions shape the design more than any syntactic choice. None is
+decided. They are not independent; [How they interact](#how-they-interact)
+comes last.
+
+### 1. When does a macro expand?
+
+**Today:** at the invocation when it can be, otherwise at instantiation (see
+[Expansion](#expansion)):
+- a dependent callee, or an argument of dependent type, defers the invocation
+  up front;
+- a body that asks for the value of a value-dependent argument ends quietly
+  and defers;
+- `expand_at_instantiation()` defers explicitly.
+
+Eager expansion is what lets a name introduced by an expansion be used by
+later code in the template, and it is much cheaper. Expanding once in the
+template beats expanding once per instantiation. For a `fwd!`-like macro,
+parse-time expansion measured about 2.5 µs per use, against about 28 µs at
+instantiation.
+
+**The problem:** deferral is silent. A macro meant to expand in the template
+that defers because of a mistake — a stray value query, an argument that
+turned out to be dependent — still produces the right program, only more
+slowly, and nothing says so.
+
+**Options:**
+- Keep the model, and make deferral visible: a remark naming each deferred
+  invocation and why, or an opt-in on the macro (or the invocation) that makes
+  deferral an error.
+- Always expand at instantiation inside templates. This is simple and
+  predictable, but it gives up the speed, and names introduced by an expansion
+  are no longer usable by later code in the template.
+- Always expand at the invocation, making a value-dependent query an error
+  rather than a deferral. Predictable, but it rejects macros that work today,
+  and `fwd!`-style macros in generic code need the deferred form.
+
+Related: a general answer for a macro that introduces a name later code in a
+template should find, when its expansion must wait. `id!` is the explicit
+form today.
+
+### 2. Where are names in a token sequence looked up?
+
+Hygiene is two separate choices (`hygiene.md` §2), and both are open.
+
+**References the macro writes** (`report_failure`, `std::abs`): looked up
+where the literal was written, or where the tokens are injected?
+- **Today: at the injection site.** Expression parameters already give the
+  caller's side for free: `\(x)` is an already-bound expression, so nothing
+  the macro declares can capture a name inside the caller's argument. But the
+  macro's own free names can be shadowed by the caller. The idiom is to
+  interpolate a reflection instead (`\(^^std::move)`). See
+  [Name lookup and hygiene](#name-lookup-and-hygiene).
+- **Proposed** (`hygiene.md` §7): identifiers remember the scope they were
+  written in. Lookup still happens at injection, since that's when the tokens
+  are parsed, but it starts from the recorded scope. Names a declaration
+  declares belong to the target (declarator-ids, constructor names,
+  mem-initializer-ids). Uses of the target's other names are written
+  `this->x`, `\(cls)::x` or `id("x")`, which is the rule C++ already applies
+  to dependent bases.
+- The cost: a token has to carry its scope, and every injected-declaration
+  example that relies on finding the target's members unqualified has to say
+  so explicitly.
+
+**Declarations the macro introduces** (`__v`, `lhs`, `_1`): private to the
+expansion, or visible to the code around it?
+- **Today: visible.** A statement macro's helper names leak into the enclosing
+  block (and trip `-Wshadow` when nested).
+- The hygienic default makes them fresh. Capture (anaphora, a deliberate `it`
+  or `_1` that user code is meant to see) then needs an explicit opt-out.
+
+### 3. What does a macro parameter denote in the body?
+
+**Today:** a non-raw parameter names a `std::meta::info` reflecting the
+converted argument expression, so `\(x)` pastes that expression. Getting its
+value takes `extract<T>(constant_of(x))`, which repeats the type, and
+`[: x :]` is rejected because the operand is not a constant expression.
+
+**Options:**
+- (A) A `constexpr` value parameter: `__macro maybe(constexpr bool c, ...)`.
+  The argument must be a constant expression, and `c` is a `bool` in the body.
+- (B) Allow `[: p :]` when `p` names a macro parameter, reading its value when
+  the body is evaluated.
+- (C) A library helper, `value_of<T>(x)`. No language change, but it still
+  repeats `T`.
+- (D) `std::meta::typed_info<T>`: the parameter stays a reflection, converts
+  implicitly to `info`, and has an explicit `operator T` and a `value()`
+  accessor. It is additive, and keeps both the reflection and the value
+  available. The costs are overload and `==` ambiguity, deduction yielding
+  the wrapper, and a dependency on `<meta>`.
+- (E) Invert the default: a parameter is a value, and a reflection parameter is
+  marked, e.g. `^^T&& expr`. Nearly every existing expression, member and
+  operator macro uses its parameters as reflections, so all of them would need
+  the marker. And for an argument that happens to be constant, an unmarked
+  `\(x)` would paste the value instead of the expression — a different value
+  category and `decltype` — without a diagnostic.
+
+### 4. What is a token sequence?
+
+**Today, in the experiment:** `^^{...}` is a `std::meta::token_view` (lazy,
+non-owning, like `initializer_list`). The builder is
+`token_sequence = std::vector<token>`, and `token` is a scalar.
+
+**The alternative:** `token_sequence` as a builtin immutable handle, as in the
+original design.
+
+**Measured** (`token-sequence-performance.md`):
+- Real code is the same in both models, and literals are cheaper in the view
+  model.
+- Memory is flat in the view model. In the handle model it grows with the
+  square of a sequence built by repeated `+=` (141 MB for one 1000-enumerator
+  `enum_to_string`).
+- Building one token at a time, and passing a `std::span`, remain slower in
+  the view model.
+- The view model depends on several operations being native: reading back,
+  `push_back`, `+=` and `==`.
+
+**Open:**
+- the library surface macro authors program against: owning vs viewing,
+  which conversions exist, and whether ranges of tokens interpolate;
+- what token equality means. Today an interpolated declaration becomes an
+  annotation token compared by identity, so `^^{ \(^^x) } == ^^{ \(^^x) }`
+  is false.
+
+### 5. What is an expansion, for diagnostics and tools?
+
+**Today:** an expansion is tokens, parsed at the invocation and spliced in.
+No AST node records that a statement or expression came from a macro; only
+source locations do.
+
+**This determines:**
+- where an error inside an expansion points, and how the note stack explains
+  it;
+- how a debugger steps through macro code;
+- whether tools can resugar the expansion back to what the user wrote
+  (`hygiene.md` §1).
+
+**Options:** range from better location tracking alone, to a transparent node
+recording each invocation's expansion (for statement sequences as well as
+expressions), to resugaring as a supported model.
+
+### The injection mechanisms should agree
+
+Several mechanisms inject tokens:
+- expression, statement, declaration and mem-initializer macros;
+- `queue_injection` from consteval blocks;
+- the annotation callbacks (`inject_members`, `on_complete`,
+  `on_template_defined`, and the planned `on_definition`).
+
+Whatever 1 and 2 decide should hold for all of them. Today they differ in
+places:
+- callback injections target the nearest enclosing namespace;
+- pending injections behave like dependent bases;
+- declarations injected from a consteval block are parsed in an immediate
+  context, which is a known bug.
+
+### How they interact
+
+- **2 decides what 1 means.** With lookup from where the literal was written,
+  *when* an expansion happens cannot change *which* declaration a name finds,
+  so deferral really is only slower. With lookup at the injection site, an
+  expansion deferred to instantiation is parsed in the instantiated context.
+  There, argument-dependent lookup at the point of instantiation can find
+  declarations an expansion in the template would not, so early and late can
+  differ in meaning. Settling 2 hygienically is what makes the current answer
+  to 1 safe.
+- **3 feeds 1.** Value parameters (A, D, E) need constant arguments. A
+  value-dependent argument can then never expand in the template, so it
+  always defers. The more a design leans on values, the more invocations
+  defer silently.
+- **4 sets the price of eager expansion,** the performance side of 1. It is
+  otherwise independent.
+- **5 depends on 2.** Resugaring needs to know which identifiers the user
+  wrote and which the macro wrote, which is exactly what scope-carrying
+  tokens record.
+
+## Smaller future work
 
 - Statement position for member (`obj.m!(...);`) invocations; a member
   invocation as a whole statement is an expression statement today.
   (Qualified invocations, `ns::m!(...);`, work in every position.)
-- Hygiene for statement macros: a declaration whose name the macro wrote
-  should be private to its expansion (see `hygiene.md`). Until then, helper
-  names leak into the enclosing block (and trip `-Wshadow` when nested).
-- A general answer for a macro that introduces a name that later code in a
-  template should find when the expansion must wait for instantiation;
-  `id!` is the explicit form today.
-- A transparent AST node recording that a statement sequence came from an
-  invocation (for tooling and resugaring); today the statements are spliced
-  in and only their source locations remember the invocation.
 - A lazy parameter kind for `log_if!`-style macros.
 - `parse_expression(ts)` to turn raw tokens into a bound expression on demand.
 - Richer expression reflection: value category queries, unary operators,
@@ -1194,3 +1362,5 @@ a phase should do that phase's work: mutate in `inject_members`, measure in
   Testing does.
 - Reflection on the pre-conversion argument for typed parameters (`id!(2L)`
   discovering the `2L`).
+- A separator form for list interpolation that skips leading/trailing
+  separators around an empty pack (`f(x, \(a...))` with no elements).
