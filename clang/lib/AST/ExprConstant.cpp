@@ -23251,6 +23251,8 @@ public:
 
   bool VisitCXXReflectExpr(const CXXReflectExpr *E);
   bool VisitCXXTokenSequenceExpr(const CXXTokenSequenceExpr *E);
+  bool
+  VisitCXXTokenInterpolationListExpr(const CXXTokenInterpolationListExpr *E);
   bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
   bool VisitCXXMemberCallExpr(const CXXMemberCallExpr *E);
   bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
@@ -23322,6 +23324,315 @@ static tok::TokenKind tokenKindForOverloadedOperator(OverloadedOperatorKind OO) 
   }
 }
 
+/// Interpolate one '\(e)' -- the annotation token \p SrcTok, whose
+/// expression is \p SubExpr -- appending the tokens it stands for to
+/// \p NewTokens.
+static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
+                              Expr *SubExpr,
+                              SmallVectorImpl<Token> &NewTokens) {
+  // Evaluate the expression in the current constexpr context.
+  APValue Val;
+  QualType ExprTy = SubExpr->getType();
+  if (ExprTy->isTokenSequenceType() || ExprTy->isMetaTokenType()) {
+    // Token sequence (or token) interpolation: splice tokens inline.
+    if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
+      return false;
+    assert(Val.isTokenSequence());
+    TokenSequenceData Inner = Val.getTokenSequence();
+    // The first token of the inner sequence should inherit the leading
+    // space from the annotation token to preserve whitespace for stringize.
+    if (!Inner.empty()) {
+      Token First = Inner.front();
+      if (SrcTok.hasLeadingSpace())
+        First.setFlag(Token::LeadingSpace);
+      NewTokens.push_back(First);
+
+      auto Rest = Inner.drop_front(1);
+      NewTokens.append(Rest.begin(), Rest.end());
+    }
+  } else if (ExprTy->isReflectionType()) {
+    // Reflection-typed expression: evaluate and check kind.
+    if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
+      return false;
+
+    if (Val.isReflectedType()) {
+      QualType QT = Val.getReflectedType();
+
+      // Strip deduced type sugar (e.g. AutoType from 'auto L = ...')
+      // so the injected type is the concrete type, not 'auto'.
+      QT = stripDeducedTypeSugar(Info.Ctx, QT);
+
+      // Create an annot_typename token carrying the type.
+      Token Tok = SrcTok;
+      Tok.setKind(tok::annot_typename);
+      Tok.setAnnotationValue(QT.getAsOpaquePtr());
+      NewTokens.push_back(Tok);
+    } else if (Val.isReflectedExpression()) {
+      // A macro argument: one opaque value per interpolation, unique
+      // so it is emitted in place, evaluating the argument exactly
+      // where (and as often as) it was interpolated.
+      Expr *Arg = Val.getReflectedExpression();
+      auto *OVE = new (Info.Ctx)
+          OpaqueValueExpr(Arg->getExprLoc(), Arg->getType(),
+                          Arg->getValueKind(), Arg->getObjectKind(), Arg);
+      OVE->setIsUnique(true);
+
+      Token Tok = SrcTok;
+      Tok.setKind(tok::annot_primary_expr);
+      Tok.setLocation(Arg->getBeginLoc());
+      Tok.setAnnotationEndLoc(Arg->getEndLoc());
+      Tok.setAnnotationValue(static_cast<void *>(OVE));
+      NewTokens.push_back(Tok);
+    } else if (Val.isReflectedValue() || Val.isReflectedObject()) {
+      // A value (e.g. from constant_of) or object reflection:
+      // interpolate as a constant of the reflected type, so it can
+      // appear anywhere a constant can - a template argument in
+      // particular.
+      QualType QT = Val.getTypeOfReflectedResult(Info.Ctx);
+      APValue Underlying = Val.isReflectedValue() ? Val.getReflectedValue()
+                                                  : Val.getReflectedObject();
+      ExprValueKind VK = Val.isReflectedObject() ? VK_LValue : VK_PRValue;
+      OpaqueValueExpr *OVE =
+          new (Info.Ctx) OpaqueValueExpr(SubExpr->getExprLoc(), QT, VK);
+      ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Underlying);
+
+      Token Tok = SrcTok;
+      Tok.setKind(tok::annot_primary_expr);
+      Tok.setAnnotationValue(static_cast<void *>(CE));
+      NewTokens.push_back(Tok);
+    } else if (Val.isReflectedFunctionDeclSpec()) {
+      // A declaration description (std::meta::declaration_of):
+      // a single annotation token; in member-declaration position
+      // it declares the described function.
+      Token Tok = SrcTok;
+      Tok.setKind(tok::annot_decl_spec);
+      Tok.setAnnotationValue(
+          static_cast<void *>(Val.getReflectedFunctionDeclSpec()));
+      Tok.setAnnotationEndLoc(SrcTok.getLocation());
+      NewTokens.push_back(Tok);
+    } else if (Val.isReflectedDecl() &&
+               isa<EnumConstantDecl>(Val.getReflectedDecl())) {
+      // Enumerator reflection: create an integer literal with the
+      // enum constant's value, then cast to the enum type. This
+      // ensures the value is preserved through case label evaluation.
+      auto *ECD = cast<EnumConstantDecl>(Val.getReflectedDecl());
+      QualType EnumTy = ECD->getType();
+      QualType UnderlyingTy = EnumTy;
+      if (const auto *ET = EnumTy->getAs<EnumType>())
+        UnderlyingTy = ET->getDecl()->getIntegerType();
+
+      IntegerLiteral *IL = IntegerLiteral::Create(
+          Info.Ctx, ECD->getInitVal(), UnderlyingTy, SubExpr->getExprLoc());
+
+      Expr *ResultExpr = IL;
+      if (EnumTy != UnderlyingTy) {
+        ResultExpr = ImplicitCastExpr::Create(
+            Info.Ctx, EnumTy, CK_IntegralCast, IL,
+            /*BasePath=*/nullptr, VK_PRValue, FPOptionsOverride());
+      }
+
+      APValue EnumVal(ECD->getInitVal());
+      ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, ResultExpr, EnumVal);
+
+      Token Tok = SrcTok;
+      Tok.setAnnotationValue(static_cast<void *>(CE));
+      NewTokens.push_back(Tok);
+    } else if (Val.isReflectedDecl() &&
+               isa<ValueDecl>(Val.getReflectedDecl()) &&
+               !isa<FieldDecl>(Val.getReflectedDecl())) {
+      // Non-field declaration reflection: create a DeclRefExpr for
+      // the reflected declaration and emit as annot_primary_expr.
+      ValueDecl *VD = cast<ValueDecl>(Val.getReflectedDecl());
+      QualType DeclTy = VD->getType().getNonReferenceType();
+      ExprValueKind VK =
+          VD->getType()->isReferenceType() ? VK_LValue : VK_LValue;
+      DeclRefExpr *DRE = DeclRefExpr::Create(
+          Info.Ctx, NestedNameSpecifierLoc(), SourceLocation(), VD,
+          /*RefersToEnclosingVariableOrCapture=*/false, SubExpr->getExprLoc(),
+          DeclTy, VK);
+
+      Token Tok = SrcTok;
+      Tok.setAnnotationValue(static_cast<void *>(DRE));
+      NewTokens.push_back(Tok);
+    } else if (Val.isReflectedTemplate()) {
+      // Template reflection: a template-name token. The parser forms
+      // a template-id from it when a template-argument-list follows,
+      // exactly as for a template named by an identifier.
+      Token Tok = SrcTok;
+      Tok.setKind(tok::annot_template_name);
+      Tok.setAnnotationValue(Val.getReflectedTemplate().getAsVoidPointer());
+      NewTokens.push_back(Tok);
+    } else if (Val.isReflectedNamespace()) {
+      // Namespace reflection: a splice, which the parser already
+      // accepts as the leading component of a nested-name-specifier
+      // and in using-directives. A valid SpliceResult's opaque
+      // pointer is the SpliceSpecifier pointer itself.
+      OpaqueValueExpr *OVE = new (Info.Ctx)
+          OpaqueValueExpr(SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                          OK_Ordinary, SubExpr);
+      ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+      SpliceSpecifier *Splice = SpliceSpecifier::Create(
+          Info.Ctx, SrcTok.getLocation(), CE, SrcTok.getLocation(),
+          /*TemplateArgs=*/nullptr);
+
+      Token Tok = SrcTok;
+      Tok.setKind(tok::annot_splice);
+      Tok.setAnnotationValue(static_cast<void *>(Splice));
+      NewTokens.push_back(Tok);
+    } else {
+      // For FieldDecl, base specifiers, and other reflection kinds:
+      // emit as annot_primary_expr with a ConstantExpr carrying the
+      // reflection value. The parser handles this in member access
+      // context by treating it as a splice.
+      OpaqueValueExpr *OVE = new (Info.Ctx)
+          OpaqueValueExpr(SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                          OK_Ordinary, SubExpr);
+      ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+
+      Token Tok = SrcTok;
+      Tok.setAnnotationValue(static_cast<void *>(CE));
+      NewTokens.push_back(Tok);
+    }
+  } else if (ExprTy->isRecordType()) {
+    // Record type without a conversion to std::meta::info or
+    // std::meta::token_sequence (Sema would have inserted one
+    // otherwise). Interpolate the value literally.
+    if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
+      return false;
+    OpaqueValueExpr *OVE = new (Info.Ctx)
+        OpaqueValueExpr(SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
+                        OK_Ordinary, SubExpr);
+    ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+
+    Token Tok = SrcTok;
+    Tok.setAnnotationValue(static_cast<void *>(CE));
+    NewTokens.push_back(Tok);
+  } else {
+    // Non-reflection, non-record interpolation: evaluate as
+    // rvalue and wrap in a ConstantExpr.
+    if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
+      return false;
+
+    Expr *ResultExpr;
+    QualType ExprType = SubExpr->getType();
+
+    // A std::meta::punctuator value is the punctuator's token.
+    if (Val.isInt() && isStdMetaEnum(ExprType, "punctuator")) {
+      tok::TokenKind Kind =
+          getPunctuatorForMetaIndex(Val.getInt().getZExtValue());
+      if (Kind == tok::unknown) {
+        Info.FFDiag(SubExpr, diag::note_constexpr_invalid_punctuator)
+            << toString(Val.getInt(), 10);
+        return false;
+      }
+      Token Tok;
+      Tok.startToken();
+      Tok.setKind(Kind);
+      Tok.setLocation(SrcTok.getLocation());
+      Tok.setLength(strlen(tok::getPunctuatorSpelling(Kind)));
+      if (SrcTok.hasLeadingSpace())
+        Tok.setFlag(Token::LeadingSpace);
+      NewTokens.push_back(Tok);
+      return true;
+    }
+
+    // A std::meta::operators value spells the operator's token.
+    if (Val.isInt() && isStdMetaEnum(ExprType, "operators")) {
+      OverloadedOperatorKind OO =
+          getOverloadedOperatorForMetaIndex(Val.getInt().getZExtValue());
+      tok::TokenKind Kind = tokenKindForOverloadedOperator(OO);
+      if (Kind == tok::unknown) {
+        Info.FFDiag(SubExpr, diag::note_constexpr_macro_operator_not_token)
+            << getOperatorSpelling(OO);
+        return false;
+      }
+      Token Tok;
+      Tok.startToken();
+      Tok.setKind(Kind);
+      Tok.setLocation(SrcTok.getLocation());
+      Tok.setLength(strlen(getOperatorSpelling(OO)));
+      if (SrcTok.hasLeadingSpace())
+        Tok.setFlag(Token::LeadingSpace);
+      NewTokens.push_back(Tok);
+      return true;
+    }
+
+    // For integral and enum types, create an IntegerLiteral
+    // directly from the value. This avoids issues where implicit
+    // conversions would later wrap the inner expression and lose
+    // the constant value.
+    if (Val.isInt() && ExprType->isIntegralOrEnumerationType()) {
+      // For enums, we need to use the underlying integer type for
+      // the literal, then cast back to the enum type.
+      QualType LiteralType = ExprType;
+      if (const auto *ET = ExprType->getAs<EnumType>())
+        LiteralType = ET->getDecl()->getIntegerType();
+
+      // Create an integer literal with the evaluated value
+      IntegerLiteral *IL = IntegerLiteral::Create(
+          Info.Ctx, Val.getInt(), LiteralType, SubExpr->getExprLoc());
+
+      Expr *InnerExpr = IL;
+      // If it was an enum, add an implicit cast back to enum type
+      if (ExprType != LiteralType) {
+        InnerExpr = ImplicitCastExpr::Create(
+            Info.Ctx, ExprType, CK_IntegralCast, IL,
+            /*BasePath=*/nullptr, VK_PRValue, FPOptionsOverride());
+      }
+      ResultExpr = ConstantExpr::Create(Info.Ctx, InnerExpr, Val);
+    } else {
+      // For other types, use OpaqueValueExpr as before
+      OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
+          SubExpr->getExprLoc(), ExprType, VK_PRValue, OK_Ordinary, SubExpr);
+      OVE->setIsUnique(true);
+      ResultExpr = ConstantExpr::Create(Info.Ctx, OVE, Val);
+    }
+
+    Token Tok = SrcTok;
+    Tok.setAnnotationValue(static_cast<void *>(ResultExpr));
+    NewTokens.push_back(Tok);
+  }
+  return true;
+}
+
+bool ReflectionEvaluator::VisitCXXTokenInterpolationListExpr(
+    const CXXTokenInterpolationListExpr *E) {
+  // Each element as its own interpolation, then the separator's tokens
+  // between consecutive elements (a ',' if none was written).
+  auto SourceToken = [&](const Expr *At) {
+    Token Tok;
+    Tok.startToken();
+    Tok.setKind(tok::annot_token_seq_expr);
+    Tok.setLocation(At->getBeginLoc());
+    Tok.setAnnotationEndLoc(At->getEndLoc());
+    return Tok;
+  };
+  SmallVector<Token, 4> Separator;
+  if (Expr *Sep = E->getSeparator()) {
+    if (!interpolateTokens(Info, SourceToken(Sep), Sep, Separator))
+      return false;
+  } else {
+    Token Comma;
+    Comma.startToken();
+    Comma.setKind(tok::comma);
+    Comma.setLocation(E->getBeginLoc());
+    Comma.setLength(1);
+    Separator.push_back(Comma);
+  }
+  SmallVector<Token, 32> Tokens;
+  for (unsigned I = 0, N = E->getNumElements(); I != N; ++I) {
+    if (I)
+      Tokens.append(Separator.begin(), Separator.end());
+    Expr *Elt = E->getElement(I);
+    if (!interpolateTokens(Info, SourceToken(Elt), Elt, Tokens))
+      return false;
+  }
+  return Success(APValue(Tokens.empty()
+                             ? CreateEmptyTokenSequenceData(Info.Ctx)
+                             : CreateTokenSequenceData(Info.Ctx, Tokens)),
+                 E);
+}
+
 bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
     const CXXTokenSequenceExpr *E) {
   APValue Refl(E->getValue());
@@ -23345,282 +23656,10 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
       NewTokens.reserve(TSD.size());
       for (const Token &SrcTok : TSD) {
         if (SrcTok.is(tok::annot_token_seq_expr)) {
-          // Extract the unevaluated expression from the annotation token.
-          // The annotation value is the Expr* stored by setExprAnnotation.
-          Expr *SubExpr = static_cast<Expr *>(
-              SrcTok.getAnnotationValue());
-
-          // Evaluate the expression in the current constexpr context.
-          APValue Val;
-          QualType ExprTy = SubExpr->getType();
-          if (ExprTy->isTokenSequenceType() || ExprTy->isMetaTokenType()) {
-            // Token sequence (or token) interpolation: splice tokens inline.
-            if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
-              return false;
-            assert(Val.isTokenSequence());
-            TokenSequenceData Inner = Val.getTokenSequence();
-            // The first token of the inner sequence should inherit the leading
-            // space from the annotation token to preserve whitespace for stringize.
-            if (!Inner.empty()) {
-              Token First = Inner.front();
-              if (SrcTok.hasLeadingSpace())
-                First.setFlag(Token::LeadingSpace);
-              NewTokens.push_back(First);
-
-              auto Rest = Inner.drop_front(1);
-              NewTokens.append(Rest.begin(), Rest.end());
-            }
-          } else if (ExprTy->isReflectionType()) {
-            // Reflection-typed expression: evaluate and check kind.
-            if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
-              return false;
-
-            if (Val.isReflectedType()) {
-              QualType QT = Val.getReflectedType();
-
-              // Strip deduced type sugar (e.g. AutoType from 'auto L = ...')
-              // so the injected type is the concrete type, not 'auto'.
-              QT = stripDeducedTypeSugar(Info.Ctx, QT);
-
-              // Create an annot_typename token carrying the type.
-              Token Tok = SrcTok;
-              Tok.setKind(tok::annot_typename);
-              Tok.setAnnotationValue(QT.getAsOpaquePtr());
-              NewTokens.push_back(Tok);
-            } else if (Val.isReflectedExpression()) {
-              // A macro argument: one opaque value per interpolation, unique
-              // so it is emitted in place, evaluating the argument exactly
-              // where (and as often as) it was interpolated.
-              Expr *Arg = Val.getReflectedExpression();
-              auto *OVE = new (Info.Ctx) OpaqueValueExpr(
-                  Arg->getExprLoc(), Arg->getType(), Arg->getValueKind(),
-                  Arg->getObjectKind(), Arg);
-              OVE->setIsUnique(true);
-
-              Token Tok = SrcTok;
-              Tok.setKind(tok::annot_primary_expr);
-              Tok.setLocation(Arg->getBeginLoc());
-              Tok.setAnnotationEndLoc(Arg->getEndLoc());
-              Tok.setAnnotationValue(static_cast<void *>(OVE));
-              NewTokens.push_back(Tok);
-            } else if (Val.isReflectedValue() || Val.isReflectedObject()) {
-              // A value (e.g. from constant_of) or object reflection:
-              // interpolate as a constant of the reflected type, so it can
-              // appear anywhere a constant can - a template argument in
-              // particular.
-              QualType QT = Val.getTypeOfReflectedResult(Info.Ctx);
-              APValue Underlying = Val.isReflectedValue()
-                                       ? Val.getReflectedValue()
-                                       : Val.getReflectedObject();
-              ExprValueKind VK =
-                  Val.isReflectedObject() ? VK_LValue : VK_PRValue;
-              OpaqueValueExpr *OVE = new (Info.Ctx)
-                  OpaqueValueExpr(SubExpr->getExprLoc(), QT, VK);
-              ConstantExpr *CE =
-                  ConstantExpr::Create(Info.Ctx, OVE, Underlying);
-
-              Token Tok = SrcTok;
-              Tok.setKind(tok::annot_primary_expr);
-              Tok.setAnnotationValue(static_cast<void *>(CE));
-              NewTokens.push_back(Tok);
-            } else if (Val.isReflectedFunctionDeclSpec()) {
-              // A declaration description (std::meta::declaration_of):
-              // a single annotation token; in member-declaration position
-              // it declares the described function.
-              Token Tok = SrcTok;
-              Tok.setKind(tok::annot_decl_spec);
-              Tok.setAnnotationValue(
-                  static_cast<void *>(Val.getReflectedFunctionDeclSpec()));
-              Tok.setAnnotationEndLoc(SrcTok.getLocation());
-              NewTokens.push_back(Tok);
-            } else if (Val.isReflectedDecl() &&
-                       isa<EnumConstantDecl>(Val.getReflectedDecl())) {
-              // Enumerator reflection: create an integer literal with the
-              // enum constant's value, then cast to the enum type. This
-              // ensures the value is preserved through case label evaluation.
-              auto *ECD = cast<EnumConstantDecl>(Val.getReflectedDecl());
-              QualType EnumTy = ECD->getType();
-              QualType UnderlyingTy = EnumTy;
-              if (const auto *ET = EnumTy->getAs<EnumType>())
-                UnderlyingTy = ET->getDecl()->getIntegerType();
-
-              IntegerLiteral *IL = IntegerLiteral::Create(
-                  Info.Ctx, ECD->getInitVal(), UnderlyingTy,
-                  SubExpr->getExprLoc());
-
-              Expr *ResultExpr = IL;
-              if (EnumTy != UnderlyingTy) {
-                ResultExpr = ImplicitCastExpr::Create(
-                    Info.Ctx, EnumTy, CK_IntegralCast, IL,
-                    /*BasePath=*/nullptr, VK_PRValue, FPOptionsOverride());
-              }
-
-              APValue EnumVal(ECD->getInitVal());
-              ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, ResultExpr,
-                                                      EnumVal);
-
-              Token Tok = SrcTok;
-              Tok.setAnnotationValue(static_cast<void *>(CE));
-              NewTokens.push_back(Tok);
-            } else if (Val.isReflectedDecl() &&
-                       isa<ValueDecl>(Val.getReflectedDecl()) &&
-                       !isa<FieldDecl>(Val.getReflectedDecl())) {
-              // Non-field declaration reflection: create a DeclRefExpr for
-              // the reflected declaration and emit as annot_primary_expr.
-              ValueDecl *VD = cast<ValueDecl>(Val.getReflectedDecl());
-              QualType DeclTy = VD->getType().getNonReferenceType();
-              ExprValueKind VK = VD->getType()->isReferenceType()
-                                     ? VK_LValue : VK_LValue;
-              DeclRefExpr *DRE = DeclRefExpr::Create(
-                  Info.Ctx, NestedNameSpecifierLoc(), SourceLocation(),
-                  VD, /*RefersToEnclosingVariableOrCapture=*/false,
-                  SubExpr->getExprLoc(), DeclTy, VK);
-
-              Token Tok = SrcTok;
-              Tok.setAnnotationValue(static_cast<void *>(DRE));
-              NewTokens.push_back(Tok);
-            } else if (Val.isReflectedTemplate()) {
-              // Template reflection: a template-name token. The parser forms
-              // a template-id from it when a template-argument-list follows,
-              // exactly as for a template named by an identifier.
-              Token Tok = SrcTok;
-              Tok.setKind(tok::annot_template_name);
-              Tok.setAnnotationValue(
-                  Val.getReflectedTemplate().getAsVoidPointer());
-              NewTokens.push_back(Tok);
-            } else if (Val.isReflectedNamespace()) {
-              // Namespace reflection: a splice, which the parser already
-              // accepts as the leading component of a nested-name-specifier
-              // and in using-directives. A valid SpliceResult's opaque
-              // pointer is the SpliceSpecifier pointer itself.
-              OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
-                  SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                  OK_Ordinary, SubExpr);
-              ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
-              SpliceSpecifier *Splice = SpliceSpecifier::Create(
-                  Info.Ctx, SrcTok.getLocation(), CE, SrcTok.getLocation(),
-                  /*TemplateArgs=*/nullptr);
-
-              Token Tok = SrcTok;
-              Tok.setKind(tok::annot_splice);
-              Tok.setAnnotationValue(static_cast<void *>(Splice));
-              NewTokens.push_back(Tok);
-            } else {
-              // For FieldDecl, base specifiers, and other reflection kinds:
-              // emit as annot_primary_expr with a ConstantExpr carrying the
-              // reflection value. The parser handles this in member access
-              // context by treating it as a splice.
-              OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
-                  SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                  OK_Ordinary, SubExpr);
-              ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
-
-              Token Tok = SrcTok;
-              Tok.setAnnotationValue(static_cast<void *>(CE));
-              NewTokens.push_back(Tok);
-            }
-          } else if (ExprTy->isRecordType()) {
-            // Record type without a conversion to std::meta::info or
-            // std::meta::token_sequence (Sema would have inserted one
-            // otherwise). Interpolate the value literally.
-            if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
-              return false;
-            OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
-                SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                OK_Ordinary, SubExpr);
-            ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
-
-            Token Tok = SrcTok;
-            Tok.setAnnotationValue(static_cast<void *>(CE));
-            NewTokens.push_back(Tok);
-          } else {
-            // Non-reflection, non-record interpolation: evaluate as
-            // rvalue and wrap in a ConstantExpr.
-            if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
-              return false;
-
-            Expr *ResultExpr;
-            QualType ExprType = SubExpr->getType();
-
-            // A std::meta::punctuator value is the punctuator's token.
-            if (Val.isInt() && isStdMetaEnum(ExprType, "punctuator")) {
-              tok::TokenKind Kind =
-                  getPunctuatorForMetaIndex(Val.getInt().getZExtValue());
-              if (Kind == tok::unknown) {
-                Info.FFDiag(SubExpr, diag::note_constexpr_invalid_punctuator)
-                    << toString(Val.getInt(), 10);
-                return false;
-              }
-              Token Tok;
-              Tok.startToken();
-              Tok.setKind(Kind);
-              Tok.setLocation(SrcTok.getLocation());
-              Tok.setLength(strlen(tok::getPunctuatorSpelling(Kind)));
-              if (SrcTok.hasLeadingSpace())
-                Tok.setFlag(Token::LeadingSpace);
-              NewTokens.push_back(Tok);
-              continue;
-            }
-
-            // A std::meta::operators value spells the operator's token.
-            if (Val.isInt() && isStdMetaEnum(ExprType, "operators")) {
-              OverloadedOperatorKind OO = getOverloadedOperatorForMetaIndex(
-                  Val.getInt().getZExtValue());
-              tok::TokenKind Kind = tokenKindForOverloadedOperator(OO);
-              if (Kind == tok::unknown) {
-                Info.FFDiag(SubExpr,
-                            diag::note_constexpr_macro_operator_not_token)
-                    << getOperatorSpelling(OO);
-                return false;
-              }
-              Token Tok;
-              Tok.startToken();
-              Tok.setKind(Kind);
-              Tok.setLocation(SrcTok.getLocation());
-              Tok.setLength(strlen(getOperatorSpelling(OO)));
-              if (SrcTok.hasLeadingSpace())
-                Tok.setFlag(Token::LeadingSpace);
-              NewTokens.push_back(Tok);
-              continue;
-            }
-
-            // For integral and enum types, create an IntegerLiteral
-            // directly from the value. This avoids issues where implicit
-            // conversions would later wrap the inner expression and lose
-            // the constant value.
-            if (Val.isInt() && ExprType->isIntegralOrEnumerationType()) {
-              // For enums, we need to use the underlying integer type for
-              // the literal, then cast back to the enum type.
-              QualType LiteralType = ExprType;
-              if (const auto *ET = ExprType->getAs<EnumType>())
-                LiteralType = ET->getDecl()->getIntegerType();
-
-              // Create an integer literal with the evaluated value
-              IntegerLiteral *IL = IntegerLiteral::Create(
-                  Info.Ctx, Val.getInt(), LiteralType,
-                  SubExpr->getExprLoc());
-
-              Expr *InnerExpr = IL;
-              // If it was an enum, add an implicit cast back to enum type
-              if (ExprType != LiteralType) {
-                InnerExpr = ImplicitCastExpr::Create(
-                    Info.Ctx, ExprType, CK_IntegralCast, IL,
-                    /*BasePath=*/nullptr, VK_PRValue, FPOptionsOverride());
-              }
-              ResultExpr = ConstantExpr::Create(Info.Ctx, InnerExpr, Val);
-            } else {
-              // For other types, use OpaqueValueExpr as before
-              OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
-                  SubExpr->getExprLoc(), ExprType, VK_PRValue,
-                  OK_Ordinary, SubExpr);
-              OVE->setIsUnique(true);
-              ResultExpr = ConstantExpr::Create(Info.Ctx, OVE, Val);
-            }
-
-            Token Tok = SrcTok;
-            Tok.setAnnotationValue(static_cast<void *>(ResultExpr));
-            NewTokens.push_back(Tok);
-          }
+          if (!interpolateTokens(
+                  Info, SrcTok,
+                  static_cast<Expr *>(SrcTok.getAnnotationValue()), NewTokens))
+            return false;
         } else {
           NewTokens.push_back(SrcTok);
         }
@@ -25065,6 +25104,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
   case Expr::CXXMetafunctionExprClass:
   case Expr::CXXBuiltinInjectExprClass:
   case Expr::CXXBuiltinReportTokensExprClass:
+  case Expr::CXXTokenInterpolationListExprClass:
   case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXBuiltinStrLiteralExprClass:
   case Expr::CXXBuiltinTokenizeExprClass:

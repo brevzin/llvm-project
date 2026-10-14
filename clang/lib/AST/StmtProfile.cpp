@@ -2497,6 +2497,11 @@ void StmtProfiler::VisitCXXBuiltinReportTokensExpr(
   VisitExpr(E);
 }
 
+void StmtProfiler::VisitCXXTokenInterpolationListExpr(
+    const CXXTokenInterpolationListExpr *E) {
+  VisitExpr(E);
+}
+
 void StmtProfiler::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
   VisitExpr(E);
 }

@@ -567,6 +567,11 @@ void ASTStmtReader::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
     E->setTargetNS(Record.readExpr());
 }
 
+void ASTStmtReader::VisitCXXTokenInterpolationListExpr(
+    CXXTokenInterpolationListExpr *E) {
+  llvm_unreachable("token interpolation lists are not serialized");
+}
+
 void ASTStmtReader::VisitCXXBuiltinReportTokensExpr(
     CXXBuiltinReportTokensExpr *E) {
   VisitExpr(E);

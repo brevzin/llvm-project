@@ -2916,6 +2916,21 @@ void StmtPrinter::VisitCXXBuiltinReportTokensExpr(
   OS << ")";
 }
 
+void StmtPrinter::VisitCXXTokenInterpolationListExpr(
+    CXXTokenInterpolationListExpr *S) {
+  OS << "\\(";
+  for (unsigned I = 0; I < S->getNumElements(); ++I) {
+    if (I > 0)
+      OS << ", ";
+    PrintExpr(S->getElement(I));
+  }
+  if (Expr *Sep = S->getSeparator()) {
+    OS << "; ";
+    PrintExpr(Sep);
+  }
+  OS << ")";
+}
+
 void StmtPrinter::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *S) {
   OS << "std::meta::id(";
   for (unsigned I = 0; I < S->getNumArgs(); ++I) {

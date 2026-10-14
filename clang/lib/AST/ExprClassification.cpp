@@ -245,6 +245,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
 
   case Expr::CXXBuiltinInjectExprClass:
   case Expr::CXXBuiltinReportTokensExprClass:
+  case Expr::CXXTokenInterpolationListExprClass:
   case Expr::CXXBuiltinIdExprClass:
   case Expr::CXXBuiltinStrLiteralExprClass:
   case Expr::CXXBuiltinTokenizeExprClass:

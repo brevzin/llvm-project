@@ -6024,6 +6024,62 @@ public:
   }
 };
 
+/// A list interpolated into a token sequence: '\(e1, e2, ...; sep)' inside
+/// '^^{ ... }'. Each element -- any of which may be a pack expansion, expanded
+/// at instantiation -- is interpolated as '\(e)' would be, and consecutive
+/// elements are separated by the separator's tokens (a ',' when there is no
+/// separator). '\(a...)' is thus '\(a...[0]), \(a...[1]), ...'. Its value is
+/// the resulting token array.
+class CXXTokenInterpolationListExpr : public Expr {
+  // NumElements elements, then the separator (null if none was written).
+  Stmt **SubExprs = nullptr;
+  unsigned NumElements = 0;
+  SourceLocation BeginLoc;
+  SourceLocation EndLoc;
+
+  CXXTokenInterpolationListExpr(ASTContext &C, QualType Ty,
+                                ArrayRef<Expr *> Elements, Expr *Separator,
+                                SourceLocation BeginLoc, SourceLocation EndLoc);
+  CXXTokenInterpolationListExpr(EmptyShell Empty)
+      : Expr(CXXTokenInterpolationListExprClass, Empty) {}
+
+public:
+  static CXXTokenInterpolationListExpr *
+  Create(ASTContext &C, QualType Ty, ArrayRef<Expr *> Elements, Expr *Separator,
+         SourceLocation BeginLoc, SourceLocation EndLoc);
+  static CXXTokenInterpolationListExpr *CreateEmpty(ASTContext &C);
+
+  unsigned getNumElements() const { return NumElements; }
+  Expr *getElement(unsigned I) const {
+    assert(I < NumElements);
+    return cast<Expr>(SubExprs[I]);
+  }
+  ArrayRef<Expr *> getElements() const {
+    return {reinterpret_cast<Expr *const *>(SubExprs), NumElements};
+  }
+  Expr *getSeparator() const {
+    return SubExprs ? cast_or_null<Expr>(SubExprs[NumElements]) : nullptr;
+  }
+
+  SourceLocation getBeginLoc() const LLVM_READONLY { return BeginLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return EndLoc; }
+
+  child_range children() {
+    if (!SubExprs)
+      return child_range(child_iterator(), child_iterator());
+    return child_range(SubExprs, SubExprs + NumElements + 1);
+  }
+  const_child_range children() const {
+    if (!SubExprs)
+      return const_child_range(const_child_iterator(), const_child_iterator());
+    return const_child_range(SubExprs, SubExprs + NumElements + 1);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXTokenInterpolationListExprClass;
+  }
+};
+
 class CXXBuiltinIdExpr : public Expr {
   // Per-arg storage: 3 slots per logical argument.
   //   [3*I + 0] = original argument expression (always set; carries type

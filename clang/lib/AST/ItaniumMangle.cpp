@@ -5233,6 +5233,7 @@ recurse:
   case Expr::CXXParenListInitExprClass:
   case Expr::CXXBuiltinInjectExprClass:
   case Expr::CXXBuiltinReportTokensExprClass:
+  case Expr::CXXTokenInterpolationListExprClass:
   case Expr::CXXBuiltinIdExprClass:
     llvm_unreachable("unexpected statement kind");
 

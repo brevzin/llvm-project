@@ -550,6 +550,11 @@ void ASTStmtWriter::VisitCXXBuiltinInjectExpr(CXXBuiltinInjectExpr *E) {
   Code = serialization::EXPR_BUILTIN_INJECT;
 }
 
+void ASTStmtWriter::VisitCXXTokenInterpolationListExpr(
+    CXXTokenInterpolationListExpr *E) {
+  llvm_unreachable("token interpolation lists are not serialized");
+}
+
 void ASTStmtWriter::VisitCXXBuiltinReportTokensExpr(
     CXXBuiltinReportTokensExpr *E) {
   VisitExpr(E);

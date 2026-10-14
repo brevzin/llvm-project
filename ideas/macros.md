@@ -49,17 +49,19 @@ name at the use site and are found however operator functions are found; see
 A macro cannot be virtual, defaulted or deleted, and a non-static member
 macro must have an explicit object parameter (all diagnosed). A macro may
 declare a parameter pack (`auto&&... xs`, `Ts&&... xs`): each element binds
-one argument expression, and a fold over the pack in the body is the
-repetition syntax — each `\(xs)` inside the fold is its own interpolation,
-so every argument is still evaluated exactly once, at its own position:
+one argument expression, and a list interpolation expands it — `\(xs...)`,
+with a pattern and a separator as needed (see
+[Interpolating a list](#interpolating-a-list)). Each element is its own
+interpolation, so every argument is still evaluated exactly once, at its own
+position:
 
 ```cpp
 template <class... Ts>
 __macro vec(Ts&&... xs) {                       // vec![a, b, c]
-  std::meta::list_builder pushes;
-  ((pushes += ^^{ __v.__emplace_back_assume_capacity(\(xs)); }), ...);
   return ^^{ do -> std::vector<...> { std::vector<...> __v;
-             __v.reserve(\(sizeof...(xs))); \(pushes) do_return __v; } };
+             __v.reserve(\(sizeof...(xs)));
+             \(^^{ __v.__emplace_back_assume_capacity(\(xs)); }...; ^^{})
+             do_return __v; } };
 }
 ```
 
@@ -342,6 +344,52 @@ More backslashes than there are enclosing literals is an error. (Rust's
 `quote!` has the opposite default — the outermost active quotation claims
 every `#var` — which makes exactly this case, generating a macro, the
 awkward one; binding inward keeps the common case escape-free.)
+
+### Interpolating a list
+
+`\(e1, e2, ...; sep)` interpolates a list. Its elements are a list as a
+function's arguments are — any element may be a pack expansion — and each is
+interpolated as `\(e)` would be, with the separator's tokens between
+consecutive elements. Without `; sep` the separator is a `,`, so `\(a...)` is
+`\(a...[0]), \(a...[1]), ...` and `f(\(a...))` calls `f` with every element:
+
+```cpp
+^^{ f(\(a...)) }                                  // f(a0, a1, a2)
+^^{ (\(xs...; ^^{ && })) }                        // (x0 && x1 && x2)
+^^{ \(^^{ \(target) += \(xs); }...; ^^{}) }      // statements: no separator
+^^{ f(\(^^{ static_cast<\(type_of(a))&&>(\(a)) }...)) }   // a pattern
+^^{ sum(\(^^{ 0 }, xs..., ^^{ 1 })) }              // fixed elements and a pack
+```
+
+The pattern of a `...` is the element expression it follows, by the ordinary
+rules of pack expansion. A pattern bigger than one interpolation is a nested
+literal, as in the fourth line: its interpolations of the pack make it the
+pattern. The separator is any one interpolable value — a token sequence, a
+`punctuator`, a token — and cannot be a pack.
+
+**Everything inside `\( )` is the macro's language; a `...` outside it is
+always a token.** That is what keeps the two kinds of `...` apart. `\(name)...`
+interpolates `name` and then emits `...` — a pack expansion in the generated
+code, `xs...` when `name` names the pack `xs` — even inside a fold in the body
+that expands a pack `name` there:
+
+```cpp
+((l += ^^{ \(names)... }), ...);    // each name followed by the token '...'
+```
+
+The empty pack interpolates nothing, separators included, so a list after a
+fixed element carries its comma in the pattern: `f(x \(^^{ , \(rest) }...; ^^{}))`
+is `f(x)` or `f(x, r0, r1)`. Without a pack, a list is just a list:
+`\(x, y)` is `x, y` (a comma expression needs its own parentheses, as in a
+call) and `\(x; sep)` is `x`.
+
+Compared with building the same tokens in a fold — a `list_builder`, or a
+`token_sequence` and `+=` — a list interpolation is part of the one literal,
+so nothing runs per element while the body is evaluated: for `format!` with
+three arguments, the macro's cost per call fell from 2.64M to 1.78M
+instructions (from 65% over `std::format` to 11%; `std::format` is 1.60M),
+and with a new argument type list per call from 12.6M to 10.4M (from 23% over
+to 1% over).
 
 Each interpolated expression is evaluated exactly once, at the point where its
 interpolation lands in the expansion. This is the rule that makes `check!`

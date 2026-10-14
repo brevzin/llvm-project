@@ -2273,6 +2273,35 @@ CXXBuiltinReportTokensExpr::CreateEmpty(ASTContext &C) {
   return new (C) CXXBuiltinReportTokensExpr(EmptyShell());
 }
 
+CXXTokenInterpolationListExpr::CXXTokenInterpolationListExpr(
+    ASTContext &C, QualType Ty, ArrayRef<Expr *> Elements, Expr *Separator,
+    SourceLocation BeginLoc, SourceLocation EndLoc)
+    : Expr(CXXTokenInterpolationListExprClass, Ty, VK_PRValue, OK_Ordinary),
+      NumElements(Elements.size()), BeginLoc(BeginLoc), EndLoc(EndLoc) {
+  SubExprs = new (C) Stmt *[NumElements + 1];
+  ExprDependence Deps = ExprDependence::None;
+  for (unsigned I = 0; I != NumElements; ++I) {
+    SubExprs[I] = Elements[I];
+    Deps |= Elements[I]->getDependence();
+  }
+  SubExprs[NumElements] = Separator;
+  if (Separator)
+    Deps |= Separator->getDependence();
+  setDependence(Deps);
+}
+
+CXXTokenInterpolationListExpr *CXXTokenInterpolationListExpr::Create(
+    ASTContext &C, QualType Ty, ArrayRef<Expr *> Elements, Expr *Separator,
+    SourceLocation BeginLoc, SourceLocation EndLoc) {
+  return new (C) CXXTokenInterpolationListExpr(C, Ty, Elements, Separator,
+                                               BeginLoc, EndLoc);
+}
+
+CXXTokenInterpolationListExpr *
+CXXTokenInterpolationListExpr::CreateEmpty(ASTContext &C) {
+  return new (C) CXXTokenInterpolationListExpr(EmptyShell());
+}
+
 CXXBuiltinIdExpr::CXXBuiltinIdExpr(ASTContext &C, QualType Ty,
                                      ArrayRef<Expr *> Args,
                                      ArrayRef<Expr *> SizeCalls,
