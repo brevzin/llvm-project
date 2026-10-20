@@ -1297,30 +1297,34 @@ value takes `extract<T>(constant_of(x))`, which repeats the type, and
 
 ### 4. What is a token sequence?
 
-**Today, in the experiment:** `^^{...}` is a `std::meta::token_view` (lazy,
-non-owning, like `initializer_list`). The builder is
-`token_sequence = std::vector<token>`, and `token` is a scalar.
+**Today:** `token` is a builtin scalar. `^^{...}` is a
+`std::meta::token_sequence`: a compiler-owned value type.
+- It is an immutable handle to a view of an append-only buffer, so copies are
+  O(1).
+- `+=` and `+` append in amortized O(1) per token, writing in place when the
+  sequence ends its buffer and copying otherwise. No other copy can see the
+  difference.
+- `subseq` is an O(1) slice.
+- It is a contiguous, borrowed range of `const token`, iterated through a
+  lazily materialized array.
+- Every operation is native.
 
-**The alternative:** `token_sequence` as a builtin immutable handle, as in the
-original design.
+Two earlier experiments led here:
+- **The original builtin immutable handle:** cheap copies, but quadratic memory
+  for `+=`, and slow iteration.
+- **A `token_view` literal with `std::vector<token>` as the builder:** flat
+  memory, but the whole `vector` interface, and an interpreted vector unless
+  each operation was made native.
 
-**Measured** (`token-sequence-performance.md`):
-- Real code is the same in both models, and literals are cheaper in the view
-  model.
-- Memory is flat in the view model. In the handle model it grows with the
-  square of a sequence built by repeated `+=` (141 MB for one 1000-enumerator
-  `enum_to_string`).
-- Building one token at a time, and passing a `std::span`, remain slower in
-  the view model.
-- The view model depends on several operations being native: reading back,
-  `push_back`, `+=` and `==`.
+**Measured** (`token-sequence-performance.md`, Stage 7):
+- At or below the original model on nearly every stress workload. Splitting
+  is 0.62–0.79×, and 0.62× with `subseq`.
+- Memory stays linear.
+- The 90 tests and examples compile 1.9% faster than in the original model.
 
-**Open:**
-- the library surface macro authors program against: owning vs viewing,
-  which conversions exist, and whether ranges of tokens interpolate;
-- what token equality means. Today an interpolated declaration becomes an
-  annotation token compared by identity, so `^^{ \(^^x) } == ^^{ \(^^x) }`
-  is false.
+**Open:** what token equality means. Today an interpolated declaration becomes
+an annotation token compared by identity, so `^^{ \(^^x) } == ^^{ \(^^x) }`
+is false.
 
 ### 5. What is an expansion, for diagnostics and tools?
 

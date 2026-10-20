@@ -28,11 +28,11 @@
 
 using std::meta::info;
 using std::meta::token_sequence;
-using std::meta::token_view;
+using std::meta::token_sequence;
 
 // ------------------------------------------------ deferred macro ----------
 
-__macro maybe(bool cond, token_view decl) {
+__macro maybe(bool cond, token_sequence decl) {
   if (extract<bool>(constant_of(cond)))
     return decl;
   return ^^{};
@@ -110,7 +110,7 @@ consteval void add_members() {
   });
 }
 
-__macro init_if_member(std::meta::token_view init) {
+__macro init_if_member(std::meta::token_sequence init) {
   std::meta::info ctor = std::meta::macro_expansion_context();
   std::string_view name = identifier_of(init[0]);
   for (std::meta::info m : nonstatic_data_members_of(

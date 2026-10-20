@@ -62,21 +62,21 @@ consteval void expand(token_sequence item, token_sequence prefix,
   auto lb = std::ranges::find_if(item, [](token t) {
     return is(t, punctuator::left_brace);
   });
-  if (lb == end(item)) {
+  if (lb == item.end()) {
     out.push_back(prefix + item);
     return;
   }
-  if (lb == begin(item) || !is(lb[-1], punctuator::colon_colon))
+  if (lb == item.begin() || !is(lb[-1], punctuator::colon_colon))
     std::constexpr_error_str("using_", "a group must follow '::'");
-  if (!is(item[size(item) - 1], punctuator::right_brace))
+  if (!is(item[item.size() - 1], punctuator::right_brace))
     std::constexpr_error_str("using_", "nothing may follow a group");
-  token_sequence head = prefix + join(std::ranges::subrange(begin(item), lb));
-  for (token_sequence inner : split_commas(std::ranges::subrange(lb + 1, end(item) - 1)))
+  token_sequence head = prefix + join(std::ranges::subrange(item.begin(), lb));
+  for (token_sequence inner : split_commas(std::ranges::subrange(lb + 1, item.end() - 1)))
     expand(inner, head, out);
 }
 }  // namespace using_detail
 
-__macro using_(std::meta::token_view names) {
+__macro using_(std::meta::token_sequence names) {
   std::vector<std::meta::token_sequence> declared;
   for (auto item : using_detail::split_commas(names))
     using_detail::expand(item, ^^{}, declared);

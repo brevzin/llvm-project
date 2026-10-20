@@ -60,6 +60,45 @@ APValue MaterializeTokens(ASTContext &C, TokenSequenceData TSD,
                  /*OnePastTheEnd=*/false);
 }
 
+namespace {
+// The buffers made by AppendTokenSequenceData, by their first token: how
+// many tokens are in use, and how many fit.
+struct GrowableBuffer {
+  size_t Used;
+  size_t Capacity;
+};
+llvm::DenseMap<const Token *, GrowableBuffer> &growableBuffers() {
+  static llvm::DenseMap<const Token *, GrowableBuffer> Buffers;
+  return Buffers;
+}
+} // namespace
+
+TokenSequenceData AppendTokenSequenceData(ASTContext &Ctx,
+                                          TokenSequenceData LHS,
+                                          ArrayRef<Token> RHS) {
+  if (RHS.empty())
+    return LHS;
+  auto &Buffers = growableBuffers();
+  size_t N = LHS.size() + RHS.size();
+  if (!LHS.empty()) {
+    auto It = Buffers.find(LHS.data());
+    if (It != Buffers.end() && It->second.Used == LHS.size() &&
+        N <= It->second.Capacity) {
+      // (RHS may be a view of this same buffer, e.g. ts += ts; it lies
+      // within the used prefix, so it does not overlap what is written.)
+      std::copy(RHS.begin(), RHS.end(),
+                const_cast<Token *>(LHS.data()) + LHS.size());
+      It->second.Used = N;
+      return TokenSequenceData(LHS.data(), N);
+    }
+  }
+  size_t Capacity = std::max<size_t>(2 * N, 16);
+  Token *Stored = new (Ctx) Token[Capacity];
+  std::copy(RHS.begin(), RHS.end(), std::copy(LHS.begin(), LHS.end(), Stored));
+  Buffers[Stored] = {N, Capacity};
+  return TokenSequenceData(Stored, N);
+}
+
 const TokenSequenceData *getMaterializedTokens(const Decl *Storage) {
   MaterializedTokens &M = materializedTokens();
   auto It = M.TokensOf.find(Storage);

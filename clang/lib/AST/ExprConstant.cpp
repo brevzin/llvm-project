@@ -8367,6 +8367,11 @@ namespace {
 static bool TryNativeTokenOperator(EvalInfo &Info, const CallExpr *E,
                                    const FunctionDecl *FD, APValue &Result,
                                    bool &Done);
+static bool TryNativeTokenSequenceMember(EvalInfo &Info, const CallExpr *E,
+                                         const FunctionDecl *FD,
+                                         const LValue &This,
+                                         ArrayRef<const Expr *> Args,
+                                         APValue &Result, bool &Done);
 
 class BitCastBuffer {
   // FIXME: We're going to need bit-level granularity when we support
@@ -9384,20 +9389,6 @@ public:
           return Error(Callee);
         This = &ObjectArg;
         HasQualifier = ME->hasQualifier();
-        // std::meta::token_sequence's push_back, natively (when there is
-        // room).
-        if (Args.size() == 1 && Member->getIdentifier() &&
-            Member->getName() == "push_back" &&
-            Info.Ctx.getCanonicalTagType(Member->getParent())
-                .getTypePtr()
-                ->isStdMetaTokenSequenceType()) {
-          bool Done = false;
-          if (!TryNativeTokenPushBack(Info, E, ObjectArg, Member->getParent(),
-                                      Args[0], Done))
-            return false;
-          if (Done)
-            return true;
-        }
       } else if (const BinaryOperator *BE = dyn_cast<BinaryOperator>(Callee)) {
         // Indirect bound member calls ('.*' or '->*').
         const ValueDecl *D =
@@ -9537,6 +9528,15 @@ public:
       }
     } else
       return Error(E);
+
+    // std::meta::token_sequence's accessors, natively.
+    if (This && !Call) {
+      bool Done = false;
+      if (!TryNativeTokenSequenceMember(Info, E, FD, *This, Args, Result, Done))
+        return false;
+      if (Done)
+        return true;
+    }
 
     // Evaluate the arguments now if we've not already done so.
     if (!Call) {
@@ -10034,80 +10034,6 @@ public:
   bool VisitStackLocationExpr(const StackLocationExpr *E);
 };
 
-/// EvaluateAsRValue - Try to evaluate this expression, performing an implicit
-/// lvalue-to-rvalue cast if it is an lvalue.
-/// std::meta::token_sequence's push_back, natively: when there is room in
-/// the buffer (a heap allocation), the token is stored and the size bumped;
-/// otherwise (\p Done stays false) the function itself runs, and grows it.
-static bool TryNativeTokenPushBack(EvalInfo &Info, const Expr *E,
-                                   const LValue &Obj, const CXXRecordDecl *RD,
-                                   const Expr *Arg, bool &Done) {
-  Done = false;
-  SmallVector<const FieldDecl *, 3> Fields(RD->fields());
-  if (Fields.size() != 3 || !Fields[0]->getType()->isPointerType() ||
-      !Fields[1]->getType()->isIntegerType() ||
-      !Fields[2]->getType()->isIntegerType())
-    return true;
-  APValue Vec;
-  if (!handleLValueToRValueConversion(Info, E, Info.Ctx.getCanonicalTagType(RD),
-                                      Obj, Vec))
-    return false;
-  if (!Vec.isStruct() || Vec.getStructNumFields() != 3)
-    return true;
-  const APValue &P = Vec.getStructField(0);
-  const APValue &Sz = Vec.getStructField(1);
-  const APValue &Cap = Vec.getStructField(2);
-  if (!Sz.isInt() || !Cap.isInt() || !P.isLValue() ||
-      !P.getLValueBase().is<DynamicAllocLValue>())
-    return true;
-  uint64_t Size = Sz.getInt().getZExtValue();
-  if (Size >= Cap.getInt().getZExtValue())
-    return true;
-
-  APValue Tok;
-  if (!Evaluate(Tok, Info, Arg))
-    return false;
-  if (Arg->isGLValue()) {
-    LValue LV;
-    LV.setFrom(Info.Ctx, Tok);
-    if (!handleLValueToRValueConversion(Info, Arg, Arg->getType(), LV, Tok))
-      return false;
-  }
-  if (!Tok.isTokenSequence())
-    return true;
-
-  // The element: written straight into the allocation's array when it is a
-  // plain array slot; otherwise through an ordinary assignment.
-  QualType ElemTy = Fields[0]->getType()->getPointeeType();
-  bool Stored = false;
-  ArrayRef<APValue::LValuePathEntry> Path = P.getLValuePath();
-  if (P.hasLValuePath() && Path.size() == 1 && P.getLValueOffset().isZero())
-    if (std::optional<DynAlloc *> Alloc =
-            Info.lookupDynamicAlloc(P.getLValueBase().get<DynamicAllocLValue>());
-        Alloc && (*Alloc)->Value.isArray()) {
-      uint64_t Idx = Path[0].getAsArrayIndex() + Size;
-      if (Idx < (*Alloc)->Value.getArrayInitializedElts()) {
-        (*Alloc)->Value.getArrayInitializedElt(Idx) = Tok;
-        Stored = true;
-      }
-    }
-  if (!Stored) {
-    LValue Elem;
-    Elem.setFrom(Info.Ctx, P);
-    if (!HandleLValueArrayAdjustment(Info, E, Elem, ElemTy, Size) ||
-        !handleAssignment(Info, E, Elem, ElemTy, Tok))
-      return false;
-  }
-  LValue SizeLV = Obj;
-  if (!HandleLValueMember(Info, E, SizeLV, Fields[1]))
-    return false;
-  APValue NewSize(Info.Ctx.MakeIntValue(Size + 1, Fields[1]->getType()));
-  if (!handleAssignment(Info, E, SizeLV, Fields[1]->getType(), NewSize))
-    return false;
-  Done = true;
-  return true;
-}
-
 /// The concatenation of \p N tokens (std::meta::token, or single-token
 /// sequences) starting at \p Ptr: for storage made by MaterializeTokens, a
 /// slice of the token array it was made from (the array itself if whole);
@@ -10175,31 +10101,10 @@ static bool ReadTokenArray(EvalInfo &Info, const Expr *E, LValue Ptr,
   return true;
 }
 
-/// A std::meta::token_sequence's (std::vector<std::meta::token>) tokens,
-/// given its value: its first two members are the buffer and the size.
-static bool ReadTokenVector(EvalInfo &Info, const Expr *E, const APValue &Vec,
-                            QualType ElemTy, TokenSequenceData &Out) {
-  if (!Vec.isStruct() || Vec.getStructNumFields() < 2)
-    return false;
-  const APValue &P = Vec.getStructField(0);
-  const APValue &Sz = Vec.getStructField(1);
-  if (!Sz.isInt())
-    return false;
-  uint64_t N = Sz.getInt().getZExtValue();
-  if (N == 0) {
-    Out = CreateEmptyTokenSequenceData(Info.Ctx);
-    return true;
-  }
-  if (!P.isLValue())
-    return false;
-  LValue Ptr;
-  Ptr.setFrom(Info.Ctx, P);
-  return ReadTokenArray(Info, E, Ptr, ElemTy, N, Out);
-}
-
-/// A std::meta::token_view's tokens, given the view's value.
-static bool ReadTokenView(EvalInfo &Info, const Expr *E, const APValue &View,
-                          QualType ElemTy, TokenSequenceData &Out) {
+/// A std::meta::token_sequence's tokens, given its value.
+static bool ReadTokenSequenceObject(EvalInfo &Info, const Expr *E,
+                                    const APValue &View, QualType ElemTy,
+                                    TokenSequenceData &Out) {
   if (!View.isStruct() || View.getStructNumFields() != 2)
     return false;
   const APValue &P = View.getStructField(0);
@@ -10216,94 +10121,8 @@ static bool ReadTokenView(EvalInfo &Info, const Expr *E, const APValue &View,
   return ReadTokenArray(Info, E, Ptr, ElemTy, Sz.getInt().getZExtValue(), Out);
 }
 
-/// Append \p Toks to the std::meta::token_sequence \p Obj. The operands
-/// have been evaluated, so this always finishes the job itself: growing the
-/// buffer by calling the class's own __grow_for when it is full, and storing
-/// each token straight into its slot (or by an ordinary assignment, should a
-/// slot not be a plain array element).
-static bool NativeTokenAppend(EvalInfo &Info, const Expr *E, const LValue &Obj,
-                              const CXXRecordDecl *RD, TokenSequenceData Toks) {
-  SmallVector<const FieldDecl *, 3> Fields(RD->fields());
-  if (Fields.size() != 3 || !Fields[0]->getType()->isPointerType() ||
-      !Fields[1]->getType()->isIntegerType() ||
-      !Fields[2]->getType()->isIntegerType())
-    return false;
-  QualType VecTy = Info.Ctx.getCanonicalTagType(RD);
-  uint64_t N = Toks.size();
-  APValue Vec;
-  if (!handleLValueToRValueConversion(Info, E, VecTy, Obj, Vec) ||
-      !Vec.isStruct() || Vec.getStructNumFields() != 3 ||
-      !Vec.getStructField(1).isInt() || !Vec.getStructField(2).isInt())
-    return false;
-  if (N == 0)
-    return true;
-  uint64_t Size = Vec.getStructField(1).getInt().getZExtValue();
-  if (Size + N > Vec.getStructField(2).getInt().getZExtValue()) {
-    // Full: grow it as the class does.
-    const CXXMethodDecl *Grow = nullptr;
-    for (const CXXMethodDecl *M : RD->methods())
-      if (M->getIdentifier() && M->getName() == "__grow_for" &&
-          M->getNumParams() == 1)
-        Grow = M;
-    if (!Grow)
-      return false;
-    const FunctionDecl *Def = nullptr;
-    const Stmt *Body = Grow->getBody(Def);
-    CallScopeRAII CallScope(Info);
-    CallRef Call = Info.CurrentCall->createCall(Def);
-    LValue ParamLV;
-    Info.CurrentCall->createParam(Call, Def->getParamDecl(0), ParamLV) =
-        APValue(Info.Ctx.MakeIntValue(Size + N,
-                                      Def->getParamDecl(0)->getType()));
-    APValue Ignored;
-    if (!HandleFunctionCall(E->getExprLoc(), Def, &Obj, E, {}, Call, Body,
-                            Info, Ignored, nullptr) ||
-        !CallScope.destroy())
-      return false;
-    if (!handleLValueToRValueConversion(Info, E, VecTy, Obj, Vec) ||
-        !Vec.isStruct())
-      return false;
-  }
-  const APValue &P = Vec.getStructField(0);
-  if (!P.isLValue())
-    return false;
-  QualType ElemTy = Fields[0]->getType()->getPointeeType();
-  bool Direct = false;
-  if (P.getLValueBase().is<DynamicAllocLValue>() && P.hasLValuePath() &&
-      P.getLValuePath().size() == 1 && P.getLValueOffset().isZero())
-    if (std::optional<DynAlloc *> Alloc =
-            Info.lookupDynamicAlloc(P.getLValueBase().get<DynamicAllocLValue>());
-        Alloc && (*Alloc)->Value.isArray()) {
-      uint64_t Base = P.getLValuePath()[0].getAsArrayIndex() + Size;
-      if (Base + N <= (*Alloc)->Value.getArrayInitializedElts()) {
-        for (uint64_t I = 0; I != N; ++I)
-          (*Alloc)->Value.getArrayInitializedElt(Base + I) =
-              APValue(TokenSequenceData(Toks.data() + I, 1));
-        Direct = true;
-      }
-    }
-  if (!Direct) {
-    LValue Elem;
-    Elem.setFrom(Info.Ctx, P);
-    if (!HandleLValueArrayAdjustment(Info, E, Elem, ElemTy, Size))
-      return false;
-    for (uint64_t I = 0; I != N; ++I) {
-      if (I && !HandleLValueArrayAdjustment(Info, E, Elem, ElemTy, 1))
-        return false;
-      APValue One(TokenSequenceData(Toks.data() + I, 1));
-      if (!handleAssignment(Info, E, Elem, ElemTy, One))
-        return false;
-    }
-  }
-  LValue SizeLV = Obj;
-  if (!HandleLValueMember(Info, E, SizeLV, Fields[1]))
-    return false;
-  APValue NewSize(Info.Ctx.MakeIntValue(Size + N, Fields[1]->getType()));
-  return handleAssignment(Info, E, SizeLV, Fields[1]->getType(), NewSize);
-}
-
-/// The tokens of an operand of a std::meta token operator: a token, a
-/// token_view, or a token_sequence.
+/// The tokens of an operand of a std::meta token operator: a token or a
+/// token_sequence.
 static bool ReadTokenOperand(EvalInfo &Info, const Expr *Arg,
                              TokenSequenceData &Out) {
   QualType T = Arg->getType().getNonReferenceType();
@@ -10329,17 +10148,32 @@ static bool ReadTokenOperand(EvalInfo &Info, const Expr *Arg,
     Out = V.getTokenSequence();
     return true;
   }
-  if (T->isStdMetaTokenViewType())
-    return ReadTokenView(Info, Arg, V, ElemTy, Out);
   if (T->isStdMetaTokenSequenceType())
-    return ReadTokenVector(Info, Arg, V, ElemTy, Out);
+    return ReadTokenSequenceObject(Info, Arg, V, ElemTy, Out);
   return false;
 }
 
-/// std::meta's operators on tokens -- += on a token_sequence (with a token,
-/// a token_view, or a token_sequence) and == between tokens, views, and
-/// sequences -- natively. \p Done stays false if the function must run (+=
-/// needing to grow the buffer, say).
+/// A std::meta::token_sequence of class type \p T holding \p TSD: its token
+/// array and its size.
+static bool MakeTokenSequenceValue(EvalInfo &Info, QualType T,
+                                   TokenSequenceData TSD, APValue &Out) {
+  const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  if (!RD)
+    return false;
+  SmallVector<const FieldDecl *, 2> Fields(RD->fields());
+  if (Fields.size() != 2 || !Fields[0]->getType()->isTokenSequenceType() ||
+      !Fields[1]->getType()->isIntegerType() || RD->getNumBases())
+    return false;
+  Out = APValue(APValue::UninitStruct(), 0, 2);
+  Out.getStructField(0) = APValue(TSD);
+  Out.getStructField(1) =
+      APValue(Info.Ctx.MakeIntValue(TSD.size(), Fields[1]->getType()));
+  return true;
+}
+
+/// std::meta's operators on token sequences -- += and + (with a token or a
+/// token_sequence), and == between tokens and sequences -- natively.
+/// \p Done stays false for anything else.
 static bool TryNativeTokenOperator(EvalInfo &Info, const CallExpr *E,
                                    const FunctionDecl *FD, APValue &Result,
                                    bool &Done) {
@@ -10357,30 +10191,47 @@ static bool TryNativeTokenOperator(EvalInfo &Info, const CallExpr *E,
   const Expr *L = OCE->getArg(0), *R = OCE->getArg(1);
   auto IsTokenish = [](QualType T) {
     T = T.getNonReferenceType();
-    return T->isMetaTokenType() || T->isStdMetaTokenViewType() ||
-           T->isStdMetaTokenSequenceType();
+    return T->isMetaTokenType() || T->isStdMetaTokenSequenceType();
   };
+  if (!IsTokenish(L->getType()) || !IsTokenish(R->getType()))
+    return true;
   switch (OCE->getOperator()) {
   case OO_PlusEqual: {
     QualType LT = L->getType().getNonReferenceType();
-    if (!L->isGLValue() || !LT->isStdMetaTokenSequenceType() ||
-        !IsTokenish(R->getType()))
+    if (!L->isGLValue() || !LT->isStdMetaTokenSequenceType())
       return true;
     // The right operand first, as for any compound assignment.
     TokenSequenceData Toks;
     if (!ReadTokenOperand(Info, R, Toks))
       return false;
     LValue Obj;
+    APValue Cur, New;
+    TokenSequenceData Old;
     if (!EvaluateLValue(L, Obj, Info) ||
-        !NativeTokenAppend(Info, E, Obj, LT->getAsCXXRecordDecl(), Toks))
+        !handleLValueToRValueConversion(Info, L, LT, Obj, Cur) ||
+        !ReadTokenSequenceObject(Info, L, Cur, Info.Ctx.MetaTokenTy.withConst(),
+                                 Old) ||
+        !MakeTokenSequenceValue(
+            Info, LT, AppendTokenSequenceData(Info.Ctx, Old, Toks), New) ||
+        !handleAssignment(Info, E, Obj, LT, New))
       return false;
     Obj.moveInto(Result);
     Done = true;
     return true;
   }
-  case OO_EqualEqual: {
-    if (!IsTokenish(L->getType()) || !IsTokenish(R->getType()))
+  case OO_Plus: {
+    QualType RT = E->getType();
+    if (!RT->isStdMetaTokenSequenceType())
       return true;
+    TokenSequenceData A, B;
+    if (!ReadTokenOperand(Info, L, A) || !ReadTokenOperand(Info, R, B) ||
+        !MakeTokenSequenceValue(
+            Info, RT, AppendTokenSequenceData(Info.Ctx, A, B), Result))
+      return false;
+    Done = true;
+    return true;
+  }
+  case OO_EqualEqual: {
     TokenSequenceData A, B;
     if (!ReadTokenOperand(Info, L, A) || !ReadTokenOperand(Info, R, B))
       return false;
@@ -10394,6 +10245,125 @@ static bool TryNativeTokenOperator(EvalInfo &Info, const CallExpr *E,
   default:
     return true;
   }
+}
+
+/// std::meta::token_sequence's accessors -- size, empty, data, begin, end,
+/// operator[], and subseq -- natively: the same results as the functions,
+/// without interpreting them. \p Done stays false (before anything is
+/// evaluated) for any other function, or an object not of the expected shape.
+static bool TryNativeTokenSequenceMember(EvalInfo &Info, const CallExpr *E,
+                                         const FunctionDecl *FD,
+                                         const LValue &This,
+                                         ArrayRef<const Expr *> Args,
+                                         APValue &Result, bool &Done) {
+  Done = false;
+  const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+  if (!MD || !MD->isImplicitObjectMemberFunction())
+    return true;
+  QualType ClassTy = Info.Ctx.getCanonicalTagType(MD->getParent());
+  if (!ClassTy->isStdMetaTokenSequenceType())
+    return true;
+  enum { Size, Empty, Data, Begin, End, Subscript, Subseq, Other } Kind = Other;
+  if (MD->getOverloadedOperator() == OO_Subscript)
+    Kind = Subscript;
+  else if (const IdentifierInfo *II = MD->getIdentifier()) {
+    StringRef N = II->getName();
+    Kind = N == "size"                     ? Size
+           : N == "empty"                  ? Empty
+           : N == "data"                   ? Data
+           : N == "begin" || N == "cbegin" ? Begin
+           : N == "end" || N == "cend"     ? End
+           : N == "subseq"                 ? Subseq
+                                           : Other;
+  }
+  if (Kind == Other)
+    return true;
+  APValue Obj;
+  if (!handleLValueToRValueConversion(Info, E, ClassTy, This, Obj))
+    return false;
+  if (!Obj.isStruct() || Obj.getStructNumFields() != 2 ||
+      !Obj.getStructField(0).isTokenSequence())
+    return true;
+  TokenSequenceData TSD = Obj.getStructField(0).getTokenSequence();
+
+  auto ReadSize = [&](const Expr *A, uint64_t &V) {
+    APValue X;
+    if (!Evaluate(X, Info, A))
+      return false;
+    if (A->isGLValue()) {
+      LValue LV;
+      LV.setFrom(Info.Ctx, X);
+      if (!handleLValueToRValueConversion(Info, A, A->getType(), LV, X))
+        return false;
+    }
+    if (!X.isInt())
+      return false;
+    V = X.getInt().getZExtValue();
+    return true;
+  };
+  QualType ElemTy = Info.Ctx.MetaTokenTy.withConst();
+  QualType PtrTy = Info.Ctx.getPointerType(ElemTy);
+  // A pointer to element I of the tokens' array (made once per array).
+  auto ElementPtr = [&](uint64_t I, APValue &Out) {
+    Out = MaterializeTokens(Info.Ctx, TSD, PtrTy);
+    if (I == 0)
+      return true;
+    LValue P;
+    P.setFrom(Info.Ctx, Out);
+    if (!HandleLValueArrayAdjustment(Info, E, P, ElemTy, I))
+      return false;
+    P.moveInto(Out);
+    return true;
+  };
+
+  switch (Kind) {
+  case Size:
+    Result = APValue(Info.Ctx.MakeIntValue(TSD.size(), E->getType()));
+    break;
+  case Empty:
+    Result = APValue(Info.Ctx.MakeIntValue(TSD.empty(), E->getType()));
+    break;
+  case Data:
+  case Begin:
+    if (!ElementPtr(0, Result))
+      return false;
+    break;
+  case End:
+    if (!ElementPtr(TSD.size(), Result))
+      return false;
+    break;
+  case Subscript: {
+    uint64_t I;
+    if (Args.size() != 1 || !ReadSize(Args[0], I))
+      return false;
+    if (I >= TSD.size()) {
+      Info.FFDiag(E, diag::note_constexpr_access_past_end) << AK_Read;
+      return false;
+    }
+    if (!ElementPtr(I, Result))
+      return false;
+    break;
+  }
+  case Subseq: {
+    uint64_t Pos, N;
+    if (Args.size() != 2 || !ReadSize(Args[0], Pos) || !ReadSize(Args[1], N))
+      return false;
+    if (Pos > TSD.size()) {
+      Info.FFDiag(E, diag::note_constexpr_access_past_end) << AK_Read;
+      return false;
+    }
+    N = std::min<uint64_t>(N, TSD.size() - Pos);
+    if (!MakeTokenSequenceValue(
+            Info, E->getType(),
+            TokenSequenceData(N ? TSD.data() + Pos : nullptr, N), Result))
+      return false;
+    break;
+  }
+  case Other:
+    llvm_unreachable("handled above");
+  }
+  Done = true;
+  return true;
 }
 
 template <typename Derived>
@@ -13065,12 +13035,14 @@ bool RecordExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E,
   const CXXConstructorDecl *FD = E->getConstructor();
   if (FD->isInvalidDecl() || FD->getParent()->isInvalidDecl()) return false;
 
-  // A std::meta::token_view from the compiler's token array (a token literal):
+  // A std::meta::token_sequence from the compiler's token array (a literal):
   // made directly -- the token array (or a pointer to its tokens in static
   // storage) and a size -- rather than by evaluating the constructor.
   if (E->getNumArgs() == 1 && FD->getNumParams() == 1 &&
       FD->getParamDecl(0)->getType()->isTokenSequenceType() &&
-      Info.Ctx.getCanonicalTagType(FD->getParent()).getTypePtr()->isStdMetaTokenViewType()) {
+      Info.Ctx.getCanonicalTagType(FD->getParent())
+          .getTypePtr()
+          ->isStdMetaTokenSequenceType()) {
     const CXXRecordDecl *RD = FD->getParent();
     SmallVector<const FieldDecl *, 2> Fields(RD->fields());
     if (Fields.size() == 2 &&
@@ -23722,27 +23694,24 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
 }
 
 bool ReflectionEvaluator::VisitCXXMemberCallExpr(const CXXMemberCallExpr *E) {
-  // A std::meta::token_view given to the compiler as its token array: read
-  // the view directly (for a token literal, the token array it was made
-  // from) rather than by evaluating the conversion function.
-  // Likewise a std::meta::token_sequence (a vector), read out of its buffer.
-  if (const auto *Conv = dyn_cast_or_null<CXXConversionDecl>(E->getMethodDecl());
-      Conv && Conv->getConversionType()->isTokenSequenceType()) {
-    const Type *ClassTy =
-        Info.Ctx.getCanonicalTagType(Conv->getParent()).getTypePtr();
-    bool IsView = ClassTy->isStdMetaTokenViewType();
-    if (IsView || ClassTy->isStdMetaTokenSequenceType()) {
-      const Expr *Obj = E->getImplicitObjectArgument();
-      LValue LV;
-      APValue Val;
-      if (Obj->isGLValue() && EvaluateLValue(Obj, LV, Info) &&
-          handleLValueToRValueConversion(Info, Obj, Obj->getType(), LV, Val)) {
-        TokenSequenceData TSD;
-        QualType ElemTy = Info.Ctx.MetaTokenTy.withConst();
-        if (IsView ? ReadTokenView(Info, E, Val, ElemTy, TSD)
-                   : ReadTokenVector(Info, E, Val, ElemTy, TSD))
-          return Success(APValue(TSD), E);
-      }
+  // A std::meta::token_sequence given to the compiler as its token array: the
+  // one it holds, read directly rather than by evaluating the conversion
+  // function.
+  if (const auto *Conv =
+          dyn_cast_or_null<CXXConversionDecl>(E->getMethodDecl());
+      Conv && Conv->getConversionType()->isTokenSequenceType() &&
+      Info.Ctx.getCanonicalTagType(Conv->getParent())
+          .getTypePtr()
+          ->isStdMetaTokenSequenceType()) {
+    const Expr *Obj = E->getImplicitObjectArgument();
+    LValue LV;
+    APValue Val;
+    if (Obj->isGLValue() && EvaluateLValue(Obj, LV, Info) &&
+        handleLValueToRValueConversion(Info, Obj, Obj->getType(), LV, Val)) {
+      TokenSequenceData TSD;
+      if (ReadTokenSequenceObject(Info, E, Val,
+                                  Info.Ctx.MetaTokenTy.withConst(), TSD))
+        return Success(APValue(TSD), E);
     }
   }
   return BaseType::VisitCXXMemberCallExpr(E);

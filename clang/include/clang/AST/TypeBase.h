@@ -2653,17 +2653,12 @@ public:
   bool isReflectionType() const;     // C++2c reflection [P2996]
   bool isTokenSequenceType() const;  // C++2c token sequences
   bool isMetaTokenType() const;      // std::meta::token
-  /// std::meta::token_sequence: the explicit specialization
-  /// std::vector<std::meta::token> declared by <meta>.
+  /// std::meta::token_sequence: the type of a token literal, ^^{ ... } (the
+  /// compiler's token array, with the library's interface).
   bool isStdMetaTokenSequenceType() const;
-  /// std::meta::token_view: the type of a token literal, ^^{ ... } (a view of
-  /// tokens the compiler owns).
-  bool isStdMetaTokenViewType() const;
-  /// The compiler's token array, std::meta::token_view, or
-  /// std::meta::token_sequence.
+  /// The compiler's token array, or std::meta::token_sequence.
   bool isTokenSequenceLikeType() const {
-    return isTokenSequenceType() || isStdMetaTokenViewType() ||
-           isStdMetaTokenSequenceType();
+    return isTokenSequenceType() || isStdMetaTokenSequenceType();
   }
   bool isNoReturnType() const;       // std::noreturn_t (P3549)
   bool isScalarType() const;         // C99 6.2.5p21 (arithmetic + pointers)

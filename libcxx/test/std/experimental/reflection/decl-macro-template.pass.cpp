@@ -20,7 +20,7 @@
 #include <string>
 
 // Declare 'decl' only if 'c' holds.
-__macro maybe(bool c, std::meta::token_view decl) {
+__macro maybe(bool c, std::meta::token_sequence decl) {
   if (extract<bool>(constant_of(c)))
     return ^^{ \(decl); };
   return ^^{};
@@ -40,7 +40,7 @@ static_assert(nonstatic_data_members_of(^^C<false>,
 
 // Paired with a mem-initializer macro: a member that is declared only for
 // some specializations, and initialized when it is.
-__macro init_if_member(std::meta::token_view init) {
+__macro init_if_member(std::meta::token_sequence init) {
   std::meta::info ctor = std::meta::macro_expansion_context();
   std::string_view name = identifier_of(init[0]);
   for (std::meta::info m : nonstatic_data_members_of(

@@ -736,6 +736,77 @@ whatever its body does. So the remaining gaps are the calls still left:
 - splitting resets `cur` by assigning to it;
 - `std::span` has its constructor.
 
+## Stage 7: a compiler-owned `token_sequence`
+
+Review of the view model concluded that `token` as a scalar is right, but
+the full `vector` interface is not: `token_sequence` should be a type built
+for the job, owned by the compiler. This stage keeps what the measurements
+favored from each model, and drops the `vector` interface.
+
+**The type.** `^^{...}` has type `std::meta::token_sequence`. It is a class
+with two members: the compiler's token array and its size. Every operation
+is native.
+
+| operation | how | cost |
+|---|---|---|
+| literal | holds the literal's array, no copy | as the lazy view |
+| copy, pass by value | copy the handle | O(1) |
+| `+=`, `+` | append in place when the sequence ends its buffer and there is room; otherwise copy into a new buffer with doubled capacity | amortized O(1) per token |
+| `subseq(pos, n)` | a view of the same storage | O(1) |
+| `size`, `empty`, `[]`, `data`, `begin`, `end` | read natively; elements are in a lazily materialized array | O(1) after materialization |
+
+**Why value semantics survive appending in place.** A token array is a view
+of a prefix of a buffer that is only ever appended to. An append writes in
+place only when the sequence ends exactly at the buffer's used size, so every
+other view of the buffer still sees exactly what it saw. Two copies at the
+same end: the first appends in place, and the second (no longer at the end)
+copies.
+
+**Interface.** It is a contiguous, borrowed range (and a view) of `const
+token`:
+- `size`, `empty`, `data`, `begin`, `end`, `[]`, `front` and `back`;
+- `subseq(pos, n = npos)`;
+- `+=` and `+` with tokens and sequences, and `==` between them;
+- construction from an initializer list of tokens, from any contiguous range
+  of tokens (natively), or from any other range of tokens (one at a time).
+
+There is no `token_view` (sequences are as cheap to copy as views were), and
+no mutation of elements.
+
+**Stress workloads**, doubled sizes, best of 5 (`stress4.sh`; seconds above
+baseline):
+
+| workload | original | vector | new | new / original |
+|---|---|---|---|---|
+| small × 2000 | 0.24 | 0.49 | 0.27 | 1.13× |
+| enum 200 × 10 | 0.41 | 0.53 | 0.43 | 1.06× |
+| enum 20 × 100 | 0.23 | 0.31 | 0.21 | 0.93× |
+| enum 2 × 1000 | 0.31 | 0.29 | 0.20 | 0.66× |
+| split 400 × 10 | 0.23 | 0.88 | 0.18 | 0.79× |
+| split 40 × 100 | 0.24 | 0.84 | 0.18 | 0.75× |
+| split, hoisted, 400 × 10 | 0.25 | 0.56 | 0.16 | 0.65× |
+| split with `subseq`, 400 × 10 | 0.21 | 0.42 | 0.16 | 0.75× |
+| split with `subseq`, 40 × 100 | 0.23 | 0.35 | 0.14 | 0.62× |
+| scan 400 × 30 | 0.33 | 0.32 | 0.25 | 0.78× |
+| scan 40 × 300 | 0.27 | 0.19 | 0.15 | 0.57× |
+| pass by `const&`, 200 × 20 | 0.07 | 0.36 | 0.09 | 1.3× |
+| pass by value, 200 × 20 | 0.06 | 0.52 | 0.11 | 2.0× |
+
+For the original and vector models, the split-with-`subseq` rows are their
+own block-split versions (`subrange` and `append_range` in the vector model).
+
+The native accessors matter. Before `size`, `[]`, `subseq` and the rest were
+native, the `subseq` split ran at 0.98–1.28×: each `names[i]` was an
+interpreted call through `data()`.
+
+**Memory** (peak RSS): `enum` 2 × 1000 is 289 MB in the original model and
+153 MB here, with a baseline of 147–149 MB. `split` 40 × 100 is 174 MB
+against 155 MB.
+
+**Tests and examples** (90 cases): 121.13 s (original), 121.25 s (vector),
+118.78 s (new), which is 1.9% faster than the original. Part of that is the
+native member queries, which only the new compiler has.
+
 ## Conclusions
 
 1. **Compile time is not a reason to reject `vector<token>`.** With a dedicated
@@ -773,6 +844,7 @@ whatever its body does. So the remaining gaps are the calls still left:
 | full implementation, stress workloads | `~/tmp/tvbench/gen2.py` (models `ts`, `tv` and `vw`), `stress.sh`, `stress-split.sh`, `stress-block.sh` (block-at-a-time splitting), `stress3.sh` (all three models), `stress3-big.sh` (doubled sizes, best of 5) |
 | view model, tests and examples | `~/tmp/vwbench/run3.py` (results in `results.json`); migrated example copies in `~/tmp/vwbench/examples-new/`; literal microbenchmarks in `~/tmp/vwbench/micro/` |
 | the vector-model compiler | saved in `~/tmp/clang-tv-model/` with its sources; flags in `~/tmp/flags-tv-model` |
+| compiler-owned `token_sequence` (stage 7) | stress: `~/tmp/tvbench/stress4.sh` (model `ns` in `gen2.py`); tests and examples: `~/tmp/nsbench/run4.py`, migrated example copies in `~/tmp/nsbench/examples-new/` |
 | the previous compiler | saved in `~/tmp/clang-ts-model/` (compiler, headers, libraries, and the original test and example sources), with flags in `~/tmp/flags-ts-model` |
 
 Stages 1–4 depend on the experimental `fill` and `join` metafunctions

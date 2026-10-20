@@ -173,6 +173,17 @@ TokenSequenceData CreateTokenSequenceData(ASTContext &Ctx,
                                           ArrayRef<Token> Tokens1,
                                           ArrayRef<Token> Tokens2);
 
+/// \p LHS followed by \p RHS, for std::meta::token_sequence's += and +.
+/// Token arrays are immutable: an array is a view of a prefix of a buffer
+/// that is only ever appended to. When \p LHS is a whole buffer's used
+/// prefix and the buffer has room, \p RHS is written past it and the
+/// result views the longer prefix -- every other view of the buffer still
+/// sees exactly what it saw. Otherwise both are copied into a new buffer
+/// with spare capacity. So building a sequence by appending is amortized
+/// linear, and copies of a sequence never need copying themselves.
+TokenSequenceData AppendTokenSequenceData(ASTContext &Ctx,
+                                          TokenSequenceData LHS,
+                                          ArrayRef<Token> RHS);
 
 /// Allocate an empty token sequence in the ASTContext.
 inline TokenSequenceData CreateEmptyTokenSequenceData(ASTContext &Ctx) {
@@ -180,8 +191,8 @@ inline TokenSequenceData CreateEmptyTokenSequenceData(ASTContext &Ctx) {
 }
 
 /// The tokens of \p TSD as an array of std::meta::token in static storage
-/// (what a std::meta::token_view views): a pointer to its first element, of
-/// type \p PtrTy, or a null pointer for no tokens. The storage for a token
+/// (what a std::meta::token_sequence iterates): a pointer to its first element,
+/// of type \p PtrTy, or a null pointer for no tokens. The storage for a token
 /// array is made once (keyed by its storage), and remembers its tokens (see
 /// getMaterializedTokens).
 APValue MaterializeTokens(ASTContext &C, TokenSequenceData TSD, QualType PtrTy);

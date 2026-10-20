@@ -843,6 +843,18 @@ static bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
                            SourceRange Range, ArrayRef<Expr *> Args,
                            Decl *ContainingDecl);
 
+static bool tokens_append(APValue &Result, ASTContext &C, MetaActions &Meta,
+                          EvalFn Evaluator, DiagFn Diagnoser,
+                          bool AllowInjection, QualType ResultTy,
+                          SourceRange Range, ArrayRef<Expr *> Args,
+                          Decl *ContainingDecl);
+
+static bool tokens_subseq(APValue &Result, ASTContext &C, MetaActions &Meta,
+                          EvalFn Evaluator, DiagFn Diagnoser,
+                          bool AllowInjection, QualType ResultTy,
+                          SourceRange Range, ArrayRef<Expr *> Args,
+                          Decl *ContainingDecl);
+
 static bool tokens_fill(APValue &Result, ASTContext &C, MetaActions &Meta,
                         EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                         QualType ResultTy, SourceRange Range,
@@ -1057,6 +1069,8 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_sizeT, 2, 2, tokens_fill},
     {Metafunction::MFRK_tokenPtr, 1, 1, tokens_materialize},
     {Metafunction::MFRK_sizeT, 6, 6, members_gather},
+    {Metafunction::MFRK_tokenSequence, 2, 2, tokens_append},
+    {Metafunction::MFRK_tokenSequence, 3, 3, tokens_subseq},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -2584,7 +2598,7 @@ bool tokens_join(APValue &Result, ASTContext &C, MetaActions &Meta,
 // storage (an unnamed global constant of its own: tokens that compare equal
 // may still differ, e.g. interpolated constants of different types, so it is
 // not shared): a pointer to its first element, or null for an empty array.
-// This is the storage a token literal (a std::meta::token_view) views.
+// This is the storage a std::meta::token_sequence iterates over.
 bool tokens_materialize(APValue &Result, ASTContext &C, MetaActions &Meta,
                         EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                         QualType ResultTy, SourceRange Range,
@@ -2749,6 +2763,44 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
   for (unsigned I = 0; I != Out.size(); ++I)
     Arr.getArrayInitializedElt(I) = Out[I];
   return SetAndSucceed(Result, Arr);
+}
+
+// tokens_append(token array, token array or token): the first followed by
+// the second (see AppendTokenSequenceData).
+bool tokens_append(APValue &Result, ASTContext &C, MetaActions &Meta,
+                   EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                   QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                   Decl *ContainingDecl) {
+  APValue L, R;
+  if (!Evaluator(L, Args[0], true) || !Evaluator(R, Args[1], true))
+    return true;
+  if (!L.isTokenSequence() || !R.isTokenSequence())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a token sequence");
+  return SetAndSucceed(Result,
+                       APValue(AppendTokenSequenceData(C, L.getTokenSequence(),
+                                                       R.getTokenSequence())));
+}
+
+// tokens_subseq(token array, pos, n): the 'n' tokens (or as many as there
+// are) starting at 'pos', viewing the same storage.
+bool tokens_subseq(APValue &Result, ASTContext &C, MetaActions &Meta,
+                   EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                   QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                   Decl *ContainingDecl) {
+  APValue TS, PosV, NV;
+  if (!Evaluator(TS, Args[0], true) || !Evaluator(PosV, Args[1], true) ||
+      !Evaluator(NV, Args[2], true))
+    return true;
+  if (!TS.isTokenSequence())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a token sequence");
+  TokenSequenceData TSD = TS.getTokenSequence();
+  uint64_t Pos = PosV.getInt().getZExtValue();
+  if (Pos > TSD.size())
+    return DiagnoseReflectionKind(Diagnoser, Range,
+                                  "a position within the token sequence");
+  uint64_t N = std::min<uint64_t>(NV.getInt().getZExtValue(), TSD.size() - Pos);
+  return SetAndSucceed(
+      Result, APValue(TokenSequenceData(N ? TSD.data() + Pos : nullptr, N)));
 }
 
 bool punctuator_of(APValue &Result, ASTContext &C, MetaActions &Meta,

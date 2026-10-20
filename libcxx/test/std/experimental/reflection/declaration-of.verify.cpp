@@ -139,7 +139,7 @@ constexpr auto h5 =
 // the argument list refuses.
 constexpr auto h6 = std::meta::template_parameter_list_for(
     std::meta::declaration_of(^^S::template nonterminal_pack));
-static_assert(!empty(h6));
+static_assert(!h6.empty());
 constexpr auto h7 = std::meta::template_argument_list_for(
     std::meta::declaration_of(^^S::template nonterminal_pack));
 // expected-error@-2 {{constexpr variable 'h7' must be initialized by a constant expression}}
