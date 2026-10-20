@@ -67,33 +67,32 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
           break;
       }
 
-      // Check for interpolation: \(expr), with one backslash per level.
-      unsigned Backslashes = 0;
-      if (IsBackslash(Tok)) {
-        Backslashes = 1;
-        while (IsBackslash(GetLookAheadToken(Backslashes)))
-          ++Backslashes;
-        if (GetLookAheadToken(Backslashes).isNot(tok::l_paren))
-          Backslashes = 0;
-      }
       unsigned Level = NestedLiterals.size() + 1;
-      if (Backslashes > Level) {
-        Diag(Tok, diag::err_interpolation_escapes_token_sequence)
-            << Backslashes << Level;
-        Backslashes = Level; // recover as this literal's
-      }
-      if (Backslashes == Level) {
-        SourceLocation BackslashLoc = Tok.getLocation();
-        // Preserve leading space from the backslash token so that stringize
-        // can correctly reproduce whitespace (e.g., "int \(id("x"))" should
-        // become "int x", not "intx").
-        bool HadLeadingSpace = Tok.hasLeadingSpace();
-        while (IsBackslash(Tok))
-          ConsumeToken();  // consume the '\'s
-        ConsumeParen();  // consume '('
 
-        // '\(e)', or a list: '\(e1, e2, ...)', whose elements may be pack
-        // expansions ('\(a...)'), optionally followed by '; separator'.
+      // An interpolation's annotation token.
+      auto PushInterpolation = [&](ExprResult CE, SourceLocation Begin,
+                                   SourceLocation End, bool LeadingSpace) {
+        if (CE.isInvalid())
+          return;
+        Token AnnTok;
+        AnnTok.startToken();
+        AnnTok.setKind(tok::annot_token_seq_expr);
+        AnnTok.setLocation(Begin);
+        AnnTok.setAnnotationEndLoc(End);
+        // Keep the leading space so that stringize reproduces whitespace
+        // ("int \(id("x"))" is "int x", not "intx").
+        if (LeadingSpace)
+          AnnTok.setFlag(Token::LeadingSpace);
+        setExprAnnotation(AnnTok, CE);
+        Tokens.push_back(AnnTok);
+      };
+
+      // The operand of '\( ... )' or '${ ... }', through its closing token:
+      // 'e', or a list 'e1, e2, ...' whose elements may be pack expansions
+      // ('a...'), optionally followed by '; separator'.
+      auto ParseInterpolationOperand = [&](tok::TokenKind Close,
+                                           SourceLocation Begin,
+                                           SourceLocation &End) -> ExprResult {
         SmallVector<Expr *, 4> Elements;
         bool IsList = false, Invalid = false;
         while (true) {
@@ -122,33 +121,160 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
             Separator = Sep.get();
         }
         if (Invalid) {
-          SkipUntil(tok::r_paren, StopBeforeMatch);
-          if (Tok.is(tok::r_paren))
-            ConsumeParen();
+          SkipUntil(Close, StopBeforeMatch);
+          if (Tok.is(Close))
+            ConsumeAnyToken();
+          return ExprError();
+        }
+        End = Tok.getLocation();
+        if (ExpectAndConsume(Close))
+          return ExprError();
+        return IsList ? Actions.BuildTokenInterpolationList(Begin, Elements,
+                                                            Separator, End)
+                      : Actions.ActOnTokenSequenceInterpolation(Elements[0]);
+      };
+
+      // '$' interpolation: '$name' or '${ ... }', one '$' per level as with
+      // backslashes. It is recognized on the tokens as written, however they
+      // were lexed: an identifier spelled with leading '$'s (where '$' may
+      // begin an identifier, the default), or '$' tokens followed by a name
+      // or '{'. Only tokens written in the literal are examined, never tokens
+      // that arrive by interpolation or as a macro's raw argument.
+      struct DollarForm {
+        unsigned Count = 0;        // the '$'s
+        unsigned DollarTokens = 0; // the tokens spelling them
+        IdentifierInfo *Name = nullptr;
+        SourceLocation NameLoc;
+        bool NameIsOwnToken = false; // '$' tokens, then an identifier
+        bool Brace = false;
+        bool Digit = false;
+      };
+      auto IsDollar = [&](const Token &T) {
+        return T.is(tok::unknown) && T.getLength() == 1 &&
+               *PP.getSourceManager().getCharacterData(T.getLocation()) == '$';
+      };
+      auto ScanDollar = [&](unsigned Ahead) {
+        DollarForm F;
+        Token T0 = GetLookAheadToken(Ahead);
+        if (T0.is(tok::identifier)) {
+          StringRef S = T0.getIdentifierInfo()->getName();
+          size_t N = S.find_first_not_of('$');
+          if (N == 0)
+            return F;
+          F.DollarTokens = 1;
+          if (N == StringRef::npos) {
+            F.Count = S.size();
+            F.Brace = GetLookAheadToken(Ahead + 1).is(tok::l_brace);
+            return F;
+          }
+          F.Count = N;
+          if (isDigit(S[N]))
+            F.Digit = true;
+          else {
+            F.Name = &PP.getIdentifierTable().get(S.substr(N));
+            F.NameLoc = T0.getLocation();
+          }
+          return F;
+        }
+        unsigned I = Ahead;
+        while (IsDollar(GetLookAheadToken(I)))
+          ++I;
+        F.Count = F.DollarTokens = I - Ahead;
+        if (!F.Count)
+          return F;
+        Token After = GetLookAheadToken(I);
+        if (After.is(tok::l_brace))
+          F.Brace = true;
+        else if (After.is(tok::numeric_constant))
+          F.Digit = true;
+        else if (IdentifierInfo *II = After.getIdentifierInfo()) {
+          F.Name = II;
+          F.NameLoc = After.getLocation();
+          F.NameIsOwnToken = true;
+        }
+        return F;
+      };
+
+      // '\$x' is the identifier '$x', not an interpolation.
+      if (IsBackslash(Tok)) {
+        DollarForm F = ScanDollar(1);
+        if (F.Count && F.Count == Level) {
+          ConsumeToken(); // the '\'
+          for (unsigned I = 0; I != F.DollarTokens; ++I) {
+            Tokens.push_back(Tok);
+            ConsumeAnyToken();
+          }
           continue;
         }
+      }
 
-        SourceLocation RParenLoc = Tok.getLocation();
-        if (ExpectAndConsume(tok::r_paren)) {
+      if (DollarForm F = ScanDollar(0); F.Count && F.Count >= Level) {
+        if (F.Count > Level)
+          Diag(Tok, diag::err_dollar_interpolation_escapes_token_sequence)
+              << F.Count << Level; // recover as this literal's
+        SourceLocation Begin = Tok.getLocation();
+        bool LeadingSpace = Tok.hasLeadingSpace();
+        Token First = Tok;
+        for (unsigned I = 0; I != F.DollarTokens; ++I)
+          ConsumeAnyToken();
+        if (F.Brace) {
+          ConsumeBrace();
+          SourceLocation End;
+          ExprResult E = ParseInterpolationOperand(tok::r_brace, Begin, End);
+          PushInterpolation(E, Begin, End, LeadingSpace);
           continue;
         }
+        if (F.Digit) {
+          Diag(First, diag::err_dollar_interpolation_digit);
+          continue;
+        }
+        if (!F.Name) {
+          Diag(First, diag::err_dollar_interpolation_expected);
+          continue;
+        }
+        if (F.NameIsOwnToken)
+          ConsumeAnyToken();
+        if (F.Name->isKeyword(getLangOpts())) {
+          Diag(First, diag::err_dollar_interpolation_keyword)
+              << F.Name->getName();
+          continue;
+        }
+        UnqualifiedId Id;
+        Id.setIdentifier(F.Name, F.NameLoc);
+        CXXScopeSpec SS;
+        ExprResult E = Actions.ActOnIdExpression(
+            getCurScope(), SS, SourceLocation(), Id,
+            /*HasTrailingLParen=*/false, /*IsAddressOfOperand=*/false);
+        if (!E.isInvalid())
+          E = Actions.ActOnTokenSequenceInterpolation(E.get());
+        PushInterpolation(E, Begin, F.NameLoc, LeadingSpace);
+        continue;
+      }
 
+      // Check for interpolation: \(expr), with one backslash per level.
+      unsigned Backslashes = 0;
+      if (IsBackslash(Tok)) {
+        Backslashes = 1;
+        while (IsBackslash(GetLookAheadToken(Backslashes)))
+          ++Backslashes;
+        if (GetLookAheadToken(Backslashes).isNot(tok::l_paren))
+          Backslashes = 0;
+      }
+      if (Backslashes > Level) {
+        Diag(Tok, diag::err_interpolation_escapes_token_sequence)
+            << Backslashes << Level;
+        Backslashes = Level; // recover as this literal's
+      }
+      if (Backslashes == Level) {
+        SourceLocation BackslashLoc = Tok.getLocation();
+        bool HadLeadingSpace = Tok.hasLeadingSpace();
+        while (IsBackslash(Tok))
+          ConsumeToken(); // consume the '\'s
+        ConsumeParen();   // consume '('
+        SourceLocation RParenLoc;
         ExprResult CE =
-            IsList ? Actions.BuildTokenInterpolationList(BackslashLoc, Elements,
-                                                         Separator, RParenLoc)
-                   : Actions.ActOnTokenSequenceInterpolation(Elements[0]);
-        if (CE.isInvalid())
-          continue;
-
-        Token AnnTok;
-        AnnTok.startToken();
-        AnnTok.setKind(tok::annot_token_seq_expr);
-        AnnTok.setLocation(BackslashLoc);
-        AnnTok.setAnnotationEndLoc(RParenLoc);
-        if (HadLeadingSpace)
-          AnnTok.setFlag(Token::LeadingSpace);
-        setExprAnnotation(AnnTok, CE);
-        Tokens.push_back(AnnTok);
+            ParseInterpolationOperand(tok::r_paren, BackslashLoc, RParenLoc);
+        PushInterpolation(CE, BackslashLoc, RParenLoc, HadLeadingSpace);
         continue;
       }
 

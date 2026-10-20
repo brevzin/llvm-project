@@ -345,6 +345,30 @@ More backslashes than there are enclosing literals is an error. (Rust's
 every `#var` — which makes exactly this case, generating a macro, the
 awkward one; binding inward keeps the common case escape-free.)
 
+### `$` interpolation
+
+`$` is a second spelling of interpolation, as in Kotlin or the shell:
+
+| `$` | `\` | meaning |
+|---|---|---|
+| `$x` | `\(x)` | interpolate the name `x` (an identifier only: `$x.f()` interpolates `x`, then the tokens `.f()`) |
+| `${e}` | `\(e)` | interpolate an expression |
+| `${e1, xs...; sep}` | `\(e1, xs...; sep)` | a list (below) |
+| `$$x`, `$${e}` | `\\(x)` | one more `$` per enclosing literal |
+
+`\$x` is the identifier `$x`, not an interpolation.
+
+Both spellings are accepted, and can be mixed in one literal.
+
+`$` is recognized only on tokens written in a literal: an identifier spelled
+with leading `$`s (`$` may begin an identifier, by default), or `$` tokens
+followed by a name or `{`. It is a rule about tokens, not lexing, so it holds
+in a `#define` body too. Tokens that arrive any other way are never examined,
+so a macro's raw argument is passed through as written: `λ!($1.x > $2.x)`
+hands the body the identifiers `$1` and `$2`. In the body's own literals,
+`$` followed by a digit is reserved, a keyword after `$` must be written
+`${this}`, and a `$` followed by neither a name nor `{` is an error.
+
 ### Interpolating a list
 
 `\(e1, e2, ...; sep)` interpolates a list. Its elements are a list as a
