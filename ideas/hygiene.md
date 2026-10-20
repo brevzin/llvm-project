@@ -426,6 +426,47 @@ the grammar rules C++ already has for what a declaration declares:
    parser knows whether `<` starts template arguments). Access checking is a
    separate question with its own rule (rule 6).
 
+   **A token's recorded scope is used only when that token is the subject of
+   an unqualified lookup.** In `A::B::C` only `A` is looked up unqualified;
+   `B` and `C` are looked up qualified, in what precedes them, and qualified
+   lookup does not depend on where a name was written. So a qualified-id
+   assembled from pieces written in different places needs no rule of its
+   own. In `^^{ \(ns)::\(id) }` with `ns = ^^{ std }` written in scope S1
+   and `id = ^^{ vector }` written in S2, `std` is looked up from S1 and
+   `vector` in whatever `std` found; S2 is never consulted, and neither is
+   where the outer literal was written.
+
+   | Assembled tokens | Looked up, and from where |
+   |---|---|
+   | `\(ns)::\(id)`, `ns = ^^{ detail }` from S1 | `detail` from S1, wherever the qualified-id ends up. For the injection site's `detail`, write `\(id("detail"))` (rule 4). |
+   | `\(ns)::\(id)`, `ns = ^^{ a::b }` | `a` from where `^^{ a::b }` was written; `b` and `id` qualified |
+   | `::\(id)` | nothing unqualified; `id`'s scope is irrelevant |
+   | `\(^^std)::\(id)` (a namespace reflection) | no lookup for the qualifier at all: the entity is spliced in. This is the way to make provenance irrelevant. |
+   | `\(ns)::\(tmpl)<\(arg)>` | `ns` from its scope; `tmpl` qualified (and that decides whether `<` starts template arguments); `arg` is a separate lookup from its own scope |
+   | `\(x) \(y)`, `x = ^^{ std }`, `y = ^^{ ::vector }` | the tokens form `std::vector`; `std` from `x`'s scope |
+
+   Assembly can turn a name written to be unqualified into a qualified one:
+   `id = ^^{ size }`, written to mean the macro's `size`, ends up in
+   `\(ns)::\(id)` and is looked up in `ns`. That is what the assembling
+   code asked for. Hygiene protects unqualified names from capture; an
+   explicitly qualified name was never at risk.
+
+   C++ looks some non-leftmost names up both in a class and "in the context
+   of the expression": the `A` in `p->A::m`, the type in `p->~T()` and in a
+   conversion-function-id. Here "the context" is that token's own recorded
+   scope, not the location of the surrounding expression. It is the same
+   principle: whichever token undergoes unqualified lookup brings its own
+   scope.
+
+   Declarations are unchanged. In an injected `void \(cls)::\(f)() { ... }`,
+   `cls` is looked up from its scope and `f` qualified, as the name being
+   defined (rule 2). The body's tokens are still looked up from their own
+   scopes, not from inside the class as an ordinary out-of-line body would
+   be, so members are written `this->x` or `\(cls)::x`, as rule 2 already
+   requires. Access stays per token (rule 6): each component of an assembled
+   qualified-id is checked as the owner of the token that names it, so the
+   qualifier's origin neither grants nor removes access to the final member.
+
 2. **Names being declared are resolved in the target.** When declarations
    are injected into a class or namespace (`queue_injection`,
    `inject_members`, `queue_injection(^^std, …)`), the names that the grammar

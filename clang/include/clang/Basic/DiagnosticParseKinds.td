@@ -1866,6 +1866,15 @@ def err_macro_expansion_not_single_expression : Error<
 def err_interpolation_escapes_token_sequence : Error<
   "interpolation with %0 backslashes escapes the enclosing token sequence "
   "(%1 %plural{1:level|:levels}1 of token sequence enclose it)">;
+def err_dollar_interpolation_escapes_token_sequence : Error<
+  "interpolation with %0 '$' escapes the enclosing token sequence "
+  "(%1 %plural{1:level|:levels}1 of token sequence enclose it)">;
+def err_dollar_interpolation_expected : Error<
+  "expected a name or '{' after '$' in a token sequence">;
+def err_dollar_interpolation_keyword : Error<
+  "'$' interpolates a name, not the keyword '%0'; write '${%0}'">;
+def err_dollar_interpolation_digit : Error<
+  "'$' followed by a digit is reserved in a token sequence">;
 def err_splice_template_argument : Error<
   "unparenthesized splice expression cannot be used as a template argument">;
 }
