@@ -3200,19 +3200,8 @@ bool Type::isLiteralType(const ASTContext &Ctx) const {
 }
 
 bool Type::isStdMetaTokenSequenceType() const {
-  const auto *CTSD = dyn_cast_or_null<ClassTemplateSpecializationDecl>(
-      getAsCXXRecordDecl());
-  if (!CTSD || !CTSD->getIdentifier() || CTSD->getName() != "vector" ||
-      !CTSD->isInStdNamespace())
-    return false;
-  const TemplateArgumentList &Args = CTSD->getTemplateArgs();
-  return Args.size() >= 1 && Args[0].getKind() == TemplateArgument::Type &&
-         Args[0].getAsType()->isMetaTokenType();
-}
-
-bool Type::isStdMetaTokenViewType() const {
   const CXXRecordDecl *RD = getAsCXXRecordDecl();
-  if (!RD || !RD->getIdentifier() || RD->getName() != "token_view")
+  if (!RD || !RD->getIdentifier() || RD->getName() != "token_sequence")
     return false;
   const DeclContext *DC = RD->getDeclContext();
   while (DC && DC->isInlineNamespace())

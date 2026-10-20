@@ -29,11 +29,11 @@
 
 using std::meta::punctuator;
 using std::meta::token_sequence;
-using std::meta::token_view;
+using std::meta::token_sequence;
 
 // ---------------------------------------------------------------- basics ---
 
-__macro count(token_view... args) {
+__macro count(token_sequence... args) {
   return ^^{ \(std::meta::reflect_constant(sizeof...(args))) };
 }
 static_assert(count!() == 0);
@@ -46,12 +46,12 @@ static_assert(count!{a, b,} == 2);
 
 // (A pack index must be a constant expression; a value computed in the body is
 // not one, but a vector can be indexed with it.)
-__macro nth(token_view n, token_view... args) {
+__macro nth(token_sequence n, token_sequence... args) {
   int i = extract<int>(constant_of(*std::meta::test_expression(n)));
   return std::vector<token_sequence>{args...}[i];
 }
 
-__macro last(token_view first, token_view... rest) {
+__macro last(token_sequence first, token_sequence... rest) {
   if constexpr (sizeof...(rest) == 0)
     return first;
   else
@@ -62,7 +62,7 @@ static_assert(last!(1, 2, 3 + 4) == 7);
 static_assert(nth!(1, 10, 20 + 2, 30) == 22);
 
 // Expanding the pack: into a vector, and in a fold.
-__macro sum_vector(token_view... args) {
+__macro sum_vector(token_sequence... args) {
   token_sequence out = ^^{ 0 };
   for (token_sequence a : std::vector<token_sequence>{args...})
     out += ^^{ + (\(a)) };
@@ -71,14 +71,14 @@ __macro sum_vector(token_view... args) {
 static_assert(sum_vector!(1, 2, 3) == 6);
 static_assert(sum_vector!() == 0);
 
-__macro sum_fold(token_view... args) {
+__macro sum_fold(token_sequence... args) {
   return (^^{ 0 } + ... + (^^{ + } + args));
 }
 static_assert(sum_fold!(1, 2, 3, 4) == 10);
 
 // After an expression parameter and a raw one. (The expression argument is
 // interpolated once: each interpolation would evaluate it.)
-__macro scale_sum(int factor, token_view op, token_view... args) {
+__macro scale_sum(int factor, token_sequence op, token_sequence... args) {
   token_sequence out = ^^{ 0 };
   ((out += op + ^^{ (\(args)) }), ...);
   return ^^{ \(factor) * (\(out)) };
@@ -89,14 +89,14 @@ static_assert(scale_sum!(10, +, 1, 2, 3) == 60);
 
 struct Builder {
   int base;
-  __macro add(this Builder const& self, token_view... args) {
+  __macro add(this Builder const& self, token_sequence... args) {
     return (^^{ \(self).base } + ... + (^^{ + } + args));
   }
 };
 
 template <class T>
 struct Holder {
-  static __macro count(token_view... args) {
+  static __macro count(token_sequence... args) {
     return ^^{ \(std::meta::reflect_constant(sizeof...(args))) };
   }
 };
@@ -111,7 +111,7 @@ constexpr int deferred() {
 // ------------------------------------------------------- statement macro ---
 
 // Each argument is a statement.
-__macro all(token_view... stmts) {
+__macro all(token_sequence... stmts) {
   return (^^{} + ... + (stmts + ^^{ ; }));
 }
 
@@ -138,7 +138,7 @@ consteval auto parse_named(token_sequence arg) -> named_arg {
 
 // Call a function with its arguments named, in any order; trailing
 // parameters with default arguments may be left out.
-__macro call(token_view fn, token_view... args) {
+__macro call(token_sequence fn, token_sequence... args) {
   auto r = std::meta::test_expression(^^{ ^^\(fn) });
   if (!r)
     std::constexpr_error_str("call", "the callee must name a single function");

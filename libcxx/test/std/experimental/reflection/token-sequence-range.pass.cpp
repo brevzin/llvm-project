@@ -27,10 +27,10 @@ namespace m = std::meta;
 constexpr m::token_sequence ts = ^^{ a + b };
 
 // ----------------------------------------------------------------------------
-// size / empty (unqualified: ADL).
+// size / empty.
 // ----------------------------------------------------------------------------
-static_assert(size(ts) == 3);
-static_assert(!empty(ts));
+static_assert(ts.size() == 3);
+static_assert(!ts.empty());
 static_assert(std::empty(^^{ }));
 static_assert(std::size(^^{ }) == 0);
 
@@ -64,7 +64,7 @@ consteval m::token_sequence with_live_vector() {
 }
 static_assert([] {
   auto r = with_live_vector();
-  return size(r) == 3 && r[0] == ^^{ x } &&
+  return std::size(r) == 3 && r[0] == ^^{ x } &&
          m::token_kind_of(r[1]) == m::token_kind::annotation &&
          m::token_kind_of(r[2]) == m::token_kind::annotation;
 }());
@@ -97,7 +97,7 @@ static_assert(roundtrip(^^{ if (x) { return 1; } }) ==
 // Iterator arithmetic (random access).
 // ----------------------------------------------------------------------------
 static_assert([] {
-  auto it = begin(ts);
+  auto it = std::begin(ts);
   assert(*it == ^^{ a });
   assert(it[2] == ^^{ b });
   ++it;
@@ -110,21 +110,22 @@ static_assert([] {
   assert(*it == ^^{ b });
   it -= 2;
   assert(*it == ^^{ a });
-  assert(end(ts) - begin(ts) == 3);
-  assert(begin(ts) != end(ts));
-  assert(begin(ts) < end(ts));
-  assert(begin(ts) + 3 == end(ts));
+  assert(std::end(ts) - std::begin(ts) == 3);
+  assert(std::begin(ts) != std::end(ts));
+  assert(std::begin(ts) < std::end(ts));
+  assert(std::begin(ts) + 3 == std::end(ts));
   auto post = it++;
   assert(*post == ^^{ a } && *it == ^^{ + });
   return true;
 }());
 
 // ----------------------------------------------------------------------------
-// token_sequence is a vector: a contiguous range (not a borrowed one).
+// token_sequence is a contiguous range, and a borrowed one (its tokens are in
+// static storage).
 // ----------------------------------------------------------------------------
 static_assert(std::ranges::random_access_range<m::token_sequence>);
 static_assert(std::ranges::sized_range<m::token_sequence>);
-static_assert(!std::ranges::borrowed_range<m::token_sequence>);
+static_assert(std::ranges::borrowed_range<m::token_sequence>);
 static_assert(std::ranges::viewable_range<m::token_sequence>);
 static_assert(std::ranges::contiguous_range<m::token_sequence>);
 
@@ -160,7 +161,7 @@ static_assert([]() consteval {
 // ----------------------------------------------------------------------------
 static_assert([]() consteval {
   auto v = m::tokens_of(ts);
-  assert(v.size() == size(ts));
+  assert(v.size() == std::size(ts));
   for (size_t i = 0; i != v.size(); ++i)
     assert(v[i] == ts[i]);
   return true;

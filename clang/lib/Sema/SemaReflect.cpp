@@ -1132,37 +1132,16 @@ QualType Sema::getStdMetaTokenSequenceType() {
   R.suppressDiagnostics();
   if (!LookupQualifiedName(R, Meta) || !R.isSingleResult())
     return QualType();
-  auto *TND = dyn_cast<TypedefNameDecl>(R.getFoundDecl());
-  if (!TND || !TND->getUnderlyingType()->isStdMetaTokenSequenceType())
-    return QualType();
-  StdMetaTokenSequenceTy = Context.getTypeDeclType(TND);
-  return StdMetaTokenSequenceTy;
-}
-
-QualType Sema::getStdMetaTokenViewType() {
-  if (!StdMetaTokenViewTy.isNull())
-    return StdMetaTokenViewTy;
-  NamespaceDecl *Meta = lookupStdMetaNamespace();
-  if (!Meta)
-    return QualType();
-  LookupResult R(*this, &PP.getIdentifierTable().get("token_view"),
-                 SourceLocation(), LookupOrdinaryName);
-  R.suppressDiagnostics();
-  if (!LookupQualifiedName(R, Meta) || !R.isSingleResult())
-    return QualType();
   auto *RD = dyn_cast<CXXRecordDecl>(R.getFoundDecl());
   if (!RD || !RD->isCompleteDefinition())
     return QualType();
-  StdMetaTokenViewTy = Context.getCanonicalTagType(RD);
-  return StdMetaTokenViewTy;
+  StdMetaTokenSequenceTy = Context.getCanonicalTagType(RD);
+  return StdMetaTokenSequenceTy;
 }
 
 ExprResult Sema::BuildTokenSequenceValue(Expr *E) {
-  // A token literal is a std::meta::token_view, viewing the literal's tokens
-  // in static storage; (without one, a std::meta::token_sequence).
-  QualType T = getStdMetaTokenViewType();
-  if (T.isNull())
-    T = getStdMetaTokenSequenceType();
+  // A token literal is a std::meta::token_sequence.
+  QualType T = getStdMetaTokenSequenceType();
   if (T.isNull() || RequireCompleteType(E->getBeginLoc(), T,
                                         diag::err_incomplete_type))
     return E;

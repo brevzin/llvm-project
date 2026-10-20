@@ -8346,8 +8346,8 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
     ExprCleanupObjects.truncate(SavedCleanupObjects);
   });
   // Nor are the conversions it applies immediate invocations: binding a raw
-  // argument to a token_sequence parameter goes through token_view's
-  // consteval conversion, which is evaluated with the body.
+  // argument to a token_sequence parameter goes through a consteval
+  // conversion, which is evaluated with the body.
   EnterExpressionEvaluationContext BindingContext(
       *this, ExpressionEvaluationContext::ImmediateFunctionContext);
 
@@ -8378,11 +8378,10 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
     ParmVarDecl *PVD = Macro->getParamDecl(I);
     ParamInits.push_back(nullptr);
     if (isRawMacroParameter(PVD) &&
-        (PVD->getType()->isStdMetaTokenSequenceType() ||
-         PVD->getType()->isStdMetaTokenViewType())) {
-      // A std::meta::token_view or token_sequence parameter is an object,
-      // initialized from the argument (as a token literal: a token_view)
-      // when the body is evaluated: every mention of it is that object.
+        PVD->getType()->isStdMetaTokenSequenceType()) {
+      // A std::meta::token_sequence parameter is an object, initialized from
+      // the argument (as a token literal is) when the body is evaluated:
+      // every mention of it is that object.
       Expr *Init = I < Args.size() ? Args[I] : Arg;
       if (Init->getType()->isTokenSequenceType()) {
         ExprResult Built = BuildTokenSequenceValue(Init);

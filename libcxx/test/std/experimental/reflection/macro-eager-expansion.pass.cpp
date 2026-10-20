@@ -28,7 +28,7 @@
 
 // ------------------------------------- names introduced are visible later --
 
-__macro let(std::meta::token_view name, int init) {
+__macro let(std::meta::token_sequence name, int init) {
   return ^^{ auto \(name) = \(init) };
 }
 
