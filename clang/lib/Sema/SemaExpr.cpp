@@ -22374,6 +22374,24 @@ ExprResult Sema::CheckLValueToRValueConversionOperand(Expr *E) {
   return Result;
 }
 
+ExprResult Sema::CheckTokenSequenceReadOperand(Expr *E) {
+  // C++2a [basic.def.odr]p4: reading the tokens is reading a (non-class)
+  // member of the object, so 'e' is among the potential results of an
+  // expression to which the lvalue-to-rvalue conversion is applied.
+  if (E->getType().isVolatileQualified())
+    return E;
+  auto &CEO = ExprEvalContexts.back().ConstevalOnly;
+  bool ReplaceConstevalOnly = CEO.find(E) != CEO.end();
+  ExprResult Result =
+      rebuildPotentialResultsAsNonOdrUsed(*this, E, NOUR_Constant);
+  if (Result.isInvalid())
+    return ExprError();
+  Result = Result.get() ? Result : E;
+  if (ReplaceConstevalOnly)
+    CEO.insert(Result.get());
+  return Result;
+}
+
 ExprResult Sema::ActOnConstantExpression(ExprResult Res) {
   if (!Res.isUsable())
     return Res;

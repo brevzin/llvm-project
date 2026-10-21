@@ -162,6 +162,17 @@ consteval bool interpolation() {
 }
 static_assert(interpolation());
 
+// Reading a constexpr token_sequence does not odr-use it: a consteval block
+// or a lambda can interpolate one from the enclosing function without
+// capturing it.
+constexpr int read_local() {
+  constexpr token_sequence seven = ^^{ 7 };
+  consteval { queue_injection(^^{ constexpr int from_block = \(seven); }); }
+  return [] { return int(token_sequence(^^{ \(seven) }).size()); }() +
+         from_block;
+}
+static_assert(read_local() == 8);
+
 // Literals that compare equal but differ (interpolated constants of different
 // types) have their own storage.
 enum class E0 { e };

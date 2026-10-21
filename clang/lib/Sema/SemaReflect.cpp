@@ -1190,6 +1190,12 @@ ExprResult Sema::BuildTokenSequenceValue(Expr *E) {
 }
 
 Expr *Sema::BuildTokenArrayFromSequence(Expr *E) {
+  // Reading a token_sequence's tokens is reading its value: it does not
+  // odr-use a constexpr variable it names (so a lambda or consteval block
+  // need not capture one).
+  if (E->isGLValue())
+    if (ExprResult R = CheckTokenSequenceReadOperand(E); R.isUsable())
+      E = R.get();
   return ImplicitCastExpr::Create(Context, Context.TokenSequenceTy,
                                   CK_SequenceToTokenArray, E, nullptr,
                                   VK_PRValue, FPOptionsOverride());

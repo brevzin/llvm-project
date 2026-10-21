@@ -7509,6 +7509,9 @@ public:
                                          unsigned CapturingScopeIndex);
 
   ExprResult CheckLValueToRValueConversionOperand(Expr *E);
+  /// \p E, a std::meta::token_sequence whose tokens are read (P4380): as for
+  /// reading a member of it, a constexpr variable it names is not odr-used.
+  ExprResult CheckTokenSequenceReadOperand(Expr *E);
   void CleanupVarDeclMarking();
 
   /// Try to capture the given variable.
