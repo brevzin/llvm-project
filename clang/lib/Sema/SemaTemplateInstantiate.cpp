@@ -2810,7 +2810,8 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
   TokenSequenceData NewTSD = CreateTokenSequenceData(Ctx, NewTokens);
 
   return RecordConsteval.RecordAndReturn(CXXTokenSequenceExpr::Create(
-      Ctx, E->getOperatorLoc(), E->getOperandRange(), NewTSD, NewBindings));
+      Ctx, E->getOperatorLoc(), E->getOperandRange(), NewTSD, NewBindings,
+      E->getType()));
 }
 
 ExprResult TemplateInstantiator::TransformCXXDefaultArgExpr(

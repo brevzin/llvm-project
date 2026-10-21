@@ -3279,6 +3279,9 @@ def err_not_a_macro : Error<"%0 is not an expression macro">;
 def err_macro_overload_shape : Error<
   "overloads of expression macro %0 disagree on which parameters are "
   "token sequences">;
+def err_token_sequence_requires_meta : Error<
+  "a token sequence requires the definition of 'std::meta::token_sequence'; "
+  "include <meta>">;
 def err_macro_undefined : Error<
   "expression macro %0 is invoked before it is defined">;
 def err_macro_token_argument_not_constant : Error<

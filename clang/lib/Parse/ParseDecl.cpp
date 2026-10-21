@@ -4485,7 +4485,7 @@ void Parser::ParseDeclarationSpecifiers(
       if (!isInvalid)
         isInvalid = DS.SetTypeSpecType(
             DeclSpec::TST_typename, Loc, PrevSpec, DiagID,
-            ParsedType::make(Actions.getASTContext().TokenSequenceTy), Policy);
+            ParsedType::make(Actions.getMacroReturnType()), Policy);
       break;
     case tok::kw_constinit:
       isInvalid = DS.SetConstexprSpec(ConstexprSpecKind::Constinit, Loc,

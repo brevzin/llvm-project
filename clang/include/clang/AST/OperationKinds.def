@@ -189,6 +189,16 @@ CAST_OPERATION(ToVoid)
 ///    int i = std::unreachable();
 CAST_OPERATION(NoReturnToAny)
 
+/// CK_TokenArrayToSequence - The compiler's token array (a token literal, a
+/// raw macro argument, a metafunction's result) as a std::meta::token_sequence
+/// holding it. Only the compiler forms this conversion (P4380).
+CAST_OPERATION(TokenArrayToSequence)
+
+/// CK_SequenceToTokenArray - The token array a std::meta::token_sequence holds,
+/// where the compiler takes tokens: interpolation, injection, a metafunction's
+/// argument, a macro's result. Only the compiler forms this conversion.
+CAST_OPERATION(SequenceToTokenArray)
+
 /// CK_MatrixCast - A cast between matrix types of the same dimensions.
 CAST_OPERATION(MatrixCast)
 

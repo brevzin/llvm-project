@@ -5741,10 +5741,14 @@ class CXXTokenSequenceExpr final
   }
 
 public:
+  /// \p Ty is std::meta::token_sequence for a token literal, and the
+  /// compiler's token array (the default) for the tokens of a raw macro
+  /// argument before it is bound.
   static CXXTokenSequenceExpr *
   Create(ASTContext &C, SourceLocation OperatorLoc, SourceRange OperandRange,
          TokenSequenceData TSD,
-         ArrayRef<TokenSequenceParamBinding> ParamBindings = {});
+         ArrayRef<TokenSequenceParamBinding> ParamBindings = {},
+         QualType Ty = QualType());
   static CXXTokenSequenceExpr *CreateEmpty(const ASTContext &C,
                                            unsigned NumInterpolationExprs);
 

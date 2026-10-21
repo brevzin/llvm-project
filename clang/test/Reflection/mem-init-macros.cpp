@@ -6,7 +6,9 @@
 // zero or more mem-initializers. (See libcxx's mem-init-macro.pass.cpp for
 // the motivating use, initializing conditionally injected members.)
 
-using token_sequence = decltype(^^{ });
+
+#include "Inputs/token-sequence.h"
+using std::meta::token_sequence;
 
 __macro keep(token_sequence t) { return t; }
 __macro drop(token_sequence) { return ^^{ }; }

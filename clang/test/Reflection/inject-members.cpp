@@ -4,9 +4,10 @@
 // class is completed, its returned tokens are parsed as additional members.
 // Multiple annotations run in order, each seeing the previous injections.
 
+#include "Inputs/token-sequence.h"
+
 namespace std::meta {
     using info = decltype(^^::);
-    using token_sequence = decltype(^^{ });
 
     consteval auto queue_injection(token_sequence) -> void;
     consteval auto queue_injection(info target_ns, token_sequence) -> void;
@@ -14,8 +15,6 @@ namespace std::meta {
     template <class... Ts>
     consteval auto tokenize(Ts const&...) -> token_sequence;
 
-    template <class... Ts>
-    consteval auto id(Ts const&...) -> token_sequence;
 }
 using std::meta::info;
 using std::meta::token_sequence;

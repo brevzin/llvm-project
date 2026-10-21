@@ -1389,6 +1389,11 @@ bool Sema::RequireStructuralType(QualType T, SourceLocation Loc) {
 
   // Drill down into the reason why the class is non-structural.
   while (const CXXRecordDecl *RD = T->getAsCXXRecordDecl()) {
+    // A token sequence has no mangling (P4380): that is the reason, and its
+    // storage is not a member to point at.
+    if (T->isStdMetaTokenSequenceType())
+      return true;
+
     // P4340 ext: a deleted reflect_constant customization point makes the
     // type non-structural regardless of its subobjects.
     if (RD->hasDeletedReflectConstant()) {

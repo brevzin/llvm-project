@@ -1,7 +1,8 @@
 // RUN: %clang_cc1 -std=c++26 -freflection -ast-dump -ast-dump-filter=tokens %s | FileCheck %s
 
+#include "../Reflection/Inputs/token-sequence.h"
+
 namespace std::meta {
-  using token_sequence = decltype(^^{});
 }
 
 constexpr int value = 42;
