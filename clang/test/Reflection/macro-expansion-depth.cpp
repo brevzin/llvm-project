@@ -15,6 +15,8 @@
 // DRIVER: "-fmacro-expansion-depth=17"
 
 // Legitimate recursion: count!(C<N>{}) expands N levels deep.
+#include "Inputs/token-sequence.h"
+
 template <int N> struct C { static constexpr int value = N; };
 template <class T> __macro count(T&& n) {
   if constexpr (T::value == 0)

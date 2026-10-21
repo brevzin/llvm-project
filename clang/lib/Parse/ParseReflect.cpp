@@ -1150,9 +1150,9 @@ bool Parser::ParseMacroArgumentList(ArrayRef<MacroParamKind> RawParams,
         Arg = ParseMacroRawArgument(
             Close, /*Greedy=*/Kind == MacroParamKind::Raw &&
                        Idx + 1 == RawParams.size());
-        // A raw pack deduces its element type from its arguments: make them
-        // std::meta::token_sequence values, so that is what it deduces.
-        if (Kind == MacroParamKind::RawPack && Arg.isUsable())
+        // Raw arguments are std::meta::token_sequence values (and so that is
+        // what a raw pack deduces).
+        if (Arg.isUsable())
           Arg = Actions.BuildTokenSequenceValue(Arg.get());
       }
       else if (Tok.is(tok::l_brace))

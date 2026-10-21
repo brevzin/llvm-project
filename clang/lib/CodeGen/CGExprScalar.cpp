@@ -3053,6 +3053,12 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     CGF.EmitIgnoredExpr(E);
     return nullptr;
   }
+  case CK_SequenceToTokenArray:
+    // Token sequences carry no state at runtime (P4380): the empty value.
+    CGF.EmitIgnoredExpr(E);
+    return llvm::Constant::getNullValue(ConvertType(DestTy));
+  case CK_TokenArrayToSequence:
+    llvm_unreachable("a token_sequence is not a scalar");
   case CK_NoReturnToAny: {
     // The operand diverges, so no value is ever produced.
     CGF.EmitDivergingExpr(E);

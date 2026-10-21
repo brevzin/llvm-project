@@ -3,9 +3,10 @@
 // Declarations injected at namespace scope must be handed to the ASTConsumer,
 // or they are parsed and then silently never emitted, producing link errors.
 
+#include "../Reflection/Inputs/token-sequence.h"
+
 namespace std::meta {
   using info = decltype(^^::);
-  using token_sequence = decltype(^^{ });
   consteval auto queue_injection(token_sequence) -> void;
   consteval auto queue_injection(info target_ns, token_sequence) -> void;
 }

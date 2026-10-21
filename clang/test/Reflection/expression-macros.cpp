@@ -1,6 +1,8 @@
 // RUN: %clang_cc1 %s -std=c++26 -freflection -fconsteval-operations -fsyntax-only -fcxx-exceptions -verify
 
-using token_sequence = decltype(^^{ });
+#include "Inputs/token-sequence.h"
+using std::meta::token_sequence;
+
 namespace std { class type_info { public: virtual ~type_info(); }; }
 
 namespace N1 {
@@ -877,11 +879,11 @@ __macro first_plus(token_sequence body, int x) {
   static_assert(__is_same(decltype((x)), decltype(^^int)));
   auto&& r = body;
   auto const& cx = x;
-  token_sequence first = r[0];
+  token_sequence first = r;
   return ^^{ (\(first) * 10 + \(cx)) };
 }
 constexpr int a = 3;
-static_assert(first_plus!(a b c, 7) == 37);
+static_assert(first_plus!(a, 7) == 37);
 
 }  // namespace N20
 
@@ -1082,7 +1084,6 @@ namespace N26 {
 // Arguments captured with an unknown shape are parsed where they were
 // written, as part of the template, then substituted into like the rest of
 // it: packs, member names, lambdas, and nested templates all behave.
-using token_sequence = decltype(^^{});
 
 struct H {
   static __macro keep(token_sequence t) { return t; }

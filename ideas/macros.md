@@ -1299,6 +1299,13 @@ value takes `extract<T>(constant_of(x))`, which repeats the type, and
 
 **Today:** `token` is a builtin scalar. `^^{...}` is a
 `std::meta::token_sequence`: a compiler-owned value type.
+- The class declares no data members. The compiler gives it its storage, a
+  member no program can name (and reflection does not list), and a token
+  literal is created with the class type.
+- There is no separate type for the compiler's token array that a program or
+  `<meta>` can name.
+- A token literal therefore requires `<meta>`, as `typeid` requires
+  `<typeinfo>`.
 - It is an immutable handle to a view of an append-only buffer, so copies are
   O(1).
 - `+=` and `+` append in amortized O(1) per token, writing in place when the

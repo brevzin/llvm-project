@@ -17,10 +17,11 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/MetaActions.h"
-#include "clang/Lex/Preprocessor.h"
-#include "clang/Lex/Token.h"
 #include "clang/AST/Metafunction.h"
 #include "clang/Basic/DiagnosticSema.h"
+#include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/Token.h"
+#include "clang/Sema/CXXFieldCollector.h"
 #include "clang/Sema/EnterExpressionEvaluationContext.h"
 #include "clang/Sema/Initialization.h"
 #include "clang/Sema/Lookup.h"
@@ -1113,12 +1114,22 @@ ExprResult Sema::ActOnCXXTokenSequenceReflection(Scope *S, SourceLocation OpLoc,
                                                  SourceRange OperandRange,
                                                  ArrayRef<Token> Tokens,
                                                  bool AsValue) {
+  // A token literal is a std::meta::token_sequence, which the program must
+  // have defined (by including <meta>); the tokens of a raw macro argument
+  // stay the compiler's array until bound.
+  QualType T;
+  if (AsValue) {
+    T = getStdMetaTokenSequenceType();
+    if (T.isNull()) {
+      Diag(OpLoc, diag::err_token_sequence_requires_meta);
+      return ExprError();
+    }
+  }
   TokenSequenceData TSD = CreateTokenSequenceData(Context, Tokens);
   SmallVector<TokenSequenceParamBinding, 4> Bindings;
   collectTokenSequenceParamBindings(*this, S, Tokens, Bindings);
-  Expr *E = CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD,
-                                         Bindings);
-  return AsValue ? BuildTokenSequenceValue(E) : E;
+  return CXXTokenSequenceExpr::Create(Context, OpLoc, OperandRange, TSD,
+                                      Bindings, T);
 }
 
 QualType Sema::getStdMetaTokenSequenceType() {
@@ -1139,16 +1150,53 @@ QualType Sema::getStdMetaTokenSequenceType() {
   return StdMetaTokenSequenceTy;
 }
 
-ExprResult Sema::BuildTokenSequenceValue(Expr *E) {
-  // A token literal is a std::meta::token_sequence.
+QualType Sema::getMacroReturnType() {
   QualType T = getStdMetaTokenSequenceType();
-  if (T.isNull() || RequireCompleteType(E->getBeginLoc(), T,
-                                        diag::err_incomplete_type))
+  return T.isNull() ? Context.TokenSequenceTy : T;
+}
+
+void Sema::AddTokenSequenceStorage(CXXRecordDecl *Record) {
+  // A token_sequence is the compiler's token array, held in a member no one
+  // else can name: the identifier is not one a program can spell. Its default
+  // initializer is the empty array, so a default-constructed sequence is
+  // empty.
+  SourceLocation Loc = Record->getLocation();
+  QualType T = Context.TokenSequenceTy;
+  auto *FD = FieldDecl::Create(
+      Context, Record, Loc, Loc, &PP.getIdentifierTable().get("<tokens>"), T,
+      Context.getTrivialTypeSourceInfo(T, Loc), /*BW=*/nullptr,
+      /*Mutable=*/false, ICIS_CopyInit);
+  FD->setAccess(AS_private);
+  FD->setImplicit();
+  FD->setInClassInitializer(
+      CXXTokenSequenceExpr::Create(Context, Loc, SourceRange(Loc, Loc),
+                                   CreateEmptyTokenSequenceData(Context), {}));
+  Record->addDecl(FD);
+  FieldCollector->Add(FD);
+}
+
+ExprResult Sema::BuildTokenSequenceValue(Expr *E) {
+  // The compiler's token array as a std::meta::token_sequence, which the
+  // program must have defined (by including <meta>).
+  QualType T = getStdMetaTokenSequenceType();
+  if (T.isNull()) {
+    Diag(E->getBeginLoc(), diag::err_token_sequence_requires_meta);
+    return ExprError();
+  }
+  if (E->getType()->isDependentType() || !E->getType()->isTokenSequenceType())
     return E;
-  TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(T, E->getBeginLoc());
-  return BuildCXXTypeConstructExpr(TSI, E->getBeginLoc(), MultiExprArg(E),
-                                   E->getEndLoc(),
-                                   /*ListInitialization=*/false);
+  return ImplicitCastExpr::Create(Context, T, CK_TokenArrayToSequence, E,
+                                  nullptr, VK_PRValue, FPOptionsOverride());
+}
+
+Expr *Sema::BuildTokenArrayFromSequence(Expr *E) {
+  return ImplicitCastExpr::Create(Context, Context.TokenSequenceTy,
+                                  CK_SequenceToTokenArray, E, nullptr,
+                                  VK_PRValue, FPOptionsOverride());
+}
+
+static Expr *UnwrapTokenSequence(Sema &S, Expr *E) {
+  return S.BuildTokenArrayFromSequence(E);
 }
 
 enum class TokenOpTarget { MetaInfo, TokenSequence };
@@ -1161,12 +1209,29 @@ static Expr *TryConvertTo(Sema &S, Expr *E, TokenOpTarget Target) {
   // If the expression is already of the desired type, no conversion needed.
   if (Target == TokenOpTarget::MetaInfo && ExprTy->isReflectionType())
     return E;
-  if (Target == TokenOpTarget::TokenSequence && ExprTy->isTokenSequenceType())
-    return E;
+  if (Target == TokenOpTarget::TokenSequence) {
+    if (ExprTy->isTokenSequenceType())
+      return E;
+    // A std::meta::token_sequence: the array it holds. Anything else that
+    // converts to one (a list_builder, say): that conversion, then the array.
+    if (ExprTy->isStdMetaTokenSequenceType())
+      return UnwrapTokenSequence(S, E);
+    QualType SeqTy = S.getStdMetaTokenSequenceType();
+    if (SeqTy.isNull() || !ExprTy->isRecordType())
+      return E;
+    InitializedEntity Entity = InitializedEntity::InitializeTemporary(SeqTy);
+    InitializationKind Kind =
+        InitializationKind::CreateCopy(E->getBeginLoc(), E->getBeginLoc());
+    InitializationSequence Seq(S, Entity, Kind, E);
+    if (!Seq)
+      return E;
+    ExprResult Conv = Seq.Perform(S, Entity, Kind, E);
+    if (Conv.isInvalid())
+      return E;
+    return UnwrapTokenSequence(S, Conv.get());
+  }
 
-  QualType TargetTy = Target == TokenOpTarget::MetaInfo
-                          ? S.Context.MetaInfoTy
-                          : S.Context.TokenSequenceTy;
+  QualType TargetTy = S.Context.MetaInfoTy;
   InitializedEntity Entity =
       InitializedEntity::InitializeTemporary(TargetTy);
   InitializationKind Kind =
@@ -1214,8 +1279,8 @@ ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
     return Converted;
 
   // Any other contiguous range of tokens (a std::span<const token>, say):
-  // std::meta::detail::__tokens_of_range(E), the compiler's token array of
-  // its data() and size().
+  // std::meta::detail::__tokens_of_range(E), a token_sequence of its data()
+  // and size().
   if (NamespaceDecl *Meta = lookupStdMetaNamespace()) {
     LookupResult DR(*this, &PP.getIdentifierTable().get("detail"),
                     E->getBeginLoc(), LookupNamespaceName);
@@ -1238,8 +1303,8 @@ ExprResult Sema::ActOnTokenSequenceInterpolation(Expr *E) {
                                             E->getBeginLoc(), {E},
                                             E->getEndLoc());
             if (!Call.isInvalid() && !Trap.hasErrorOccurred() &&
-                Call.get()->getType()->isTokenSequenceType())
-              return Call.get();
+                Call.get()->getType()->isStdMetaTokenSequenceType())
+              return UnwrapTokenSequence(*this, Call.get());
           }
         }
       }
@@ -2676,8 +2741,17 @@ ExprResult Sema::BuildCXXMetafunctionExpr(
   QualType ResultTy;
   if (DeriveResultTy(ResultTy))
     return ExprError();
-  return CXXMetafunctionExpr::Create(Context, MetaFnID, Impl, ResultTy, Args,
-                                     KwLoc, LParenLoc, RParenLoc);
+  // Metafunctions take and give the compiler's token arrays; a program has
+  // std::meta::token_sequence.
+  for (Expr *&Arg : Args)
+    if (!Arg->isTypeDependent() && Arg->getType()->isStdMetaTokenSequenceType())
+      Arg = UnwrapTokenSequence(*this, Arg);
+  Expr *Call = CXXMetafunctionExpr::Create(Context, MetaFnID, Impl, ResultTy,
+                                           Args, KwLoc, LParenLoc, RParenLoc);
+  if (ResultTy->isTokenSequenceType() &&
+      !getStdMetaTokenSequenceType().isNull())
+    return BuildTokenSequenceValue(Call);
+  return Call;
 }
 
 ExprResult Sema::BuildExplDependentCallExpr(Expr *SubExpr,

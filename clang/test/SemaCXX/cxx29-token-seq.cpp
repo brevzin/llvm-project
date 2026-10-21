@@ -1,14 +1,13 @@
 // RUN: %clang_cc1 -std=c++26 -freflection -fconsteval-operations -verify -verify-ignore-unexpected=note %s
 
+#include "../Reflection/Inputs/token-sequence.h"
+
 using size_t = decltype(sizeof(0));
 
 // Forward declaration of std::meta functions (will be intercepted by compiler).
 namespace std::meta {
     using info = decltype(^^::);
-    using token_sequence = decltype(^^{ });
 
-    template <class... Ts>
-    consteval auto id(Ts const&...) -> token_sequence;
 
     template <class... Ts>
     consteval auto str_lit(Ts const&...) -> token_sequence;

@@ -422,12 +422,6 @@ _LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
 // An opaque handle to a reflected entity.
 using info = decltype(^^int);
 
-// The compiler's immutable array of tokens: what a token literal is here,
-// before std::meta::token_sequence is defined below. Everywhere after, a
-// token literal ^^{ ... } is a token_sequence holding one of these, and the
-// compiler takes token sequences back as these.
-using __token_array = decltype(^^{ });
-
 template <typename R>
 concept reflection_range =
   ranges::input_range<R> &&
@@ -594,6 +588,8 @@ enum : unsigned {
   __metafn_members_gather,
   __metafn_tokens_append,
   __metafn_tokens_subseq,
+  __metafn_token_type,
+  __metafn_tokens_equal,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -605,43 +601,7 @@ consteval auto __underlying_entity_of(info r) -> info {
 }  // namespace detail
 
 // A single token: a scalar.
-using token = decltype(__metafunction(detail::__metafn_get_ith_token,
-                                      ^^{ x }, 0));
-
-namespace detail {
-// Between the compiler's token array and an array of tokens, natively
-// (the constant evaluator does these as it does __builtin_memcpy).
-constexpr auto __tokens_count(__token_array __ts) -> size_t {
-  return __metafunction(detail::__metafn_token_count, __ts);
-}
-constexpr auto __tokens_fill(token* __dst, __token_array __ts) -> size_t {
-  return __metafunction(detail::__metafn_tokens_fill, __dst, __ts);
-}
-constexpr auto __tokens_join(token const* __p, size_t __n) -> __token_array {
-  return __metafunction(detail::__metafn_tokens_join, __p, __n);
-}
-// The token array's tokens in static storage (null if there are none).
-constexpr auto __tokens_materialize(__token_array __ts) -> token const* {
-  return __metafunction(detail::__metafn_tokens_materialize, __ts);
-}
-// The first token array followed by the second (or by a token). Appends in
-// place when the first ends its storage and there is room: token arrays are
-// immutable, so no other array sees the difference.
-constexpr auto __tokens_append(__token_array __a, __token_array __b)
-    -> __token_array {
-  return __metafunction(detail::__metafn_tokens_append, __a, __b);
-}
-constexpr auto __tokens_append(__token_array __a, token __t) -> __token_array {
-  return __metafunction(detail::__metafn_tokens_append, __a, __t);
-}
-// The __n tokens (or as many as there are) from __pos: the same storage.
-constexpr auto __tokens_subseq(__token_array __ts, size_t __pos, size_t __n)
-    -> __token_array {
-  return __metafunction(detail::__metafn_tokens_subseq, __ts, __pos, __n);
-}
-// (Here a token literal is still the compiler's array.)
-constexpr auto __tokens_empty() -> __token_array { return ^^{}; }
-}  // namespace detail
+using token = decltype(__metafunction(detail::__metafn_token_type));
 
 // Any contiguous run of tokens: a token_sequence, a span, an array.
 template <class _Rp>
@@ -655,14 +615,10 @@ concept __token_range =
 // subseq a shorter one (in constant time), without disturbing any other
 // sequence. The compiler owns the tokens (in static storage, like a string
 // literal's), so iterators into a sequence never dangle.
+//
+// The compiler holds the tokens in a member only it can name, and does the
+// operations below natively; the definitions here say what they do.
 class token_sequence {
-  // The compiler's token array, and its size. Storage for the tokens as
-  // objects -- made once per token array -- is only made when it is asked
-  // for (data(), begin(), indexing): making, copying, concatenating,
-  // slicing, comparing, and giving a sequence back to the compiler need none.
-  __token_array __ts_;
-  size_t __size_ = 0;
-
 public:
   using value_type = token;
   using size_type = size_t;
@@ -676,70 +632,63 @@ public:
 
   static constexpr size_type npos = size_type(-1);
 
-  constexpr token_sequence() noexcept : __ts_(detail::__tokens_empty()) {}
-
-  // (For the compiler, which makes a token literal -- or a raw macro
-  // argument -- from its token array.)
-  constexpr token_sequence(__token_array __ts)
-      : __ts_(__ts), __size_(detail::__tokens_count(__ts)) {}
+  constexpr token_sequence() noexcept = default;
 
   // The tokens listed: token_sequence{t0, t1}.
   consteval token_sequence(initializer_list<token> __il)
-      : token_sequence(detail::__tokens_join(__il.begin(), __il.size())) {}
+      : token_sequence(__metafunction(detail::__metafn_tokens_join,
+                                      __il.begin(), __il.size())) {}
 
   // The tokens of a range: a contiguous one in one step, any other one by
   // one.
   template <__token_range _Rp>
     requires(!same_as<remove_cvref_t<_Rp>, token_sequence>)
   consteval explicit token_sequence(_Rp const& __r)
-      : token_sequence(
-            detail::__tokens_join(ranges::data(__r), ranges::size(__r))) {}
+      : token_sequence(__metafunction(detail::__metafn_tokens_join,
+                                      ranges::data(__r), ranges::size(__r))) {}
   template <ranges::input_range _Rp>
     requires(!__token_range<_Rp> &&
              same_as<remove_cvref_t<ranges::range_reference_t<_Rp>>, token>)
-  consteval explicit token_sequence(_Rp&& __r) : token_sequence() {
+  consteval explicit token_sequence(_Rp&& __r) {
     for (token __t : __r)
       *this += __t;
   }
 
+  // The tokens as objects, in static storage made once per sequence (null if
+  // there are none).
   constexpr pointer data() const noexcept {
-    return detail::__tokens_materialize(__ts_);
+    return __metafunction(detail::__metafn_tokens_materialize, *this);
   }
   constexpr iterator begin() const noexcept { return data(); }
-  constexpr iterator end() const noexcept { return data() + __size_; }
+  constexpr iterator end() const noexcept { return data() + size(); }
   constexpr iterator cbegin() const noexcept { return begin(); }
   constexpr iterator cend() const noexcept { return end(); }
-  constexpr size_type size() const noexcept { return __size_; }
-  constexpr bool empty() const noexcept { return __size_ == 0; }
+  constexpr size_type size() const noexcept {
+    return __metafunction(detail::__metafn_token_count, *this);
+  }
+  constexpr bool empty() const noexcept { return size() == 0; }
   constexpr reference operator[](size_type __i) const { return data()[__i]; }
   constexpr reference front() const { return data()[0]; }
-  constexpr reference back() const { return data()[__size_ - 1]; }
+  constexpr reference back() const { return data()[size() - 1]; }
 
   // The __n tokens (or as many as there are) starting at __pos.
   consteval auto subseq(size_type __pos, size_type __n = npos) const
       -> token_sequence {
-    return token_sequence(detail::__tokens_subseq(__ts_, __pos, __n));
+    return __metafunction(detail::__metafn_tokens_subseq, *this, __pos, __n);
   }
-
-  // Given to the compiler (interpolated, injected, returned from a macro) as
-  // its token array: the one it holds.
-  constexpr operator __token_array() const { return __ts_; }
 
   // Appending and concatenating, and comparing token by token. (Hidden
   // friends: an operator template found by ADL would be considered for every
-  // operator on any std::meta type, and that costs. The constant evaluator
-  // does these natively.)
+  // operator on any std::meta type, and that costs.)
   friend constexpr auto operator+=(token_sequence& __a,
                                    token_sequence const& __b)
       -> token_sequence& {
-    __a.__ts_ = detail::__tokens_append(__a.__ts_, __b.__ts_);
-    __a.__size_ += __b.__size_;
+    __a = __metafunction(detail::__metafn_tokens_append, __a, __b);
     return __a;
   }
   friend constexpr auto operator+=(token_sequence& __a, token __t)
       -> token_sequence& {
-    __a.__ts_ = detail::__tokens_append(__a.__ts_, __t);
-    ++__a.__size_;
+    __a = __metafunction(detail::__metafn_tokens_append, __a, __t);
     return __a;
   }
   friend constexpr auto operator+(token_sequence __a,
@@ -762,20 +711,20 @@ public:
   }
   friend consteval bool operator==(token_sequence const& __a,
                                    token_sequence const& __b) {
-    return __a.__ts_ == __b.__ts_;
+    return __metafunction(detail::__metafn_tokens_equal, __a, __b);
   }
   // A token against a single-token sequence: tok == ^^{ + }.
   friend consteval bool operator==(token __t, token_sequence const& __s) {
-    return __s.__size_ == 1 && __s.__ts_ == __t;
+    return __metafunction(detail::__metafn_tokens_equal, __t, __s);
   }
 };
 
 namespace detail {
-// (Also how the compiler interpolates any other contiguous range of tokens:
-// a std::span<const token>, say.)
+// (How the compiler interpolates any other contiguous range of tokens: a
+// std::span<const token>, say.)
 template <__token_range _Rp>
-constexpr auto __tokens_of_range(_Rp const& __r) -> __token_array {
-  return __tokens_join(ranges::data(__r), ranges::size(__r));
+constexpr auto __tokens_of_range(_Rp const& __r) -> token_sequence {
+  return token_sequence(__r);
 }
 }  // namespace detail
 
@@ -3363,11 +3312,6 @@ public:
   consteval operator token_sequence() const {
     return body;
   }
-  // Interpolated as raw tokens: \(builder). (Directly to the compiler's
-  // token array, which via token_sequence would be two conversions.)
-  consteval operator __token_array() const {
-    return body;
-  }
 };
 
 // A single identifier token assembled from the arguments (strings and
@@ -3512,7 +3456,7 @@ consteval auto is_constant_expression(info r) -> bool {
 //     return ^^{ \(*r) };
 consteval auto test_expression(token_sequence tokens) -> optional<info> {
   info __r = __metafunction(detail::__metafn_test_expression,
-                            __token_array(tokens));
+                            tokens);
   if (__r == info{})
     return nullopt;
   return __r;
@@ -3599,7 +3543,7 @@ struct clone_naming {
 // Reusing the description in another class creates fresh declarations.
 consteval auto declaration_of(info fn, clone_naming naming = {}) -> info {
   return __metafunction(detail::__metafn_declaration_of, fn,
-                        __token_array(naming.name),
+                        naming.name,
                         naming.template_parameter_prefix.size(),
                         naming.template_parameter_prefix.data(),
                         naming.parameter_prefix.size(),
@@ -3741,7 +3685,7 @@ consteval auto forwarding_call_for(info d, token_sequence receiver,
                                    argument_list_options opts = {})
     -> token_sequence {
   return __metafunction(detail::__metafn_forwarding_call_for, d,
-                        __token_array(receiver), opts.forward);
+                        receiver, opts.forward);
 }
 
 _LIBCPP_END_NAMESPACE_REFLECTION_V2

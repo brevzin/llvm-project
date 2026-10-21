@@ -16445,6 +16445,14 @@ public:
   /// token literal is the compiler's token array).
   QualType getStdMetaTokenSequenceType();
   QualType StdMetaTokenSequenceTy;
+  /// The return type of an expression macro: std::meta::token_sequence once
+  /// <meta> defines it (the compiler's token array before).
+  QualType getMacroReturnType();
+  /// The token array the std::meta::token_sequence \p E holds.
+  Expr *BuildTokenArrayFromSequence(Expr *E);
+  /// \p Record is std::meta::token_sequence, being defined: give it its
+  /// storage, a member only the compiler can name.
+  void AddTokenSequenceStorage(CXXRecordDecl *Record);
   /// \p E, of the compiler's token array type, as a std::meta::token_sequence
   /// (constructed from it), or \p E itself before <meta> declares one.
   ExprResult BuildTokenSequenceValue(Expr *E);

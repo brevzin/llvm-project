@@ -2028,15 +2028,16 @@ void CXXTokenSequenceExpr::initializeInterpolationExprs() {
     setInterpolationExpr(I, nullptr);
 }
 
-CXXTokenSequenceExpr *CXXTokenSequenceExpr::Create(
-    ASTContext &C, SourceLocation OperatorLoc, SourceRange OperandRange,
-    TokenSequenceData TSD, ArrayRef<TokenSequenceParamBinding> ParamBindings) {
+CXXTokenSequenceExpr *
+CXXTokenSequenceExpr::Create(ASTContext &C, SourceLocation OperatorLoc,
+                             SourceRange OperandRange, TokenSequenceData TSD,
+                             ArrayRef<TokenSequenceParamBinding> ParamBindings,
+                             QualType Ty) {
   unsigned NumInterpolationExprs = countInterpolationExprs(TSD);
   void *Mem =
       C.Allocate(totalSizeToAlloc<Stmt *>(NumInterpolationExprs));
-  auto *E =
-      new (Mem) CXXTokenSequenceExpr(C, C.TokenSequenceTy, TSD,
-                                     NumInterpolationExprs);
+  auto *E = new (Mem) CXXTokenSequenceExpr(
+      C, Ty.isNull() ? C.TokenSequenceTy : Ty, TSD, NumInterpolationExprs);
   E->setOperatorLoc(OperatorLoc);
   E->setOperandRange(OperandRange);
   if (!ParamBindings.empty()) {

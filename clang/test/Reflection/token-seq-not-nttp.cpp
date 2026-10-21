@@ -5,9 +5,10 @@
 // mangled name and collide silently at link time. Token sequences are
 // therefore not structural types, and cannot be non-type template parameters.
 
+#include "Inputs/token-sequence.h"
+
 namespace std::meta {
   using info = decltype(^^::);
-  using token_sequence = decltype(^^{ });
 }
 using std::meta::token_sequence;
 

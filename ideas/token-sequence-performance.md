@@ -807,6 +807,44 @@ against 155 MB.
 118.78 s (new), which is 1.9% faster than the original. Part of that is the
 native member queries, which only the new compiler has.
 
+### No nameable token-array type
+
+The first version of this stage still had two layers visible in `<meta>`:
+- the compiler's token array, named there as `__token_array =
+  decltype(^^{ })` (only valid before the class was defined);
+- a class holding one, plus its size.
+
+Now `<meta>` names neither:
+- **Storage:** the class declares no data members. When
+  `std::meta::token_sequence` is defined, the compiler adds its storage: a
+  private member no program can name, which reflection skips.
+- **Literals:** a token literal is created with the class type.
+- **Conversions:** the compiler converts between the class and its internal
+  array only where it needs to (raw arguments, metafunction arguments and
+  results, interpolation, injection, a macro's result). These are two implicit
+  conversions only Sema forms, which template instantiation keeps rather than
+  recomputes.
+- **`<meta>` is required:** without it there is nothing for a literal to be,
+  so `^^{ ... }` is an error, as `typeid` is without `<typeinfo>`. The clang
+  tests that use token sequences without the library include a minimal
+  definition (`clang/test/Reflection/Inputs/token-sequence.h`) whose operators
+  are declared but not defined, since the compiler does them natively.
+
+It is also faster: a sequence given to the compiler is a field read, not a
+member-call intercept, and the object is a single field.
+
+| workload | new / original, before | after |
+|---|---|---|
+| small × 2000 | 1.13× | 1.13× |
+| enum (3 shapes) | 0.66–1.06× | 0.72–0.94× |
+| split, token at a time | 0.75–0.79× | 0.57–0.59× |
+| split, hoisted | 0.65× | 0.42× |
+| split with `subseq` | 0.62–0.75× | 0.36–0.47× |
+| scan | 0.57–0.78× | 0.55–0.56× |
+| pass by `const&` / by value | 1.3× / 2.0× | 0.37× / 0.80× |
+
+Tests and examples (90 cases): 2.0% faster than the original model.
+
 ## Conclusions
 
 1. **Compile time is not a reason to reject `vector<token>`.** With a dedicated

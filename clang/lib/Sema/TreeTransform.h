@@ -59,6 +59,19 @@
 using namespace llvm::omp;
 
 namespace clang {
+
+/// The conversion between a token array and std::meta::token_sequence among
+/// the implicit conversions that \p E is (and its operand is, ...), if any:
+/// analysis does not recompute one, so transforming must keep it (P4380).
+inline ImplicitCastExpr *findTokenSequenceCast(Expr *E) {
+  while (auto *ICE = dyn_cast<ImplicitCastExpr>(E)) {
+    if (ICE->getCastKind() == CK_TokenArrayToSequence ||
+        ICE->getCastKind() == CK_SequenceToTokenArray)
+      return ICE;
+    E = ICE->getSubExpr();
+  }
+  return nullptr;
+}
 using namespace sema;
 
 // This helper class is used to facilitate pack expansion during tree transform.
@@ -4525,9 +4538,13 @@ ExprResult TreeTransform<Derived>::TransformInitializer(Expr *Init,
   if (ImplicitCastExpr *ICE = dyn_cast<ImplicitCastExpr>(Init))
     // Don't strip derived-to-base casts that represent base-specifier splices;
     // they affect type deduction.
-    if (!((ICE->getCastKind() == CK_DerivedToBase ||
-           ICE->getCastKind() == CK_UncheckedDerivedToBase) &&
-          isa<CXXSpliceExpr>(ICE->getSubExpr())))
+    // Nor the conversions between token arrays and std::meta::token_sequence,
+    // which analysis does not recompute.
+    if (ImplicitCastExpr *TokenCast = findTokenSequenceCast(ICE))
+      Init = TokenCast;
+    else if (!((ICE->getCastKind() == CK_DerivedToBase ||
+                ICE->getCastKind() == CK_UncheckedDerivedToBase) &&
+               isa<CXXSpliceExpr>(ICE->getSubExpr())))
       Init = ICE->getSubExprAsWritten();
 
   if (CXXStdInitializerListExpr *ILE =
@@ -15022,6 +15039,27 @@ TreeTransform<Derived>::TransformConditionalOperator(ConditionalOperator *E) {
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformImplicitCastExpr(ImplicitCastExpr *E) {
+  // The conversions between the compiler's token arrays and
+  // std::meta::token_sequence are not recomputed by analyzing the operand
+  // again (P4380): keep them, unless the transformed operand already has the
+  // type.
+  if (ImplicitCastExpr *TokenCast = findTokenSequenceCast(E);
+      TokenCast && TokenCast != E)
+    return getDerived().TransformExpr(TokenCast);
+  if (E->getCastKind() == CK_TokenArrayToSequence ||
+      E->getCastKind() == CK_SequenceToTokenArray) {
+    ExprResult Sub = getDerived().TransformExpr(E->getSubExpr());
+    if (Sub.isInvalid() || Sub.get()->isTypeDependent())
+      return Sub;
+    QualType T = Sub.get()->getType();
+    if (E->getCastKind() == CK_TokenArrayToSequence)
+      return T->isTokenSequenceType()
+                 ? getSema().BuildTokenSequenceValue(Sub.get())
+                 : Sub;
+    return T->isStdMetaTokenSequenceType()
+               ? getSema().BuildTokenArrayFromSequence(Sub.get())
+               : Sub;
+  }
   // Derived-to-base casts from base specifier splices (e.g., object.[:base:])
   // must be preserved. Unlike normal implicit conversions that can be
   // recomputed by semantic analysis, these casts represent the semantic

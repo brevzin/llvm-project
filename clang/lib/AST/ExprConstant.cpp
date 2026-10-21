@@ -10103,22 +10103,14 @@ static bool ReadTokenArray(EvalInfo &Info, const Expr *E, LValue Ptr,
 
 /// A std::meta::token_sequence's tokens, given its value.
 static bool ReadTokenSequenceObject(EvalInfo &Info, const Expr *E,
-                                    const APValue &View, QualType ElemTy,
+                                    const APValue &Obj, QualType ElemTy,
                                     TokenSequenceData &Out) {
-  if (!View.isStruct() || View.getStructNumFields() != 2)
+  // One field: the token array the compiler gave it.
+  if (!Obj.isStruct() || Obj.getStructNumFields() != 1 ||
+      !Obj.getStructField(0).isTokenSequence())
     return false;
-  const APValue &P = View.getStructField(0);
-  const APValue &Sz = View.getStructField(1);
-  // A view that holds its token array: that array.
-  if (P.isTokenSequence()) {
-    Out = P.getTokenSequence();
-    return true;
-  }
-  if (!P.isLValue() || !Sz.isInt())
-    return false;
-  LValue Ptr;
-  Ptr.setFrom(Info.Ctx, P);
-  return ReadTokenArray(Info, E, Ptr, ElemTy, Sz.getInt().getZExtValue(), Out);
+  Out = Obj.getStructField(0).getTokenSequence();
+  return true;
 }
 
 /// The tokens of an operand of a std::meta token operator: a token or a
@@ -10153,21 +10145,16 @@ static bool ReadTokenOperand(EvalInfo &Info, const Expr *Arg,
   return false;
 }
 
-/// A std::meta::token_sequence of class type \p T holding \p TSD: its token
-/// array and its size.
+/// A std::meta::token_sequence of class type \p T holding \p TSD.
 static bool MakeTokenSequenceValue(EvalInfo &Info, QualType T,
                                    TokenSequenceData TSD, APValue &Out) {
   const CXXRecordDecl *RD = T->getAsCXXRecordDecl();
-  if (!RD)
+  if (!RD || RD->getNumBases() ||
+      std::distance(RD->field_begin(), RD->field_end()) != 1 ||
+      !RD->field_begin()->getType()->isTokenSequenceType())
     return false;
-  SmallVector<const FieldDecl *, 2> Fields(RD->fields());
-  if (Fields.size() != 2 || !Fields[0]->getType()->isTokenSequenceType() ||
-      !Fields[1]->getType()->isIntegerType() || RD->getNumBases())
-    return false;
-  Out = APValue(APValue::UninitStruct(), 0, 2);
+  Out = APValue(APValue::UninitStruct(), 0, 1);
   Out.getStructField(0) = APValue(TSD);
-  Out.getStructField(1) =
-      APValue(Info.Ctx.MakeIntValue(TSD.size(), Fields[1]->getType()));
   return true;
 }
 
@@ -10281,7 +10268,7 @@ static bool TryNativeTokenSequenceMember(EvalInfo &Info, const CallExpr *E,
   APValue Obj;
   if (!handleLValueToRValueConversion(Info, E, ClassTy, This, Obj))
     return false;
-  if (!Obj.isStruct() || Obj.getStructNumFields() != 2 ||
+  if (!Obj.isStruct() || Obj.getStructNumFields() != 1 ||
       !Obj.getStructField(0).isTokenSequence())
     return true;
   TokenSequenceData TSD = Obj.getStructField(0).getTokenSequence();
@@ -12670,46 +12657,49 @@ bool MemberPointerExprEvaluator::VisitUnaryAddrOf(const UnaryOperator *E) {
 //===----------------------------------------------------------------------===//
 
 namespace {
-  class RecordExprEvaluator
-  : public ExprEvaluatorBase<RecordExprEvaluator> {
-    const LValue &This;
-    APValue &Result;
-  public:
+// A token literal's tokens, interpolations resolved (see
+// ReflectionEvaluator::VisitCXXTokenSequenceExpr).
+static bool EvaluateTokenLiteral(EvalInfo &Info, const CXXTokenSequenceExpr *E,
+                                 APValue &Result);
 
-    RecordExprEvaluator(EvalInfo &info, const LValue &This, APValue &Result)
+class RecordExprEvaluator : public ExprEvaluatorBase<RecordExprEvaluator> {
+  const LValue &This;
+  APValue &Result;
+
+public:
+  RecordExprEvaluator(EvalInfo &info, const LValue &This, APValue &Result)
       : ExprEvaluatorBaseTy(info), This(This), Result(Result) {}
 
-    bool Success(const APValue &V, const Expr *E) {
-      Result = V;
-      return true;
-    }
-    bool ZeroInitialization(const Expr *E) {
-      return ZeroInitialization(E, E->getType());
-    }
-    bool ZeroInitialization(const Expr *E, QualType T);
+  bool Success(const APValue &V, const Expr *E) {
+    Result = V;
+    return true;
+  }
+  bool ZeroInitialization(const Expr *E) {
+    return ZeroInitialization(E, E->getType());
+  }
+  bool ZeroInitialization(const Expr *E, QualType T);
 
-    bool VisitCallExpr(const CallExpr *E) {
-      return handleCallExpr(E, Result, &This);
-    }
-    bool VisitDoExpr(const DoExpr *E) {
-      return handleDoExpr(E, Result, &This);
-    }
-    bool VisitCastExpr(const CastExpr *E);
-    bool VisitInitListExpr(const InitListExpr *E);
-    bool VisitCXXConstructExpr(const CXXConstructExpr *E) {
-      return VisitCXXConstructExpr(E, E->getType());
-    }
-    bool VisitLambdaExpr(const LambdaExpr *E);
-    bool VisitTemplateStringLiteralExpr(const TemplateStringLiteralExpr *E);
-    bool VisitCXXInheritedCtorInitExpr(const CXXInheritedCtorInitExpr *E);
-    bool VisitCXXConstructExpr(const CXXConstructExpr *E, QualType T);
-    bool VisitCXXStdInitializerListExpr(const CXXStdInitializerListExpr *E);
-    bool VisitBinCmp(const BinaryOperator *E);
-    bool VisitCXXParenListInitExpr(const CXXParenListInitExpr *E);
-    bool VisitCXXParenListOrInitListExpr(const Expr *ExprToVisit,
-                                         ArrayRef<Expr *> Args);
-    bool VisitDesignatedInitUpdateExpr(const DesignatedInitUpdateExpr *E);
-  };
+  bool VisitCallExpr(const CallExpr *E) {
+    return handleCallExpr(E, Result, &This);
+  }
+  bool VisitDoExpr(const DoExpr *E) { return handleDoExpr(E, Result, &This); }
+  bool VisitCastExpr(const CastExpr *E);
+  bool VisitCXXTokenSequenceExpr(const CXXTokenSequenceExpr *E);
+  bool VisitInitListExpr(const InitListExpr *E);
+  bool VisitCXXConstructExpr(const CXXConstructExpr *E) {
+    return VisitCXXConstructExpr(E, E->getType());
+  }
+  bool VisitLambdaExpr(const LambdaExpr *E);
+  bool VisitTemplateStringLiteralExpr(const TemplateStringLiteralExpr *E);
+  bool VisitCXXInheritedCtorInitExpr(const CXXInheritedCtorInitExpr *E);
+  bool VisitCXXConstructExpr(const CXXConstructExpr *E, QualType T);
+  bool VisitCXXStdInitializerListExpr(const CXXStdInitializerListExpr *E);
+  bool VisitBinCmp(const BinaryOperator *E);
+  bool VisitCXXParenListInitExpr(const CXXParenListInitExpr *E);
+  bool VisitCXXParenListOrInitListExpr(const Expr *ExprToVisit,
+                                       ArrayRef<Expr *> Args);
+  bool VisitDesignatedInitUpdateExpr(const DesignatedInitUpdateExpr *E);
+};
 }
 
 /// Perform zero-initialization on an object of non-union class type.
@@ -12792,10 +12782,35 @@ bool RecordExprEvaluator::ZeroInitialization(const Expr *E, QualType T) {
   return HandleClassZeroInitialization(Info, E, RD, This, Result);
 }
 
+bool RecordExprEvaluator::VisitCXXTokenSequenceExpr(
+    const CXXTokenSequenceExpr *E) {
+  // A token literal: its tokens, interpolations resolved, in a
+  // std::meta::token_sequence.
+  APValue TS;
+  if (!EvaluateTokenLiteral(Info, E, TS) || !TS.isTokenSequence())
+    return false;
+  if (!MakeTokenSequenceValue(Info, E->getType(), TS.getTokenSequence(),
+                              Result))
+    return Error(E);
+  return true;
+}
+
 bool RecordExprEvaluator::VisitCastExpr(const CastExpr *E) {
   switch (E->getCastKind()) {
   default:
     return ExprEvaluatorBaseTy::VisitCastExpr(E);
+
+  case CK_TokenArrayToSequence: {
+    // A std::meta::token_sequence holding the compiler's token array.
+    APValue TS;
+    if (!Evaluate(TS, Info, E->getSubExpr()))
+      return false;
+    if (!TS.isTokenSequence() ||
+        !MakeTokenSequenceValue(Info, E->getType(), TS.getTokenSequence(),
+                                Result))
+      return Error(E);
+    return true;
+  }
 
   case CK_ConstructorConversion:
     return Visit(E->getSubExpr());
@@ -13034,44 +13049,6 @@ bool RecordExprEvaluator::VisitCXXConstructExpr(const CXXConstructExpr *E,
   // be initializing an array element instead.
   const CXXConstructorDecl *FD = E->getConstructor();
   if (FD->isInvalidDecl() || FD->getParent()->isInvalidDecl()) return false;
-
-  // A std::meta::token_sequence from the compiler's token array (a literal):
-  // made directly -- the token array (or a pointer to its tokens in static
-  // storage) and a size -- rather than by evaluating the constructor.
-  if (E->getNumArgs() == 1 && FD->getNumParams() == 1 &&
-      FD->getParamDecl(0)->getType()->isTokenSequenceType() &&
-      Info.Ctx.getCanonicalTagType(FD->getParent())
-          .getTypePtr()
-          ->isStdMetaTokenSequenceType()) {
-    const CXXRecordDecl *RD = FD->getParent();
-    SmallVector<const FieldDecl *, 2> Fields(RD->fields());
-    if (Fields.size() == 2 &&
-        (Fields[0]->getType()->isPointerType() ||
-         Fields[0]->getType()->isTokenSequenceType()) &&
-        Fields[1]->getType()->isIntegerType()) {
-      APValue TS;
-      const Expr *Arg = E->getArg(0);
-      if (!Evaluate(TS, Info, Arg))
-        return false;
-      if (Arg->isGLValue()) {
-        LValue LV;
-        LV.setFrom(Info.Ctx, TS);
-        if (!handleLValueToRValueConversion(Info, Arg, Arg->getType(), LV, TS))
-          return false;
-      }
-      if (!TS.isTokenSequence())
-        return Error(E);
-      TokenSequenceData TSD = TS.getTokenSequence();
-      Result = APValue(APValue::UninitStruct(), 0, 2);
-      Result.getStructField(0) =
-          Fields[0]->getType()->isTokenSequenceType()
-              ? APValue(TSD)
-              : MaterializeTokens(Info.Ctx, TSD, Fields[0]->getType());
-      Result.getStructField(1) = APValue(Info.Ctx.MakeIntValue(
-          TSD.size(), Fields[1]->getType()));
-      return true;
-    }
-  }
 
   bool ZeroInit = E->requiresZeroInitialization();
   if (CheckTrivialDefaultConstructor(Info, E->getExprLoc(), FD, ZeroInit)) {
@@ -23270,10 +23247,10 @@ public:
 
   bool VisitCXXReflectExpr(const CXXReflectExpr *E);
   bool VisitCXXTokenSequenceExpr(const CXXTokenSequenceExpr *E);
+  bool VisitCastExpr(const CastExpr *E);
   bool
   VisitCXXTokenInterpolationListExpr(const CXXTokenInterpolationListExpr *E);
   bool VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E);
-  bool VisitCXXMemberCallExpr(const CXXMemberCallExpr *E);
   bool VisitCXXSpliceExpr(const CXXSpliceExpr *E);
   bool VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E);
   bool VisitCXXBuiltinStrLiteralExpr(const CXXBuiltinStrLiteralExpr *E);
@@ -23693,28 +23670,30 @@ bool ReflectionEvaluator::VisitCXXTokenSequenceExpr(
   return Success(Refl, E);
 }
 
-bool ReflectionEvaluator::VisitCXXMemberCallExpr(const CXXMemberCallExpr *E) {
-  // A std::meta::token_sequence given to the compiler as its token array: the
-  // one it holds, read directly rather than by evaluating the conversion
-  // function.
-  if (const auto *Conv =
-          dyn_cast_or_null<CXXConversionDecl>(E->getMethodDecl());
-      Conv && Conv->getConversionType()->isTokenSequenceType() &&
-      Info.Ctx.getCanonicalTagType(Conv->getParent())
-          .getTypePtr()
-          ->isStdMetaTokenSequenceType()) {
-    const Expr *Obj = E->getImplicitObjectArgument();
+static bool EvaluateTokenLiteral(EvalInfo &Info, const CXXTokenSequenceExpr *E,
+                                 APValue &Result) {
+  return ReflectionEvaluator(Info, Result).VisitCXXTokenSequenceExpr(E);
+}
+
+bool ReflectionEvaluator::VisitCastExpr(const CastExpr *E) {
+  if (E->getCastKind() != CK_SequenceToTokenArray)
+    return BaseType::VisitCastExpr(E);
+  // The token array a std::meta::token_sequence holds.
+  const Expr *Sub = E->getSubExpr();
+  APValue Obj;
+  if (Sub->isGLValue()) {
     LValue LV;
-    APValue Val;
-    if (Obj->isGLValue() && EvaluateLValue(Obj, LV, Info) &&
-        handleLValueToRValueConversion(Info, Obj, Obj->getType(), LV, Val)) {
-      TokenSequenceData TSD;
-      if (ReadTokenSequenceObject(Info, E, Val,
-                                  Info.Ctx.MetaTokenTy.withConst(), TSD))
-        return Success(APValue(TSD), E);
-    }
+    if (!EvaluateLValue(Sub, LV, Info) ||
+        !handleLValueToRValueConversion(Info, Sub, Sub->getType(), LV, Obj))
+      return false;
+  } else if (!Evaluate(Obj, Info, Sub)) {
+    return false;
   }
-  return BaseType::VisitCXXMemberCallExpr(E);
+  TokenSequenceData TSD;
+  if (!ReadTokenSequenceObject(Info, E, Obj, Info.Ctx.MetaTokenTy.withConst(),
+                               TSD))
+    return Error(E);
+  return Success(APValue(TSD), E);
 }
 
 bool ReflectionEvaluator::VisitCXXMetafunctionExpr(
@@ -25650,6 +25629,12 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
   }
   if (ESR != ESR_Returned || !CallScope.destroy())
     return false;
+  // A std::meta::token_sequence: the token array it holds.
+  if (Result.isStruct() && Result.getStructNumFields() == 1 &&
+      Result.getStructField(0).isTokenSequence()) {
+    APValue TS = Result.getStructField(0);
+    Result = std::move(TS);
+  }
   Info.discardCleanups();
   return !Info.EvalStatus.HasSideEffects;
 }

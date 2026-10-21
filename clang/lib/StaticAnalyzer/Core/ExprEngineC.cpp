@@ -352,6 +352,10 @@ void ExprEngine::VisitCast(const CastExpr *CastE, const Expr *Ex,
       // value, and the path has already sunk at the diverging operand.
       case CK_NoReturnToAny:
         continue;
+      // Token sequences carry no state at runtime (P4380).
+      case CK_TokenArrayToSequence:
+      case CK_SequenceToTokenArray:
+        continue;
         // The analyzer doesn't do anything special with these casts,
         // since it understands retain/release semantics already.
       case CK_ARCProduceObject:

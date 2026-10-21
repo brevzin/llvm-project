@@ -11015,6 +11015,12 @@ void Sema::ActOnFinishCXXMemberSpecification(
     Diag(AL.getLoc(), diag::warn_attribute_after_definition_ignored) << AL;
   }
 
+  if (auto *RD = dyn_cast<CXXRecordDecl>(TagDecl);
+      RD && Context.getCanonicalTagType(RD)
+                .getTypePtr()
+                ->isStdMetaTokenSequenceType())
+    AddTokenSequenceStorage(RD);
+
   ActOnFields(S, RLoc, TagDecl,
               llvm::ArrayRef(
                   // strict aliasing violation!
