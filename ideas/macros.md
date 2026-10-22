@@ -251,6 +251,18 @@ The reflection of a bound expression supports:
   reflections, with implicit conversions stripped so that they are the
   operands as written. Each is itself interpolable.
 
+A function parameter's default argument is available the same way:
+`default_argument_of(p)`, for a parameter reflection `p` for which
+`has_default_argument(p)` holds, reflects that default argument as an
+expression. Interpolated, it is what an omitted argument is, not its tokens:
+- its names are bound, and access is checked, where it was written;
+- a function template's default argument is instantiated;
+- it is evaluated where it is interpolated, each time;
+- `std::source_location::current()` in it is the macro's invocation.
+
+This is what lets a named-argument `call!(f, y = 2)` supply `x`'s default for
+`void f(int x = 0, int y = 0)`.
+
 This is deliberately one step of navigation, not a full AST visitor. A macro
 decomposes the shapes it recognizes and interpolates everything else whole.
 Swift Testing's `#expect` works this way on the syntax tree; we get to do it on

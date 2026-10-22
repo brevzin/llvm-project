@@ -855,6 +855,12 @@ static bool tokens_subseq(APValue &Result, ASTContext &C, MetaActions &Meta,
                           SourceRange Range, ArrayRef<Expr *> Args,
                           Decl *ContainingDecl);
 
+static bool default_argument_of(APValue &Result, ASTContext &C,
+                                MetaActions &Meta, EvalFn Evaluator,
+                                DiagFn Diagnoser, bool AllowInjection,
+                                QualType ResultTy, SourceRange Range,
+                                ArrayRef<Expr *> Args, Decl *ContainingDecl);
+
 static bool tokens_equal(APValue &Result, ASTContext &C, MetaActions &Meta,
                          EvalFn Evaluator, DiagFn Diagnoser,
                          bool AllowInjection, QualType ResultTy,
@@ -1084,6 +1090,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_tokenSequence, 3, 3, tokens_subseq},
     {Metafunction::MFRK_token, 0, 0, token_type},
     {Metafunction::MFRK_bool, 2, 2, tokens_equal},
+    {Metafunction::MFRK_metaInfo, 1, 1, default_argument_of},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -7278,6 +7285,32 @@ bool has_default_argument(APValue &Result, ASTContext &C, MetaActions &Meta,
                                   DescriptionOf(RV));
   }
   llvm_unreachable("unknown reflection kind");
+}
+
+// The default argument has_default_argument finds, as an expression: what an
+// omitted argument is (bound where it was written, evaluated where used).
+bool default_argument_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                         EvalFn Evaluator, DiagFn Diagnoser,
+                         bool AllowInjection, QualType ResultTy,
+                         SourceRange Range, ArrayRef<Expr *> Args,
+                         Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+  assert(ResultTy == C.MetaInfoTy);
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  if (!RV.isReflection() || RV.getReflectionKind() != ReflectionKind::Parameter)
+    return DiagnoseReflectionKind(Diagnoser, Range, "a function parameter",
+                                  DescriptionOf(RV));
+  ParmVarDecl *PVD = getMostRecentParmVarDecl(RV.getReflectedParameter());
+  if (!PVD->hasDefaultArg())
+    return DiagnoseReflectionKind(Diagnoser, Range,
+                                  "a parameter with a default argument");
+  Expr *E = Meta.DefaultArgument(PVD, Range.getBegin());
+  if (!E)
+    return true;
+  return SetAndSucceed(Result, APValue(ReflectionKind::Expression, E));
 }
 
 bool is_explicit_object_parameter(APValue &Result, ASTContext &C,

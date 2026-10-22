@@ -146,9 +146,14 @@ public:
   // valid, and null otherwise (std::meta::test_expression).
   virtual Expr *TestExpression(TokenSequenceData TSD, SourceLocation Loc) = 0;
 
-                           // =======================
-                           // Class Synthesis Support
-                           // =======================
+  // The default argument of \p Param, as the expression an omitted argument
+  // is: bound where it was written, instantiated if need be, and used at the
+  // invocation of the macro being evaluated (else at \p Loc). Null on error.
+  virtual Expr *DefaultArgument(ParmVarDecl *Param, SourceLocation Loc) = 0;
+
+  // =======================
+  // Class Synthesis Support
+  // =======================
 
   // Returns a new definition of 'D' having the members specified by 'Mems'.
   virtual

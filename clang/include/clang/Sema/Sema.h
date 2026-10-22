@@ -16654,6 +16654,10 @@ public:
   /// evaluated, so a macro that (directly or indirectly) expands to itself is
   /// diagnosed rather than overflowing the stack.
   unsigned MacroExpansionDepth = 0;
+  /// Where the macro whose body is being evaluated was invoked (invalid
+  /// otherwise): the point of use of what its body builds for the
+  /// expansion, e.g. a std::meta::default_argument_of expression.
+  SourceLocation CurrentMacroInvocationLoc;
 
   /// Set once the depth limit has been diagnosed (a fatal error), so that the
   /// levels of expansion unwinding from it do not each add a note.

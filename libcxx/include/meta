@@ -343,6 +343,7 @@ consteval auto is_entity_proxy(info) -> bool;
 consteval auto parameters_of(info) -> vector<info>;
 consteval auto has_ellipsis_parameter(info) -> bool;
 consteval auto has_default_argument(info) -> bool;
+consteval auto default_argument_of(info) -> info;
 consteval auto is_explicit_object_parameter(info) -> bool;
 consteval auto is_function_parameter(info) -> bool;
 consteval auto return_type_of(info) -> info;
@@ -590,6 +591,7 @@ enum : unsigned {
   __metafn_tokens_subseq,
   __metafn_token_type,
   __metafn_tokens_equal,
+  __metafn_default_argument_of,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -2186,6 +2188,15 @@ consteval auto has_ellipsis_parameter(info r) -> bool {
 
 consteval auto has_default_argument(info r) -> bool {
   return __metafunction(detail::__metafn_has_default_argument, r);
+}
+
+// The default argument has_default_argument(r) finds, as an expression: what
+// an omitted argument is. Its names are bound, and access checked, where it
+// was written; it is instantiated if need be; and it is evaluated where it is
+// interpolated, each time (so std::source_location::current() there is the
+// invocation of the macro being expanded).
+consteval auto default_argument_of(info r) -> info {
+  return __metafunction(detail::__metafn_default_argument_of, r);
 }
 
 consteval auto is_explicit_object_parameter(info r) -> bool {

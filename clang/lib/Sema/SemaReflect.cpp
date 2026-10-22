@@ -535,6 +535,17 @@ public:
     return Result.get();
   }
 
+  Expr *DefaultArgument(ParmVarDecl *Param, SourceLocation Loc) override {
+    auto *FD = dyn_cast<FunctionDecl>(Param->getDeclContext());
+    if (!FD)
+      return nullptr;
+    SourceLocation Use = S.CurrentMacroInvocationLoc.isValid()
+                             ? S.CurrentMacroInvocationLoc
+                             : Loc;
+    ExprResult E = S.BuildCXXDefaultArgExpr(Use, FD, Param);
+    return E.isInvalid() ? nullptr : E.get();
+  }
+
   Expr *TestExpression(TokenSequenceData TSD, SourceLocation Loc) override {
     if (!S.CanParseSpeculativeExpression())
       return nullptr;

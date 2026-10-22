@@ -8441,6 +8441,10 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
       InvocationContext = cast<Decl>(DC);
       break;
     }
+  SourceLocation SavedInvocationLoc = CurrentMacroInvocationLoc;
+  CurrentMacroInvocationLoc = Fn->getBeginLoc();
+  auto RestoreInvocationLoc = llvm::make_scope_exit(
+      [&] { CurrentMacroInvocationLoc = SavedInvocationLoc; });
   if (!Expr::EvaluateMacroBody(Macro, ParamValues, Result, Context, Notes,
                                InvocationContext, ParamInits) ||
       !Result.isTokenSequence()) {
