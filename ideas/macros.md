@@ -268,6 +268,37 @@ decomposes the shapes it recognizes and interpolates everything else whole.
 Swift Testing's `#expect` works this way on the syntax tree; we get to do it on
 the semantically analyzed tree, so `f<a>(b) == c` has already been resolved.
 
+### Class interfaces
+
+A generator that fills in what a class hasn't written (`iterator_interface`
+injecting `<=>` from `-`, postfix `++` from prefix) has to see everything the
+user did write. Operators are often hidden friends, which `members_of` does
+not list, since they aren't members. Two queries close the gap:
+
+- `hidden_friends_of(cls) -> vector<info>`: the functions and function
+  templates *first declared* by a friend declaration in `cls`, in declaration
+  order. That excludes friend classes, friend member functions of other
+  classes, and friend declarations of previously declared functions. A
+  hidden friend that is later redeclared at namespace scope is still listed:
+  "first declared in `cls`" is the whole rule. There is no access context.
+  Friends aren't members, friend declarations aren't affected by access
+  specifiers, and a hidden friend is callable by anyone holding a `cls`. Like
+  `members_of`, it works while the class is being defined (giving the friends
+  declared so far) and instantiates a class template specialization first.
+- `interface_of(cls, ctx) -> vector<info>`: the class's functional interface.
+  First its member functions and member function templates accessible in
+  `ctx` (static members, conversion functions and non-special assignments
+  included), excluding constructors, destructors and special member
+  functions. Then its hidden friends.
+
+(The name `interface_of` is a compromise. `operations_of` read better but sits
+one letter from the existing `operator_of`. `associated_functions_of` would
+suggest everything argument-dependent lookup finds.)
+
+`hidden_friends_of` is a member-gather query, natively counted and filled;
+`interface_of` is library code over the two. Test:
+`hidden-friends-of.pass.cpp`.
+
 ### Tokens
 
 For raw parameters the only additional surface is a token list plus

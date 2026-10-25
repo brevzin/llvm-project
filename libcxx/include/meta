@@ -344,6 +344,8 @@ consteval auto parameters_of(info) -> vector<info>;
 consteval auto has_ellipsis_parameter(info) -> bool;
 consteval auto has_default_argument(info) -> bool;
 consteval auto default_argument_of(info) -> info;
+consteval auto hidden_friends_of(info) -> vector<info>;
+consteval auto interface_of(info, access_context) -> vector<info>;
 consteval auto is_explicit_object_parameter(info) -> bool;
 consteval auto is_function_parameter(info) -> bool;
 consteval auto return_type_of(info) -> info;
@@ -1218,7 +1220,8 @@ consteval auto is_accessible(info r, access_context ctx) -> bool {
 // The member queries, gathered natively (see Metafunction::isMemberGather):
 // the count, then the reflections written into the vector.
 enum class __member_query : size_t {
-  members, bases, static_data_members, nonstatic_data_members, subobjects
+  members, bases, static_data_members, nonstatic_data_members, subobjects,
+  hidden_friends
 };
 consteval auto __gather_members(info r, access_context ctx,
                                 __member_query q) -> vector<info> {
@@ -1280,6 +1283,18 @@ consteval auto subobjects_of(info r, access_context ctx) -> vector<info> {
     throw "Namespaces cannot have base classes";
 
   return __gather_members(r, ctx, __member_query::subobjects);
+}
+
+// The hidden friends of a class: the functions and function templates first
+// declared by a friend declaration in it, in declaration order. (They are
+// not members, and friend declarations are not affected by access, so there
+// is no access context.)
+consteval auto hidden_friends_of(info r) -> vector<info> {
+  if (is_namespace(r))
+    throw "Namespaces cannot have hidden friends";
+
+  return __gather_members(r, access_context::unchecked(),
+                          __member_query::hidden_friends);
 }
 
 // Returns true if the reflected entity is an enumerable type.
@@ -3711,6 +3726,21 @@ inline constexpr bool std::ranges::enable_view<std::meta::token_sequence> =
     true;
 
 _LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
+
+// The functional interface of a class: its member functions and member
+// function templates accessible in 'ctx' -- other than constructors,
+// destructors, and special member functions -- followed by its hidden friends.
+consteval auto interface_of(info r, access_context ctx) -> vector<info> {
+  vector<info> result;
+  for (info m : members_of(r, ctx))
+    if ((is_function(m) || is_function_template(m)) && !is_constructor(m) &&
+        !is_constructor_template(m) && !is_destructor(m) &&
+        !is_special_member_function(m))
+      result.push_back(m);
+  for (info f : hidden_friends_of(r))
+    result.push_back(f);
+  return result;
+}
 
 // Each token of the sequence. (A token_sequence is a range of tokens, so
 // this is the sequence itself; it predates that.)

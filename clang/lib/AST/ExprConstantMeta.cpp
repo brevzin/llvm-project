@@ -16,6 +16,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/DeclFriend.h"
 #include "clang/AST/DeclGroup.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
@@ -2654,6 +2655,8 @@ bool tokens_fill(APValue &Result, ASTContext &C, MetaActions &Meta,
 // The reflections that members_of (kind 0), bases_of (1),
 // static_data_members_of (2), nonstatic_data_members_of (3), or subobjects_of
 // (4: the bases, then the non-static data members) give for 'r' in the access
+// context -- or (5) the hidden friends of 'r' (hidden_friends_of), for which
+// the access context does not matter --
 // context (scope, designating_class), as an array. The constant evaluator
 // writes them to 'dst' (see Metafunction::isMemberGather); 'dst' and
 // 'capacity' are not read here.
@@ -2765,6 +2768,46 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
     return false;
   };
 
+  // The class's hidden friends: the functions and function templates first
+  // declared by a friend declaration in it, in declaration order. They are
+  // not members, so access does not apply.
+  auto HiddenFriends = [&]() {
+    if (!R.isReflectedType())
+      return DiagnoseReflectionKind(Diagnoser, Range, "a class type",
+                                    DescriptionOf(R));
+    QualType QT = R.getReflectedType();
+    if (isTypeAlias(QT))
+      QT = desugarType(QT, /*UnwrapAliases=*/true, /*DropCV=*/false,
+                       /*DropRefs=*/false);
+    ensureDeclared(C, QT, Range.getBegin());
+    auto *RD = dyn_cast_or_null<CXXRecordDecl>(findTypeDecl(QT));
+    if (!RD)
+      return DiagnoseReflectionKind(Diagnoser, Range, "a class type",
+                                    DescriptionOf(R));
+    // As for members_of: a class being defined shows what it has declared so
+    // far; any other class is completed (instantiated) first.
+    if (!RD->isBeingDefined()) {
+      if (!Meta.EnsureInstantiated(RD, Range))
+        return true;
+      if (QT->isIncompleteType())
+        return DiagnoseReflectionKind(Diagnoser, Range, "a complete class type",
+                                      DescriptionOf(R));
+    }
+    if (CXXRecordDecl *Def = RD->getDefinition())
+      RD = Def;
+    for (Decl *D : RD->decls()) {
+      auto *FrD = dyn_cast<FriendDecl>(D);
+      if (!FrD)
+        continue;
+      NamedDecl *ND = FrD->getFriendDecl();
+      if (!ND || !isa<FunctionDecl, FunctionTemplateDecl>(ND) ||
+          ND->getCanonicalDecl() != ND)
+        continue;
+      Out.push_back(makeReflection(ND));
+    }
+    return false;
+  };
+
   bool Failed = false;
   switch (Kind) {
   case 0:
@@ -2781,6 +2824,9 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
     break;
   case 4:
     Failed = Bases() || Members(&is_nonstatic_data_member);
+    break;
+  case 5:
+    Failed = HiddenFriends();
     break;
   default:
     llvm_unreachable("unknown member query");
