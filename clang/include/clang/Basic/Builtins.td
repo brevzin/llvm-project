@@ -1200,6 +1200,13 @@ def IsWithinLifetime : LangBuiltin<"CXX_LANG"> {
   let Prototype = "bool(void*)";
 }
 
+// std::start_lifetime (P3726R2): constexpr, and a no-op at runtime.
+def StartLifetime : LangBuiltin<"CXX26_LANG"> {
+  let Spellings = ["__builtin_start_lifetime"];
+  let Attributes = [NoThrow, CustomTypeChecking, Constexpr];
+  let Prototype = "void(void*)";
+}
+
 
 def ClearPadding : Builtin {
   let Spellings = ["__builtin_clear_padding"];

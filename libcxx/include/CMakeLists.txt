@@ -616,6 +616,7 @@ set(files
   __memory/raw_storage_iterator.h
   __memory/shared_count.h
   __memory/shared_ptr.h
+  __memory/start_lifetime.h
   __memory/swap_allocator.h
   __memory/temp_value.h
   __memory/temporary_buffer.h
@@ -872,10 +873,10 @@ set(files
   __type_traits/is_integral.h
   __type_traits/is_literal_type.h
   __type_traits/is_member_pointer.h
+  __type_traits/is_noreturn.h
   __type_traits/is_nothrow_assignable.h
   __type_traits/is_nothrow_constructible.h
   __type_traits/is_nothrow_destructible.h
-  __type_traits/is_noreturn.h
   __type_traits/is_null_pointer.h
   __type_traits/is_object.h
   __type_traits/is_pod.h

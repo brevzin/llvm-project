@@ -755,7 +755,7 @@ public:
 
   /// Activats a field.
   void activate() const;
-  /// Deactivates an entire strurcutre.
+  /// Deactivates a union member (and the members of a class it is).
   void deactivate() const;
 
   Lifetime getLifetime() const {
@@ -785,6 +785,15 @@ public:
   /// alive by default, unless the underlying object has been allocated with
   /// std::allocator. This function is used by std::construct_at.
   void startLifetime() const;
+  /// Begins the lifetime of the pointee, but not of any of its subobjects,
+  /// which are left uninitialized (std::start_lifetime, P3726R2).
+  void startLifetimeWithoutSubobjects() const;
+  /// The subobjects of the pointee are outside their lifetimes and
+  /// uninitialized.
+  void resetSubobjectLifetimes() const;
+  /// The pointee (a subobject with an inline descriptor) is outside its
+  /// lifetime and uninitialized.
+  void resetLifetime() const;
   /// Ends the lifetime of the pointer. This works for pointer with an
   /// InlineDescriptor as well as primitive array elements. This function is
   /// used by std::destroy_at.

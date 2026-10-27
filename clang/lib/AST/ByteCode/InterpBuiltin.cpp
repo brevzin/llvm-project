@@ -9,6 +9,7 @@
 #include "Boolean.h"
 #include "Char.h"
 #include "EvalEmitter.h"
+#include "Interp.h"
 #include "InterpBuiltinBitCast.h"
 #include "InterpHelpers.h"
 #include "PrimType.h"
@@ -2571,6 +2572,53 @@ static bool interp__builtin_is_within_lifetime(InterpState &S, CodePtr OpPC,
     return Error(2);
 
   pushInteger(S, Result, Call->getType());
+  return true;
+}
+
+/// __builtin_start_lifetime(p) (std::start_lifetime, P3726R2): begins the
+/// lifetime of *p, if it is not within its lifetime, without initializing it
+/// or beginning the lifetime of any subobject; a union member becomes active.
+static bool interp__builtin_start_lifetime(InterpState &S, CodePtr OpPC,
+                                           const CallExpr *Call) {
+  const Pointer Ptr = S.Stk.pop<Pointer>();
+
+  auto Invalid = [&](int Reason) {
+    bool CalledFromStd = false;
+    const auto *Callee = S.Current->getCallee();
+    if (Callee && Callee->isInStdNamespace()) {
+      const IdentifierInfo *Identifier = Callee->getIdentifier();
+      CalledFromStd = Identifier && Identifier->isStr("start_lifetime");
+    }
+    S.FFDiag(CalledFromStd ? S.Current->Caller->getSource(S.Current->getRetPC())
+                           : S.Current->getSource(OpPC),
+             diag::note_constexpr_invalid_start_lifetime)
+        << (CalledFromStd ? "std::start_lifetime" : "__builtin_start_lifetime")
+        << Reason;
+    return false;
+  };
+  if (Ptr.isZero())
+    return Invalid(0);
+  if (Ptr.isOnePastEnd())
+    return Invalid(1);
+  if (!Ptr.isBlockPointer() || !CheckLive(S, OpPC, Ptr, AK_Construct) ||
+      !CheckDummy(S, OpPC, Ptr.block(), AK_Construct))
+    return false;
+
+  // Already within its lifetime: nothing to do.
+  bool InUnion = Ptr.inUnion();
+  if (Ptr.getLifetime() == Lifetime::Started && (!InUnion || Ptr.isActive()))
+    return true;
+
+  // A union member becomes active. (An element of an array member requires
+  // the member to be active already.)
+  if (InUnion) {
+    bool IsMember = !Ptr.isArrayElement();
+    if (!CheckActive(S, OpPC, Ptr, AK_Construct, /*WillActivate=*/IsMember))
+      return false;
+    if (IsMember)
+      Ptr.activate();
+  }
+  Ptr.startLifetimeWithoutSubobjects();
   return true;
 }
 
@@ -5193,6 +5241,8 @@ bool InterpretBuiltin(InterpState &S, CodePtr OpPC, const CallExpr *Call,
 
   case Builtin::BI__builtin_is_within_lifetime:
     return interp__builtin_is_within_lifetime(S, OpPC, Call);
+  case Builtin::BI__builtin_start_lifetime:
+    return interp__builtin_start_lifetime(S, OpPC, Call);
 
   case Builtin::BI__builtin_elementwise_add_sat:
     return interp__builtin_elementwise_int_binop(
@@ -6640,7 +6690,10 @@ static bool copyRecord(InterpState &S, CodePtr OpPC, const Pointer &Src,
       });
       return true;
     }
-    // Composite field.
+    // Composite field. (Activate the field itself first: copying its
+    // contents may then end the lifetimes of some of its subobjects.)
+    if (Activate)
+      DestField.activate();
     return copyComposite(S, OpPC, Src.atField(F.Offset), DestField, Activate);
   };
 
@@ -6695,10 +6748,17 @@ static bool copyComposite(InterpState &S, CodePtr OpPC, const Pointer &Src,
     PrimType ET = DestDesc->getPrimType();
     for (unsigned I = 0, N = DestDesc->getNumElems(); I != N; ++I) {
       Pointer DestElem = Dest.atIndex(I);
+      // An element not within its lifetime (P3726R2) is copied as such.
+      if (!Src.isElementAlive(I)) {
+        DestElem.endLifetime();
+        continue;
+      }
       TYPE_SWITCH(ET, {
         DestElem.deref<T>() = Src.elem<T>(I);
         DestElem.initialize();
       });
+      if (!Dest.isElementAlive(I))
+        DestElem.startLifetime();
     }
     return true;
   }
@@ -6711,6 +6771,13 @@ static bool copyComposite(InterpState &S, CodePtr OpPC, const Pointer &Src,
     for (unsigned I = 0, N = DestDesc->getNumElems(); I != N; ++I) {
       const Pointer &SrcElem = Src.atIndex(I).narrow();
       Pointer DestElem = Dest.atIndex(I).narrow();
+      // An element not within its lifetime (P3726R2) is copied as such.
+      if (SrcElem.getLifetime() != Lifetime::Started) {
+        DestElem.resetSubobjectLifetimes();
+        DestElem.resetLifetime();
+        continue;
+      }
+      DestElem.startLifetime();
       if (!copyComposite(S, OpPC, SrcElem, DestElem, Activate))
         return false;
     }

@@ -195,6 +195,8 @@ static bool builtinIsSupported(const llvm::StringTable &Strings,
   if (!LangOpts.C23 && BuiltinInfo.Langs == C23_LANG)
     return false;
   /* C2y unsupported */
+  if (!LangOpts.CPlusPlus26 && BuiltinInfo.Langs == CXX26_LANG)
+    return false;
   if (!LangOpts.C2y && BuiltinInfo.Langs == C2Y_LANG)
     return false;
   return true;

@@ -828,10 +828,15 @@ bool CheckLoad(InterpState &S, CodePtr OpPC, const Pointer &Ptr,
     return false;
   if (!CheckActive(S, OpPC, Ptr, AK))
     return false;
-  if (!Ptr.isInitialized())
+  // (An array element outside its lifetime is reported as such, even if it
+  // was never initialized either.)
+  if (!Ptr.isInitialized() &&
+      (Ptr.getLifetime() == Lifetime::Started || !Ptr.isArrayElement()))
     return DiagnoseUninitialized(S, OpPC, Ptr, AK);
   if (!CheckLifetime(S, OpPC, Ptr, AK))
     return false;
+  if (!Ptr.isInitialized())
+    return DiagnoseUninitialized(S, OpPC, Ptr, AK);
   if (!CheckTemporary(S, OpPC, Ptr.block(), AK))
     return false;
 
@@ -1654,8 +1659,10 @@ bool CheckDestructor(InterpState &S, CodePtr OpPC, const Pointer &Ptr) {
   if (Ptr.getLifetime() == Lifetime::Ended)
     return CheckLifetime(S, OpPC, Ptr, AK_Destroy);
 
-  // Can't call a dtor on a global variable.
-  if (Ptr.block()->isStatic()) {
+  // Can't call a dtor on a global variable -- other than (a subobject of)
+  // the one being initialized, as for any other modification (CheckGlobal).
+  if (Ptr.block()->isStatic() &&
+      !(Ptr.getDeclID() && S.P.getCurrentDecl() == Ptr.getDeclID())) {
     const SourceInfo &E = S.Current->getSource(OpPC);
     S.FFDiag(E, diag::note_constexpr_modify_global);
     return false;
@@ -2156,6 +2163,50 @@ static void setLifeStateRecurse(const Pointer &Ptr, Lifetime L) {
   Ptr.setLifeState(L);
 }
 
+/// Whether \p P (a subobject) is a union elemental subobject: a member of a
+/// union, or an element of an array that is one.
+static bool isUnionElemental(Pointer P) {
+  while (!P.isRoot()) {
+    if (!P.isArrayElement()) {
+      const FieldDecl *FD = P.getField();
+      return FD && FD->getParent()->isUnion();
+    }
+    P = P.getBase();
+  }
+  return false;
+}
+
+void prepareUnionElementalStore(InterpState &S, const Pointer &Ptr) {
+  if (!S.getLangOpts().CPlusPlus26 || !Ptr.isBlockPointer() ||
+      !Ptr.inPrimitiveArray() || Ptr.isArrayRoot() || Ptr.isOnePastEnd())
+    return;
+  Pointer Arr = Ptr.getArray();
+  if (Arr.isRoot() || !isUnionElemental(Arr))
+    return;
+  // An array created by this assignment -- the union member, or an element
+  // of such an array -- has no elements within their lifetimes but this one.
+  bool IsMember = !Arr.isArrayElement();
+  if (IsMember ? !Arr.isActive() : Arr.getLifetime() != Lifetime::Started) {
+    if (IsMember)
+      Arr.activate();
+    Arr.startLifetimeWithoutSubobjects();
+  }
+  if (!Arr.isElementAlive(Ptr.getIndex()))
+    Ptr.startLifetime();
+}
+
+/// C++26 [class.union]p2: a union whose active member's lifetime has ended has
+/// no active member. (Ending the lifetime of an element of the active member
+/// leaves it active.)
+static void deactivateEndedUnionMember(InterpState &S, const Pointer &P) {
+  if (!S.getLangOpts().CPlusPlus26 || !P.isBlockPointer() || P.isRoot() ||
+      P.isArrayElement() || (P.inArray() && !P.isArrayRoot()))
+    return;
+  if (const FieldDecl *FD = P.getField();
+      FD && FD->getParent()->isUnion() && P.isActive())
+    P.deactivate();
+}
+
 /// Ends the lifetime of the peek'd pointer.
 bool EndLifetime(InterpState &S, CodePtr OpPC) {
   const auto &Ptr = S.Stk.peek<Pointer>();
@@ -2163,6 +2214,7 @@ bool EndLifetime(InterpState &S, CodePtr OpPC) {
     return false;
 
   setLifeStateRecurse(Ptr.narrow(), Lifetime::Ended);
+  deactivateEndedUnionMember(S, Ptr.narrow());
   return true;
 }
 
@@ -2173,6 +2225,7 @@ bool EndLifetimePop(InterpState &S, CodePtr OpPC) {
     return false;
 
   setLifeStateRecurse(Ptr.narrow(), Lifetime::Ended);
+  deactivateEndedUnionMember(S, Ptr.narrow());
   return true;
 }
 
@@ -2182,6 +2235,7 @@ bool MarkDestroyed(InterpState &S, CodePtr OpPC) {
     return false;
 
   setLifeStateRecurse(Ptr.narrow(), Lifetime::Destroyed);
+  deactivateEndedUnionMember(S, Ptr.narrow());
   return true;
 }
 
@@ -2225,10 +2279,18 @@ bool CheckNewTypeMismatch(InterpState &S, CodePtr OpPC, const Expr *E,
   if (!CheckTemporary(S, OpPC, Ptr.block(), AK_Construct))
     return false;
 
-  // CheckLifetime for this and all base pointers.
+  // CheckLifetime for this and all base pointers. (getBase() of a primitive
+  // array element skips the array it is an element of, such as a row of a
+  // multidimensional array, so check that too -- if it is a subobject: an
+  // allocation's storage need not be within its lifetime.)
   for (Pointer P = Ptr;;) {
     if (!CheckLifetime(S, OpPC, P, AK_Construct))
       return false;
+    if (P.inPrimitiveArray() && !P.isArrayRoot() && !P.isOnePastEnd()) {
+      Pointer Arr = P.getArray();
+      if (!Arr.isRoot() && !CheckLifetime(S, OpPC, Arr, AK_Construct))
+        return false;
+    }
 
     if (P.isRoot())
       break;

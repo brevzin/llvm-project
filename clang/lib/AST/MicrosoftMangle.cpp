@@ -1941,7 +1941,8 @@ void MicrosoftCXXNameMangler::mangleTemplateArgValue(QualType T,
   case APValue::None:
   case APValue::Indeterminate:
     // FIXME: MSVC doesn't allow this, so we can't be sure how it should be
-    // mangled.
+    // mangled. (Since P3726R2, None reaches here for array elements that are
+    // not within their lifetimes.)
     if (WithScalarType)
       mangleType(T, SourceRange(), QMM_Escape);
     Out << '@';

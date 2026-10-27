@@ -588,7 +588,9 @@ void Pointer::initializeElement(unsigned Index) const {
   }
   assert(IM.hasInitMap());
 
-  if (IM->initializeElement(Index))
+  // (Keep the map while some element is not within its lifetime: that is
+  // only recorded there.)
+  if (IM->initializeElement(Index) && IM->allElementsAlive())
     IM.noteAllInitialized();
 }
 
@@ -693,8 +695,63 @@ void Pointer::activate() const {
   }
 }
 
+/// Puts \p P outside its lifetime and uninitialized, along with all of its
+/// subobjects.
+static void resetSubobjectLifetime(const Pointer &P);
+
+void Pointer::resetSubobjectLifetimes() const {
+  const Pointer &Ptr = *this;
+  const Descriptor *Desc = Ptr.getFieldDesc();
+  if (const Record *R = Ptr.getRecord()) {
+    for (const Record::Field &F : R->fields())
+      resetSubobjectLifetime(Ptr.atField(F.Offset));
+    for (const Record::Base &B : R->bases())
+      resetSubobjectLifetime(Ptr.atField(B.Offset));
+    return;
+  }
+  if (Desc->isPrimitiveArray()) {
+    unsigned N = Desc->getNumElems();
+    if (N == 0)
+      return;
+    InitMapPtr &IM = Ptr.getInitMap();
+    IM.deleteInitMap();
+    IM.setInitMap(new InitMap(N));
+    for (unsigned I = 0; I != N; ++I)
+      IM->endElementLifetime(I);
+    return;
+  }
+  if (Desc->isCompositeArray())
+    for (unsigned I = 0; I != Desc->getNumElems(); ++I)
+      resetSubobjectLifetime(Ptr.atIndex(I).narrow());
+}
+
+static void resetSubobjectLifetime(const Pointer &P) {
+  P.resetSubobjectLifetimes();
+  P.resetLifetime();
+}
+
+void Pointer::resetLifetime() const {
+  getInlineDesc()->IsInitialized = false;
+  getInlineDesc()->LifeState = Lifetime::NotStarted;
+}
+
+void Pointer::startLifetimeWithoutSubobjects() const {
+  startLifetime();
+  resetSubobjectLifetimes();
+}
+
 void Pointer::deactivate() const {
-  // TODO: this only appears in constructors, so nothing to deactivate.
+  if (!isBlockPointer() || BS.Base == 0 || !getInlineDesc()->InUnion)
+    return;
+  std::function<void(const Pointer &)> Deactivate;
+  Deactivate = [&Deactivate](const Pointer &P) {
+    P.getInlineDesc()->IsActive = false;
+    if (const Record *R = P.getRecord())
+      for (const Record::Field &F : R->fields())
+        if (Pointer FP = P.atField(F.Offset); FP.getInlineDesc()->IsActive)
+          Deactivate(FP);
+  };
+  Deactivate(*this);
 }
 
 bool Pointer::hasSameBase(const Pointer &A, const Pointer &B) {
@@ -895,10 +952,16 @@ std::optional<APValue> Pointer::toRValue(const Context &Ctx,
       OptPrimType ElemT = Ctx.classify(ElemTy);
       for (unsigned I = 0; I != NumElems; ++I) {
         APValue &Slot = R.getArrayInitializedElt(I);
+        // An element not within its lifetime has no value (P3726R2).
         if (ElemT) {
+          if (Ptr.getFieldDesc()->isPrimitiveArray() && !Ptr.isElementAlive(I))
+            continue;
           TYPE_SWITCH(*ElemT, Slot = Ptr.elem<T>(I).toAPValue(ASTCtx));
         } else {
-          Ok &= Composite(ElemTy, Ptr.atIndex(I).narrow(), Slot);
+          Pointer EP = Ptr.atIndex(I).narrow();
+          if (EP.getLifetime() != Lifetime::Started)
+            continue;
+          Ok &= Composite(ElemTy, EP, Slot);
         }
       }
       return Ok;

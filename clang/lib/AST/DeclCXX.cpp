@@ -1246,7 +1246,15 @@ void CXXRecordDecl::addedMember(Decl *D) {
           if (FieldRec->hasNonTrivialMoveAssignment())
             data().DefaultedMoveAssignmentIsDeleted = true;
           if (FieldRec->hasNonTrivialDestructor()) {
-            data().DefaultedDestructorIsDeleted = true;
+            // In C++26, whether a variant member with a non-trivial
+            // destructor deletes the union's destructor depends on the
+            // member's initializer and on the union's constructors (see
+            // CWG3189, [class.dtor]p4), so Sema decides once the class is
+            // complete.
+            if (getASTContext().getLangOpts().CPlusPlus26)
+              data().NeedOverloadResolutionForDestructor = true;
+            else
+              data().DefaultedDestructorIsDeleted = true;
             // C++20 [dcl.constexpr]p5:
             //   The definition of a constexpr destructor whose function-body is
             //   not = delete shall additionally satisfy...
@@ -1274,7 +1282,12 @@ void CXXRecordDecl::addedMember(Decl *D) {
         //    -- for all the non-static data members of its class that are of
         //       class type (or array thereof), each such class has a trivial
         //       default constructor.
-        if (!FieldRec->hasTrivialDefaultConstructor())
+        // In C++26, variant members don't count, so a union's members never
+        // make its default constructor non-trivial (see P3074R7,
+        // [class.default.ctor]p3).
+        bool VariantMemberOfUnion =
+            isUnion() && getASTContext().getLangOpts().CPlusPlus26;
+        if (!FieldRec->hasTrivialDefaultConstructor() && !VariantMemberOfUnion)
           data().HasTrivialSpecialMembers &= ~SMF_DefaultConstructor;
 
         // C++0x [class.copy]p13:
@@ -1312,11 +1325,12 @@ void CXXRecordDecl::addedMember(Decl *D) {
         if (!FieldRec->hasTrivialMoveAssignment())
           data().HasTrivialSpecialMembers &= ~SMF_MoveAssignment;
 
-        if (!FieldRec->hasTrivialDestructor())
+        // Likewise for the destructor (see P3074R7, [class.dtor]p8).
+        if (!FieldRec->hasTrivialDestructor() && !VariantMemberOfUnion)
           data().HasTrivialSpecialMembers &= ~SMF_Destructor;
-        if (!FieldRec->hasTrivialDestructorForCall())
+        if (!FieldRec->hasTrivialDestructorForCall() && !VariantMemberOfUnion)
           data().HasTrivialSpecialMembersForCall &= ~SMF_Destructor;
-        if (!FieldRec->hasIrrelevantDestructor())
+        if (!FieldRec->hasIrrelevantDestructor() && !VariantMemberOfUnion)
           data().HasIrrelevantDestructor = false;
         if (FieldRec->isAnyDestructorNoReturn())
           data().IsAnyDestructorNoReturn = true;

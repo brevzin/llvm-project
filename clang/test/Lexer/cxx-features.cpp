@@ -58,6 +58,10 @@
 #error "wrong value for __cpp_trivial_relocatability"
 #endif
 
+#if check(trivial_union, 0, 0, 0, 0, 0, 0, 202603)
+#error "wrong value for __cpp_trivial_union"
+#endif
+
 // --- C++23 features ---
 
 #if check(auto_cast, 0, 0, 0, 0, 0, 202110, 202110)

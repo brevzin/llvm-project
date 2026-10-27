@@ -889,6 +889,9 @@ public:
             needsOverloadResolutionForDestructor()) &&
            "destructor should not be deleted");
     data().DefaultedDestructorIsDeleted = true;
+    // A deleted destructor is not irrelevant. (Usually a member's destructor
+    // already made it relevant, but a C++26 union's variant members don't.)
+    data().HasIrrelevantDestructor = false;
     // C++23 [dcl.constexpr]p3.2:
     //   if the function is a constructor or destructor, its class does not have
     //   any virtual base classes.

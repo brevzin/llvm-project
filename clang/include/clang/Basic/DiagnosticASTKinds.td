@@ -488,6 +488,9 @@ def warn_is_constant_evaluated_always_true_constexpr : Warning<
   "'%0' will always evaluate to 'true' in a manifestly constant-evaluated expression">,
   InGroup<DiagGroup<"constant-evaluated">>;
 
+def note_constexpr_invalid_start_lifetime : Note<
+  "'%0' cannot be called with "
+  "%select{a null pointer|a one-past-the-end pointer}1">;
 def err_invalid_is_within_lifetime : Note<
   "'%0' cannot be called with "
   "%select{a null pointer|a one-past-the-end pointer|"

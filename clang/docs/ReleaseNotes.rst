@@ -195,6 +195,20 @@ C++ Language Changes
 C++2c Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
 
+- Implemented `P3074R7 Trivial unions <https://wg21.link/P3074R7>`_, with the
+  destructor rule of CWG3189: a union's variant members no longer make its
+  default constructor or destructor non-trivial or deleted, except that a
+  variant member with a non-trivial, deleted, or inaccessible destructor deletes
+  the destructor of a class whose member has a default member initializer, or
+  that has a user-provided constructor.
+- Implemented `P3726R2 Adjustments to Union Lifetime Rules
+  <https://wg21.link/P3726R2>`_: ``__builtin_start_lifetime`` (for
+  ``std::start_lifetime``), and union elemental subobjects outside their
+  lifetimes in constant values and template arguments. A union whose active
+  member's lifetime has ended has no active member, and assigning to an
+  element of a union member array outside its lifetime begins its lifetime
+  (as the paper's example intends). ``__cpp_trivial_union`` is ``202603L``.
+
 - Clang now propagates ``constinit`` and ``constexpr`` in structured bindings with tuple-like initializers.
 
 C++23 Feature Support

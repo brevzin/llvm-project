@@ -2087,6 +2087,48 @@ static ExprResult BuiltinIsWithinLifetime(Sema &S, CallExpr *TheCall) {
   return TheCall;
 }
 
+// __builtin_start_lifetime(p) (std::start_lifetime, P3726R2): p must point to
+// a complete implicit-lifetime aggregate type that is neither const nor
+// volatile.
+static ExprResult BuiltinStartLifetime(Sema &S, CallExpr *TheCall) {
+  if (S.checkArgCount(TheCall, 1))
+    return ExprError();
+
+  ExprResult Arg = S.DefaultFunctionArrayLvalueConversion(TheCall->getArg(0));
+  if (Arg.isInvalid())
+    return ExprError();
+  TheCall->setArg(0, Arg.get());
+  TheCall->setType(S.Context.VoidTy);
+
+  Expr *A = Arg.get();
+  if (A->isTypeDependent())
+    return TheCall;
+  enum { NotObject, CVQualified, NotAggregate, NotImplicitLifetime };
+  auto Invalid = [&](int Reason, QualType T) {
+    S.Diag(A->getExprLoc(), diag::err_builtin_start_lifetime_invalid_arg)
+        << Reason << T << A->getSourceRange();
+    return ExprError();
+  };
+
+  const auto *PT = A->getType()->getAs<PointerType>();
+  if (!PT)
+    return Invalid(NotObject, A->getType());
+  QualType T = PT->getPointeeType();
+  if (!T->isObjectType())
+    return Invalid(NotObject, T);
+  if (T->isDependentType())
+    return TheCall;
+  if (S.RequireCompleteType(A->getExprLoc(), T, diag::err_incomplete_type))
+    return ExprError();
+  if (T.isConstQualified() || T.isVolatileQualified())
+    return Invalid(CVQualified, T);
+  if (!T->isAggregateType())
+    return Invalid(NotAggregate, T);
+  if (!S.isImplicitLifetimeType(T))
+    return Invalid(NotImplicitLifetime, T);
+  return TheCall;
+}
+
 static ExprResult BuiltinTriviallyRelocate(Sema &S, CallExpr *TheCall) {
   if (S.checkArgCount(TheCall, 3))
     return ExprError();
@@ -3179,6 +3221,8 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
     return BuiltinLaunder(*this, TheCall);
   case Builtin::BI__builtin_is_within_lifetime:
     return BuiltinIsWithinLifetime(*this, TheCall);
+  case Builtin::BI__builtin_start_lifetime:
+    return BuiltinStartLifetime(*this, TheCall);
   case Builtin::BI__builtin_trivially_relocate:
     return BuiltinTriviallyRelocate(*this, TheCall);
   case Builtin::BI__builtin_clear_padding: {

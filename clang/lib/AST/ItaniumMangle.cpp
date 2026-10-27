@@ -6914,6 +6914,11 @@ void CXXNameMangler::mangleValueInTemplateArg(QualType T, const APValue &V,
   switch (V.getKind()) {
   case APValue::None:
   case APValue::Indeterminate:
+    // FIXME: Since P3726R2 (C++26), a template argument can contain array
+    // elements that are not within their lifetimes (None), such as the unused
+    // capacity of an inplace_vector. The ABI doesn't specify a mangling for
+    // them; this one can't collide in practice, since an Indeterminate value
+    // can't appear in a template argument.
     Out << 'L';
     mangleType(T);
     Out << 'E';

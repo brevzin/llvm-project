@@ -2478,7 +2478,8 @@ static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
                                   QualType Type, const APValue &Value,
                                   ConstantExprKind Kind,
                                   const FieldDecl *SubobjectDecl,
-                                  CheckedTemporaries &CheckedTemps);
+                                  CheckedTemporaries &CheckedTemps,
+                                  bool InUnionElemental = false);
 
 /// Check that this reference or pointer core constant expression is a valid
 /// value for an address or reference constant expression. Return true if we
@@ -2776,7 +2777,15 @@ static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
                                   QualType Type, const APValue &Value,
                                   ConstantExprKind Kind,
                                   const FieldDecl *SubobjectDecl,
-                                  CheckedTemporaries &CheckedTemps) {
+                                  CheckedTemporaries &CheckedTemps,
+                                  bool InUnionElemental) {
+  // C++26 [expr.const]p2: the constituent values and references of an object
+  // exclude its inactive union elemental subobjects -- the members of a union,
+  // and (recursively) the elements of such an array member, that are not
+  // within their lifetimes. (An indeterminate value is within its lifetime.)
+  if (InUnionElemental && Value.isAbsent() && Info.getLangOpts().CPlusPlus26)
+    return true;
+
   if (!Value.hasValue()) {
     if (CERK == CheckEvaluationResultKind::ConstantExpressionAllowUninit)
       return true;
@@ -2805,19 +2814,20 @@ static bool CheckEvaluationResult(CheckEvaluationResultKind CERK,
     for (unsigned I = 0, N = Value.getArrayInitializedElts(); I != N; ++I) {
       if (!CheckEvaluationResult(CERK, Info, DiagLoc, EltTy,
                                  Value.getArrayInitializedElt(I), Kind,
-                                 SubobjectDecl, CheckedTemps))
+                                 SubobjectDecl, CheckedTemps, InUnionElemental))
         return false;
     }
     if (!Value.hasArrayFiller())
       return true;
     return CheckEvaluationResult(CERK, Info, DiagLoc, EltTy,
                                  Value.getArrayFiller(), Kind, SubobjectDecl,
-                                 CheckedTemps);
+                                 CheckedTemps, InUnionElemental);
   }
   if (Value.isUnion() && Value.getUnionField()) {
     return CheckEvaluationResult(
         CERK, Info, DiagLoc, Value.getUnionField()->getType(),
-        Value.getUnionValue(), Kind, Value.getUnionField(), CheckedTemps);
+        Value.getUnionValue(), Kind, Value.getUnionField(), CheckedTemps,
+        /*InUnionElemental=*/true);
   }
   if (Value.isStruct()) {
     auto *RD = Type->castAsRecordDecl();
@@ -7413,6 +7423,21 @@ static bool HandleDynamicCast(EvalInfo &Info, const ExplicitCastExpr *E,
   return RuntimeCheckFailed(&Paths);
 }
 
+/// The value of an object implicitly created by an assignment ([class.union]),
+/// with no initialization performed: the lifetimes of its subobjects begin,
+/// with indeterminate scalars, as default initialization would leave them --
+/// except that in C++26 an array's elements, which are union elemental
+/// subobjects like the array, don't begin theirs (P3726R2).
+static bool implicitlyCreatedUnionElementalValue(EvalInfo &Info, QualType T,
+                                                 APValue &Result) {
+  if (Info.getLangOpts().CPlusPlus26)
+    if (const ConstantArrayType *CAT = Info.Ctx.getAsConstantArrayType(T)) {
+      Result = APValue(APValue::UninitArray(), 0, CAT->getZExtSize());
+      return true;
+    }
+  return handleDefaultInitValue(T, Result);
+}
+
 namespace {
 struct StartLifetimeOfUnionMemberHandler {
   EvalInfo &Info;
@@ -7448,7 +7473,8 @@ struct StartLifetimeOfUnionMemberHandler {
       return false;
     }
     APValue Result;
-    Failed = !handleDefaultInitValue(Field->getType(), Result);
+    Failed =
+        !implicitlyCreatedUnionElementalValue(Info, Field->getType(), Result);
     Subobj.setUnion(Field, Result);
     return true;
   }
@@ -7463,6 +7489,25 @@ struct StartLifetimeOfUnionMemberHandler {
 
 const AccessKinds StartLifetimeOfUnionMemberHandler::AccessKind;
 
+namespace {
+/// Implicitly creates an array element that is not within its lifetime (a
+/// union elemental subobject, C++26), as for a union member.
+struct StartLifetimeOfArrayElementHandler {
+  EvalInfo &Info;
+  static const AccessKinds AccessKind = AK_Construct;
+  bool Failed = false;
+  typedef bool result_type;
+  bool failed() { return false; }
+  bool found(APValue &Subobj, QualType SubobjType, APValue::LValueBase) {
+    if (Subobj.isAbsent())
+      Failed = !implicitlyCreatedUnionElementalValue(Info, SubobjType, Subobj);
+    return !Failed;
+  }
+  bool found(APSInt &, QualType) { return true; }
+  bool found(APFloat &, QualType) { return true; }
+};
+} // end anonymous namespace
+
 /// Handle a builtin simple-assignment or a call to a trivial assignment
 /// operator whose left-hand side might involve a union member access. If it
 /// does, implicitly start the lifetime of any accessed union elements per
@@ -7474,6 +7519,10 @@ static bool MaybeHandleUnionActiveMemberChange(EvalInfo &Info,
     return false;
 
   llvm::SmallVector<std::pair<unsigned, const FieldDecl*>, 4> UnionPathLengths;
+  // The steps of the walk, outermost first: the path length after the step,
+  // and the member (null for a subscript); or BaseClassStep.
+  llvm::SmallVector<std::pair<unsigned, const FieldDecl *>, 4> Steps;
+  const unsigned BaseClassStep = ~0u;
   // C++ [class.union]p5:
   //   define the set S(E) of subexpressions of E as follows:
   unsigned PathLength = LHS.Designator.Entries.size();
@@ -7497,6 +7546,7 @@ static bool MaybeHandleUnionActiveMemberChange(EvalInfo &Info,
           UnionPathLengths.push_back({PathLength - 1, FD});
       }
 
+      Steps.push_back({PathLength, FD});
       E = ME->getBase();
       --PathLength;
       assert(declaresSameEntity(FD,
@@ -7511,6 +7561,7 @@ static bool MaybeHandleUnionActiveMemberChange(EvalInfo &Info,
       if (!Base->getType()->isArrayType())
         break;
 
+      Steps.push_back({PathLength, nullptr});
       E = Base;
       --PathLength;
 
@@ -7522,6 +7573,8 @@ static bool MaybeHandleUnionActiveMemberChange(EvalInfo &Info,
       if (ICE->getCastKind() != CK_DerivedToBase &&
           ICE->getCastKind() != CK_UncheckedDerivedToBase)
         break;
+      // A base class subobject is not a union elemental subobject.
+      Steps.push_back({BaseClassStep, nullptr});
       // Walk path backwards as we walk up from the base to the derived class.
       for (const CXXBaseSpecifier *Elt : llvm::reverse(ICE->path())) {
         if (Elt->isVirtual()) {
@@ -7543,8 +7596,42 @@ static bool MaybeHandleUnionActiveMemberChange(EvalInfo &Info,
     }
   }
 
+  // C++26: an element of an array that is a union elemental subobject (a
+  // union member, or an element of such an array) may be outside its
+  // lifetime even though the array is within its lifetime (P3726R2). An
+  // assignment to such an element of a type as above implicitly creates it
+  // too, as for a union member. Decide innermost first, whether each step
+  // reaches a union elemental subobject.
+  // FIXME: [class.union]p5 doesn't say this yet; it's P3726R2's intent.
+  llvm::SmallVector<unsigned, 4> ElementPathLengths;
+  if (Info.getLangOpts().CPlusPlus26) {
+    bool UnionElemental = false;
+    for (auto [Length, FD] : llvm::reverse(Steps)) {
+      if (Length == BaseClassStep) {
+        UnionElemental = false;
+      } else if (FD) {
+        UnionElemental = FD->getParent()->isUnion();
+      } else if (UnionElemental) {
+        QualType ElemTy = LHS.Base.getType();
+        // The element's type: walk the designator to this entry.
+        for (unsigned I = 0; I != Length; ++I) {
+          if (const FieldDecl *F = getAsField(LHS.Designator.Entries[I]))
+            ElemTy = F->getType();
+          else if (const CXXRecordDecl *B =
+                       getAsBaseClass(LHS.Designator.Entries[I]))
+            ElemTy = Info.Ctx.getCanonicalTagType(B);
+          else
+            ElemTy = Info.Ctx.getAsArrayType(ElemTy)->getElementType();
+        }
+        auto *RD = ElemTy->getBaseElementTypeUnsafe()->getAsCXXRecordDecl();
+        if (!RD || RD->hasTrivialDefaultConstructor())
+          ElementPathLengths.push_back(Length);
+      }
+    }
+  }
+
   // Common case: no unions' lifetimes are started.
-  if (UnionPathLengths.empty())
+  if (UnionPathLengths.empty() && ElementPathLengths.empty())
     return true;
 
   //   if modification of X [would access an inactive union member], an object
@@ -7563,6 +7650,15 @@ static bool MaybeHandleUnionActiveMemberChange(EvalInfo &Info,
                       ConstructionPhase::AfterBases;
     StartLifetimeOfUnionMemberHandler StartLifetime{
         Info, LHSExpr, LengthAndField.second, DuringInit};
+    if (!findSubobject(Info, LHSExpr, Obj, D, StartLifetime))
+      return false;
+  }
+
+  // Then the array elements, outermost first.
+  for (unsigned Length : ElementPathLengths) {
+    SubobjectDesignator D = LHS.Designator;
+    D.truncate(Info.Ctx, LHS.Base, Length);
+    StartLifetimeOfArrayElementHandler StartLifetime{Info};
     if (!findSubobject(Info, LHSExpr, Obj, D, StartLifetime))
       return false;
   }
@@ -8173,13 +8269,51 @@ struct DestroyObjectHandler {
 };
 }
 
+namespace {
+/// Leaves a union with no active member.
+struct DeactivateUnionHandler {
+  static const AccessKinds AccessKind = AK_Destroy;
+  typedef bool result_type;
+  bool failed() { return false; }
+  bool found(APValue &Union, QualType, APValue::LValueBase) {
+    if (Union.isUnion())
+      Union = APValue((const FieldDecl *)nullptr);
+    return true;
+  }
+  bool found(APSInt &, QualType) { return false; }
+  bool found(APFloat &, QualType) { return false; }
+};
+} // namespace
+
 /// Perform a destructor or pseudo-destructor call on the given object, which
 /// might in general not be a complete object.
 static bool HandleDestruction(EvalInfo &Info, const Expr *E,
                               const LValue &This, QualType ThisType) {
   CompleteObject Obj = findCompleteObject(Info, E, AK_Destroy, This, ThisType);
   DestroyObjectHandler Handler = {Info, E, This, AK_Destroy};
-  return Obj && findSubobject(Info, E, Obj, This.Designator, Handler);
+  if (!Obj || !findSubobject(Info, E, Obj, This.Designator, Handler))
+    return false;
+
+  // C++26 [class.union]p2: a union whose active member's lifetime has ended
+  // has no active member. Represent it so, so that every consumer (constant
+  // values, template argument equivalence, mangling) sees one form. Ending
+  // the lifetime of an element of the active member leaves it active.
+  // (The last entry of the path is an array index -- not a member -- when
+  // the destroyed object is an array element.)
+  const SubobjectDesignator &D = This.Designator;
+  ArrayRef<APValue::LValuePathEntry> Path = D.Entries;
+  bool LastIsArrayIndex =
+      D.MostDerivedIsArrayElement && Path.size() == D.MostDerivedPathLength;
+  if (Info.getLangOpts().CPlusPlus26 && !Path.empty() && !D.Invalid &&
+      !LastIsArrayIndex)
+    if (const FieldDecl *FD = getAsField(Path.back());
+        FD && FD->getParent()->isUnion()) {
+      SubobjectDesignator UnionDesignator = This.Designator;
+      UnionDesignator.truncate(Info.Ctx, This.Base, Path.size() - 1);
+      DeactivateUnionHandler Deactivate;
+      return findSubobject(Info, E, Obj, UnionDesignator, Deactivate);
+    }
+  return true;
 }
 
 /// Destroy and end the lifetime of the given complete object.
@@ -22752,6 +22886,77 @@ static bool EvaluateBuiltinConstexprDiag(EvalInfo &Info, const CallExpr *E) {
   return true;
 }
 
+namespace {
+/// Begins the lifetime of an implicit-lifetime aggregate without initializing
+/// it or starting the lifetime of any subobject (P3726R2, [obj.lifetime]).
+struct StartLifetimeHandler {
+  EvalInfo &Info;
+  static const AccessKinds AccessKind = AK_Construct;
+  typedef bool result_type;
+  bool failed() { return false; }
+  bool found(APValue &Subobj, QualType SubobjType,
+             APValue::LValueBase = APValue::LValueBase()) {
+    // Already within its lifetime: nothing to do.
+    if (!Subobj.isAbsent())
+      return true;
+    // Only the object itself starts: an array's elements, including the
+    // rows of a multidimensional array, and a class's subobjects do not.
+    if (const ConstantArrayType *CAT =
+            Info.Ctx.getAsConstantArrayType(SubobjType)) {
+      Subobj = APValue(APValue::UninitArray(), 0, CAT->getZExtSize());
+      return true;
+    }
+    const auto *RD = SubobjType->getAsRecordDecl();
+    if (!RD)
+      return false;
+    if (RD->isUnion()) {
+      Subobj = APValue((const FieldDecl *)nullptr);
+      return true;
+    }
+    const auto *CXXRD = dyn_cast<CXXRecordDecl>(RD);
+    Subobj = APValue(APValue::UninitStruct(), CXXRD ? CXXRD->getNumBases() : 0,
+                     std::distance(RD->field_begin(), RD->field_end()));
+    return true;
+  }
+  bool found(APSInt &, QualType) { return false; }
+  bool found(APFloat &, QualType) { return false; }
+};
+} // namespace
+
+/// __builtin_start_lifetime(p): std::start_lifetime(*p).
+static bool EvaluateBuiltinStartLifetime(EvalInfo &Info, const CallExpr *E) {
+  LValue Ptr;
+  if (!EvaluatePointer(E->getArg(0), Ptr, Info))
+    return false;
+
+  auto Invalid = [&](int Reason) {
+    // Called through std::start_lifetime: point at that call instead.
+    bool CalledFromStd = false;
+    const auto *Callee = Info.CurrentCall->getCallee();
+    if (Callee && Callee->isInStdNamespace()) {
+      const IdentifierInfo *Identifier = Callee->getIdentifier();
+      CalledFromStd = Identifier && Identifier->isStr("start_lifetime");
+    }
+    Info.FFDiag(CalledFromStd ? Info.CurrentCall->getCallRange().getBegin()
+                              : E->getExprLoc(),
+                diag::note_constexpr_invalid_start_lifetime)
+        << (CalledFromStd ? "std::start_lifetime" : "__builtin_start_lifetime")
+        << Reason;
+    return false;
+  };
+  if (Ptr.isNullPointer() || Ptr.getLValueBase().isNull())
+    return Invalid(0);
+  if (Ptr.getLValueDesignator().isOnePastTheEnd())
+    return Invalid(1);
+
+  QualType T = E->getArg(0)->getType()->getPointeeType();
+  CompleteObject Obj = findCompleteObject(Info, E, AK_Construct, Ptr, T);
+  if (!Obj)
+    return false;
+  StartLifetimeHandler Handler{Info};
+  return findSubobject(Info, E, Obj, Ptr.getLValueDesignator(), Handler);
+}
+
 class VoidExprEvaluator
   : public ExprEvaluatorBase<VoidExprEvaluator> {
 public:
@@ -22783,6 +22988,9 @@ public:
 
     case Builtin::BI__builtin_operator_delete:
       return HandleOperatorDeleteCall(Info, E);
+
+    case Builtin::BI__builtin_start_lifetime:
+      return EvaluateBuiltinStartLifetime(Info, E);
 
     case Builtin::BI__builtin_constexpr_diag:
       return EvaluateBuiltinConstexprDiag(Info, E);

@@ -178,7 +178,7 @@
 "`P3391R2 <https://wg21.link/P3391R2>`__","``constexpr`` ``std::format``","2025-11 (Kona)","","","`#171292 <https://github.com/llvm/llvm-project/issues/171292>`__",""
 "`P3913R1 <https://wg21.link/P3913R1>`__","Optimize ``for std::optional`` in range adaptors","2025-11 (Kona)","","","`#171294 <https://github.com/llvm/llvm-project/issues/171294>`__",""
 "","","","","","",""
-"`P3726R2 <https://wg21.link/P3726R2>`__","Adjustments to Union Lifetime Rules","2026-03 (Croydon)","","","`#189560 <https://github.com/llvm/llvm-project/issues/189560>`__",""
+"`P3726R2 <https://wg21.link/P3726R2>`__","Adjustments to Union Lifetime Rules","2026-03 (Croydon)","|Partial|","","`#189560 <https://github.com/llvm/llvm-project/issues/189560>`__","``std::start_lifetime`` is implemented. ``inplace_vector``, which would use it, is not yet implemented."
 "`P3690R1 <https://wg21.link/P3690R1>`__","Consistency fix: Make ``simd`` reductions SIMD-generic","2026-03 (Croydon)","","","`#189562 <https://github.com/llvm/llvm-project/issues/189562>`__",""
 "`P3844R4 <https://wg21.link/P3844R4>`__","Reword [simd.math] for consteval conversions","2026-03 (Croydon)","","","`#189579 <https://github.com/llvm/llvm-project/issues/189579>`__",""
 "`P3932R0 <https://wg21.link/P3932R0>`__","Fix LWG4470: Fix integer-from in [simd]","2026-03 (Croydon)","","","`#189591 <https://github.com/llvm/llvm-project/issues/189591>`__",""

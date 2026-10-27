@@ -19,6 +19,9 @@ export namespace std {
   using std::assume_aligned;
 #if _LIBCPP_STD_VER >= 26
   using std::is_sufficiently_aligned;
+#if __has_builtin(__builtin_start_lifetime)
+  using std::start_lifetime;
+#endif
 #endif
 
   // [obj.lifetime], explicit lifetime management

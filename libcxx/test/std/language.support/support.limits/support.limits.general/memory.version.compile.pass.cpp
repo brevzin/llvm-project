@@ -88,6 +88,10 @@
 #    error "__cpp_lib_smart_ptr_owner_equality should not be defined before c++26"
 #  endif
 
+#  ifdef __cpp_lib_start_lifetime
+#    error "__cpp_lib_start_lifetime should not be defined before c++26"
+#  endif
+
 #  ifdef __cpp_lib_to_address
 #    error "__cpp_lib_to_address should not be defined before c++20"
 #  endif
@@ -167,6 +171,10 @@
 
 #  ifdef __cpp_lib_smart_ptr_owner_equality
 #    error "__cpp_lib_smart_ptr_owner_equality should not be defined before c++26"
+#  endif
+
+#  ifdef __cpp_lib_start_lifetime
+#    error "__cpp_lib_start_lifetime should not be defined before c++26"
 #  endif
 
 #  ifdef __cpp_lib_to_address
@@ -269,6 +277,10 @@
 
 #  ifdef __cpp_lib_smart_ptr_owner_equality
 #    error "__cpp_lib_smart_ptr_owner_equality should not be defined before c++26"
+#  endif
+
+#  ifdef __cpp_lib_start_lifetime
+#    error "__cpp_lib_start_lifetime should not be defined before c++26"
 #  endif
 
 #  ifdef __cpp_lib_to_address
@@ -389,6 +401,10 @@
 
 #  ifdef __cpp_lib_smart_ptr_owner_equality
 #    error "__cpp_lib_smart_ptr_owner_equality should not be defined before c++26"
+#  endif
+
+#  ifdef __cpp_lib_start_lifetime
+#    error "__cpp_lib_start_lifetime should not be defined before c++26"
 #  endif
 
 #  ifndef __cpp_lib_to_address
@@ -518,6 +534,10 @@
 
 #  ifdef __cpp_lib_smart_ptr_owner_equality
 #    error "__cpp_lib_smart_ptr_owner_equality should not be defined before c++26"
+#  endif
+
+#  ifdef __cpp_lib_start_lifetime
+#    error "__cpp_lib_start_lifetime should not be defined before c++26"
 #  endif
 
 #  ifndef __cpp_lib_to_address
@@ -658,6 +678,19 @@
 #  else
 #    ifdef __cpp_lib_smart_ptr_owner_equality
 #      error "__cpp_lib_smart_ptr_owner_equality should not be defined because it is unimplemented in libc++!"
+#    endif
+#  endif
+
+#  if __has_builtin(__builtin_start_lifetime)
+#    ifndef __cpp_lib_start_lifetime
+#      error "__cpp_lib_start_lifetime should be defined in c++26"
+#    endif
+#    if __cpp_lib_start_lifetime != 202603L
+#      error "__cpp_lib_start_lifetime should have the value 202603L in c++26"
+#    endif
+#  else
+#    ifdef __cpp_lib_start_lifetime
+#      error "__cpp_lib_start_lifetime should not be defined when the requirement '__has_builtin(__builtin_start_lifetime)' is not met!"
 #    endif
 #  endif
 

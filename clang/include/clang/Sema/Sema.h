@@ -6641,6 +6641,10 @@ public:
   struct TypeDiagnoser;
 
   bool isAbstractType(SourceLocation Loc, QualType T);
+
+  /// Whether \p T is an implicit-lifetime type ([basic.types.general]p9).
+  /// \p T must be complete (or an array or void).
+  bool isImplicitLifetimeType(QualType T);
   bool RequireNonAbstractType(SourceLocation Loc, QualType T,
                               TypeDiagnoser &Diagnoser);
   template <typename... Ts>

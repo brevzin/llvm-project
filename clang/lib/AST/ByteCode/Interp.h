@@ -110,6 +110,13 @@ bool CheckDeleteSource(InterpState &S, CodePtr OpPC, const Expr *Source,
 bool CheckActive(InterpState &S, CodePtr OpPC, const Pointer &Ptr,
                  AccessKinds AK, bool WillActivate = false);
 
+/// Before an assignment that may begin union members' lifetimes
+/// ([class.union]p5): in C++26, an element of an array that is a union
+/// elemental subobject is implicitly created if it is outside its lifetime,
+/// and an array created by the assignment has no other elements within
+/// their lifetimes (P3726R2).
+void prepareUnionElementalStore(InterpState &S, const Pointer &Ptr);
+
 /// Sets the given integral value to the pointer, which is of
 /// a std::{weak,partial,strong}_ordering type.
 bool SetThreeWayComparisonField(InterpState &S, CodePtr OpPC,
@@ -2235,6 +2242,7 @@ bool StoreActivate(InterpState &S, CodePtr OpPC) {
 
   if (!CheckStore(S, OpPC, Ptr, /*WillBeActivated=*/true))
     return false;
+  prepareUnionElementalStore(S, Ptr);
   if (Ptr.canBeInitialized()) {
     Ptr.initialize();
     Ptr.activate();
@@ -2250,6 +2258,7 @@ bool StoreActivatePop(InterpState &S, CodePtr OpPC) {
 
   if (!CheckStore(S, OpPC, Ptr, /*WillBeActivated=*/true))
     return false;
+  prepareUnionElementalStore(S, Ptr);
   if (Ptr.canBeInitialized()) {
     Ptr.initialize();
     Ptr.activate();

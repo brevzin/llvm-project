@@ -29,8 +29,13 @@ static void DiagnoseUninitializedSubobject(InterpState &S, SourceLocation Loc,
 static bool CheckFieldsInitialized(InterpState &S, SourceLocation Loc,
                                    const Pointer &BasePtr, const Record *R);
 
+/// \p InUnionElemental: the array is a union elemental subobject (a union
+/// member, or an element of such an array). In C++26, those of its elements
+/// that are not within their lifetimes are not among its constituent values
+/// (P3726R2, [expr.const]p2).
 static bool CheckArrayInitialized(InterpState &S, SourceLocation Loc,
-                                  const Pointer &BasePtr) {
+                                  const Pointer &BasePtr,
+                                  bool InUnionElemental = false) {
   const Descriptor *BaseDesc = BasePtr.getFieldDesc();
   assert(BaseDesc->isArray());
   size_t NumElems = BaseDesc->getNumElems();
@@ -39,26 +44,33 @@ static bool CheckArrayInitialized(InterpState &S, SourceLocation Loc,
     return true;
 
   bool Result = true;
+  bool SkipDead = InUnionElemental && S.getLangOpts().CPlusPlus26;
 
   if (BaseDesc->isPrimitiveArray()) {
     if (BasePtr.allElementsInitialized())
       return true;
+    if (SkipDead) {
+      bool AllLiveInitialized = true;
+      for (size_t I = 0; I != NumElems && AllLiveInitialized; ++I)
+        AllLiveInitialized =
+            !BasePtr.isElementAlive(I) || BasePtr.isElementInitialized(I);
+      if (AllLiveInitialized)
+        return true;
+    }
     DiagnoseUninitializedSubobject(S, Loc, BasePtr.getField());
     return false;
   }
   const Descriptor *ElemDesc = BaseDesc->ElemDesc;
 
-  if (ElemDesc->isRecord()) {
-    const Record *R = ElemDesc->ElemRecord;
-    for (size_t I = 0; I != NumElems; ++I) {
-      Pointer ElemPtr = BasePtr.atIndex(I).narrow();
-      Result &= CheckFieldsInitialized(S, Loc, ElemPtr, R);
-    }
-  } else {
-    assert(ElemDesc->isArray());
-    for (size_t I = 0; I != NumElems; ++I) {
-      Pointer ElemPtr = BasePtr.atIndex(I).narrow();
-      Result &= CheckArrayInitialized(S, Loc, ElemPtr);
+  for (size_t I = 0; I != NumElems; ++I) {
+    Pointer ElemPtr = BasePtr.atIndex(I).narrow();
+    if (SkipDead && ElemPtr.getLifetime() != Lifetime::Started)
+      continue;
+    if (ElemDesc->isRecord()) {
+      Result &= CheckFieldsInitialized(S, Loc, ElemPtr, ElemDesc->ElemRecord);
+    } else {
+      assert(ElemDesc->isArray());
+      Result &= CheckArrayInitialized(S, Loc, ElemPtr, InUnionElemental);
     }
   }
 
@@ -87,7 +99,8 @@ static bool CheckFieldsInitialized(InterpState &S, SourceLocation Loc,
     } else if (F.Decl->isUnnamedBitField()) {
       // Nothing do do here.
     } else if (FieldDesc->isArray()) {
-      Result &= CheckArrayInitialized(S, Loc, FieldPtr);
+      Result &= CheckArrayInitialized(S, Loc, FieldPtr,
+                                      /*InUnionElemental=*/R->isUnion());
     } else if (!FieldPtr.isInitialized()) {
       DiagnoseUninitializedSubobject(S, Loc, F.Decl);
       Result = false;

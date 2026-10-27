@@ -5567,6 +5567,14 @@ bool Compiler<Emitter>::visitAPValueInitializer(const APValue &Val,
       const Record::Field *RF = R->getField(I);
       QualType FieldType = RF->Decl->getType();
 
+      // A field not within its lifetime (P3726R2) stays that way.
+      if (F.isAbsent()) {
+        if (!this->emitGetPtrField(RF->Offset, E) ||
+            !this->emitEndLifetimePop(E))
+          return false;
+        continue;
+      }
+
       // Fields.
       if (OptPrimType PT = classify(FieldType)) {
         if (!this->visitAPValue(F, *PT, E))
@@ -5636,6 +5644,14 @@ bool Compiler<Emitter>::visitAPValueInitializer(const APValue &Val,
       const APValue &Elem = A >= InitializedElems
                                 ? Val.getArrayFiller()
                                 : Val.getArrayInitializedElt(A);
+
+      // An element not within its lifetime (P3726R2) stays that way.
+      if (Elem.isAbsent()) {
+        if (!this->emitConstUint32(A, E) || !this->emitArrayElemPtrUint32(E) ||
+            !this->emitEndLifetimePop(E))
+          return false;
+        continue;
+      }
 
       if (ElemT) {
         if (!this->visitAPValue(Elem, *ElemT, E))

@@ -6599,6 +6599,13 @@ def note_enforce_read_only_placement : Note<"type was declared read-only here">;
 
 def note_deleted_dtor_no_operator_delete : Note<
   "virtual destructor requires an unambiguous, accessible 'operator delete'">;
+def note_deleted_special_member_variant_member : Note<
+  "%select{default constructor|destructor}0 of %1 is implicitly deleted "
+  "because variant member %2 has %select{a deleted|an inaccessible|a "
+  "non-trivial}3 destructor and %select{has a default member initializer|"
+  "%1 has a user-provided constructor}4">;
+def note_user_provided_constructor_here : Note<
+  "user-provided constructor declared here">;
 def note_deleted_special_member_class_subobject : Note<
   "%select{default constructor of|copy constructor of|move constructor of|"
   "copy assignment operator of|move assignment operator of|destructor of|"
@@ -13573,6 +13580,10 @@ def err_builtin_launder_invalid_arg : Error<
 def err_builtin_assume_aligned_invalid_arg : Error<
   "non-pointer argument to '__builtin_assume_aligned' is not allowed">;
 
+def err_builtin_start_lifetime_invalid_arg : Error<
+  "argument to '__builtin_start_lifetime' must be a pointer to "
+  "%select{an object type|a type that is not const or volatile|an aggregate "
+  "type|an implicit-lifetime type}0; %1 is not">;
 def err_builtin_is_within_lifetime_invalid_arg : Error<
   "%select{non-|function }0pointer argument to '__builtin_is_within_lifetime' "
   "is not allowed">;

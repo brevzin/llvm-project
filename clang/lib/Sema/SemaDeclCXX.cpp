@@ -9804,6 +9804,10 @@ struct SpecialMemberDeletionInfo
   bool shouldDeleteForBase(CXXBaseSpecifier *Base);
   bool shouldDeleteForField(FieldDecl *FD);
   bool shouldDeleteForAllConstMembers();
+  bool shouldDeleteForVariantMembersOf(CXXRecordDecl *AnonUnion);
+  bool shouldDeleteForVariantMemberCall(FieldDecl *Field, Subobject Subobj,
+                                        Sema::SpecialMemberOverloadResult SMOR,
+                                        bool IsDtorCallInCtor);
 
   bool shouldDeleteForClassSubobject(CXXRecordDecl *Class, Subobject Subobj,
                                      unsigned Quals);
@@ -9813,6 +9817,31 @@ struct SpecialMemberDeletionInfo
 
   bool isAccessible(Subobject Subobj, CXXMethodDecl *D);
 };
+}
+
+/// Whether \p FD has a default member initializer, counting those of the
+/// members of an anonymous struct or union, which are members of the
+/// enclosing class.
+static bool hasDefaultMemberInitializer(const FieldDecl *FD) {
+  if (FD->hasInClassInitializer())
+    return true;
+  return FD->isAnonymousStructOrUnion() &&
+         FD->getType()->getAsCXXRecordDecl()->hasInClassInitializer();
+}
+
+/// A user-provided constructor of \p RD (including a constructor template),
+/// if it has one. Inherited constructors are not user-provided in \p RD.
+static const CXXConstructorDecl *
+findUserProvidedConstructor(const CXXRecordDecl *RD) {
+  for (const Decl *D : RD->decls()) {
+    if (const auto *FTD = dyn_cast<FunctionTemplateDecl>(D))
+      D = FTD->getTemplatedDecl();
+    if (const auto *Ctor = dyn_cast<CXXConstructorDecl>(D);
+        Ctor && !Ctor->isImplicit() && !Ctor->isInheritingConstructor() &&
+        Ctor->isUserProvided())
+      return Ctor;
+  }
+  return nullptr;
 }
 
 /// Is the given special member inaccessible when used on the given
@@ -9843,6 +9872,14 @@ bool SpecialMemberDeletionInfo::shouldDeleteForSubobjectCall(
     bool IsDtorCallInCtor) {
   CXXMethodDecl *Decl = SMOR.getMethod();
   FieldDecl *Field = Subobj.dyn_cast<FieldDecl*>();
+
+  // In C++26, a variant member's default constructor and destructor delete
+  // the class's only in narrower cases (P3074R7, CWG3189).
+  if (S.getLangOpts().CPlusPlus26 && Field && Field->getParent()->isUnion() &&
+      (CSM == CXXSpecialMemberKind::DefaultConstructor ||
+       CSM == CXXSpecialMemberKind::Destructor))
+    return shouldDeleteForVariantMemberCall(Field, Subobj, SMOR,
+                                            IsDtorCallInCtor);
 
   enum {
     NotSet = -1,
@@ -9915,6 +9952,82 @@ bool SpecialMemberDeletionInfo::shouldDeleteForSubobjectCall(
   }
 
   return true;
+}
+
+/// C++26: whether the default constructor or destructor of X (the class of
+/// MD) is deleted because of a call to a special member of variant member
+/// \p Field. (See C++26 [class.default.ctor]p2 and [class.dtor]p4, as
+/// modified by CWG3189.)
+///
+/// - Default construction never calls a variant member's default
+///   constructor. It deletes X's default constructor only if the member has a
+///   default member initializer and its destructor is deleted or
+///   inaccessible.
+/// - A variant member whose destructor is deleted, inaccessible, or
+///   non-trivial deletes X's destructor only if the member has a default
+///   member initializer or X has a user-provided constructor.
+bool SpecialMemberDeletionInfo::shouldDeleteForVariantMemberCall(
+    FieldDecl *Field, Subobject Subobj, Sema::SpecialMemberOverloadResult SMOR,
+    bool IsDtorCallInCtor) {
+  bool IsDefaultCtor = CSM == CXXSpecialMemberKind::DefaultConstructor;
+  if (IsDefaultCtor && !IsDtorCallInCtor)
+    return false;
+
+  enum { Deleted, Inaccessible, NonTrivial } Kind;
+  CXXMethodDecl *Dtor = SMOR.getMethod();
+  if (SMOR.getKind() != Sema::SpecialMemberOverloadResult::Success)
+    Kind = Deleted;
+  else if (!isAccessible(Subobj, Dtor))
+    Kind = Inaccessible;
+  else if (!IsDefaultCtor && !Dtor->isTrivial())
+    Kind = NonTrivial;
+  else
+    return false;
+
+  const CXXConstructorDecl *UserProvided = nullptr;
+  bool HasDMI = hasDefaultMemberInitializer(Field);
+  if (!HasDMI) {
+    if (IsDefaultCtor)
+      return false;
+    UserProvided = findUserProvidedConstructor(MD->getParent());
+    if (!UserProvided)
+      return false;
+  }
+
+  if (Diagnose) {
+    S.Diag(Field->getLocation(),
+           diag::note_deleted_special_member_variant_member)
+        << !IsDefaultCtor << MD->getParent() << Field << Kind << !HasDMI;
+    if (UserProvided)
+      S.Diag(UserProvided->getLocation(),
+             diag::note_user_provided_constructor_here);
+    else if (Kind == Deleted && Dtor)
+      S.NoteDeletedFunction(Dtor);
+  }
+  return true;
+}
+
+/// C++26: the default constructor and destructor of X see the members of an
+/// anonymous union (recursively) as X's own variant members.
+bool SpecialMemberDeletionInfo::shouldDeleteForVariantMembersOf(
+    CXXRecordDecl *AnonUnion) {
+  for (FieldDecl *UI : AnonUnion->fields()) {
+    QualType FieldType = S.Context.getBaseElementType(UI->getType());
+    if (shouldDeleteForVariantObjCPtrMember(UI, FieldType))
+      return true;
+    CXXRecordDecl *FieldRecord = FieldType->getAsCXXRecordDecl();
+    if (!FieldRecord)
+      continue;
+    if (FieldRecord->isUnion() && FieldRecord->isAnonymousStructOrUnion()) {
+      if (shouldDeleteForVariantMembersOf(FieldRecord))
+        return true;
+      continue;
+    }
+    if (shouldDeleteForClassSubobject(FieldRecord, UI,
+                                      FieldType.getCVRQualifiers()))
+      return true;
+  }
+  return false;
 }
 
 /// Check whether we should delete a special member function due to having a
@@ -10098,6 +10211,15 @@ bool SpecialMemberDeletionInfo::shouldDeleteForField(FieldDecl *FD) {
   }
 
   if (FieldRecord) {
+    // In C++26, an anonymous union's members are variant members of this
+    // class for its default constructor and destructor (see C++26 [special]p7
+    // as modified by CWG3189), and no "all members const" rule applies.
+    if (S.getLangOpts().CPlusPlus26 && FieldRecord->isUnion() &&
+        FieldRecord->isAnonymousStructOrUnion() &&
+        (CSM == CXXSpecialMemberKind::DefaultConstructor ||
+         CSM == CXXSpecialMemberKind::Destructor))
+      return shouldDeleteForVariantMembersOf(FieldRecord);
+
     // Some additional restrictions exist on the variant members.
     if (!inUnion() && FieldRecord->isUnion() &&
         FieldRecord->isAnonymousStructOrUnion()) {
@@ -10152,9 +10274,9 @@ bool SpecialMemberDeletionInfo::shouldDeleteForField(FieldDecl *FD) {
 /// X is a union and all of its variant members are of const-qualified type.
 bool SpecialMemberDeletionInfo::shouldDeleteForAllConstMembers() {
   // This is a silly definition, because it gives an empty union a deleted
-  // default constructor. Don't do that.
+  // default constructor. Don't do that. (C++26 removed it; see P3074R7.)
   if (CSM == CXXSpecialMemberKind::DefaultConstructor && inUnion() &&
-      AllFieldsAreConst) {
+      AllFieldsAreConst && !S.getLangOpts().CPlusPlus26) {
     bool AnyFields = false;
     for (auto *F : MD->getParent()->fields())
       if ((AnyFields = !F->isUnnamedBitField()))
@@ -10579,6 +10701,14 @@ static bool checkTrivialClassMembers(Sema &S, CXXRecordDecl *RD,
           << RD << FieldType.getObjCLifetime();
       return false;
     }
+
+    // In C++26, a variant member's own default constructor and destructor
+    // don't affect triviality (see P3074R7, [class.default.ctor]p3 and
+    // [class.dtor]p8).
+    if (S.getLangOpts().CPlusPlus26 && FI->getParent()->isUnion() &&
+        (CSM == CXXSpecialMemberKind::DefaultConstructor ||
+         CSM == CXXSpecialMemberKind::Destructor))
+      continue;
 
     bool ConstRHS = ConstArg && !FI->isMutable();
     if (!checkTrivialSubobjectCall(S, FI->getLocation(), FieldType, ConstRHS,

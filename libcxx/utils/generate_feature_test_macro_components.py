@@ -1352,6 +1352,15 @@ feature_test_macros = [
             "unimplemented": True,
         },
         {
+            "name": "__cpp_lib_start_lifetime",
+            "values": {
+                "c++26": 202603  # P3726R2 Adjustments to Union Lifetime Rules
+            },
+            "headers": ["memory"],
+            "test_suite_guard": "__has_builtin(__builtin_start_lifetime)",
+            "libcxx_guard": "__has_builtin(__builtin_start_lifetime)",
+        },
+        {
             "name": "__cpp_lib_starts_ends_with",
             "values": {"c++20": 201711},
             "headers": ["string", "string_view"],

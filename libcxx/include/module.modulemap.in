@@ -1683,6 +1683,7 @@ module std [system] {
     module fwd                                { header "__fwd/memory.h" }
     module inout_ptr                          { header "__memory/inout_ptr.h" }
     module is_sufficiently_aligned            { header "__memory/is_sufficiently_aligned.h" }
+    module start_lifetime                     { header "__memory/start_lifetime.h" }
     module noexcept_move_assign_container     { header "__memory/noexcept_move_assign_container.h" }
     module out_ptr                            { header "__memory/out_ptr.h" }
     module pointer_traits                     { header "__memory/pointer_traits.h" }

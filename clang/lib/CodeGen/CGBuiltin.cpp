@@ -5495,6 +5495,11 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
 
     return RValue::get(nullptr);
   }
+  case Builtin::BI__builtin_start_lifetime:
+    // Starting the lifetime of an implicit-lifetime aggregate, without
+    // initializing anything, is only an abstract-machine notion.
+    EmitIgnoredExpr(E->getArg(0));
+    return RValue::get(nullptr);
   case Builtin::BI__builtin_launder: {
     const Expr *Arg = E->getArg(0);
     QualType ArgTy = Arg->getType()->getPointeeType();
