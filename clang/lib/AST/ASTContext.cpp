@@ -3969,6 +3969,21 @@ void ASTContext::adjustExceptionSpec(
 
 /// getComplexType - Return the uniqued reference to the type for a complex
 /// number with the specified element type.
+const OverloadSetData *
+ASTContext::getOverloadSet(ArrayRef<NamedDecl *> Decls) const {
+  llvm::FoldingSetNodeID ID;
+  OverloadSetData::Profile(ID, Decls);
+  void *InsertPos = nullptr;
+  if (OverloadSetData *Existing =
+          OverloadSets.FindNodeOrInsertPos(ID, InsertPos))
+    return Existing;
+  auto *Mem = new (*this) NamedDecl *[Decls.size()];
+  llvm::copy(Decls, Mem);
+  auto *New = new (*this) OverloadSetData(ArrayRef(Mem, Decls.size()));
+  OverloadSets.InsertNode(New, InsertPos);
+  return New;
+}
+
 QualType ASTContext::getComplexType(QualType T) const {
   // Unique pointers, to guarantee there is only one pointer of a particular
   // structure.

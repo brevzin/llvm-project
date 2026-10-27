@@ -346,6 +346,12 @@ consteval auto has_default_argument(info) -> bool;
 consteval auto default_argument_of(info) -> info;
 consteval auto hidden_friends_of(info) -> vector<info>;
 consteval auto interface_of(info, access_context) -> vector<info>;
+
+// overload sets (P2996 ext)
+consteval auto is_overload_set(info) -> bool;
+consteval auto overloads_of(info) -> vector<info>;
+template <reflection_range R = initializer_list<info>>
+  consteval auto make_overload_set(R&&) -> info;
 consteval auto is_explicit_object_parameter(info) -> bool;
 consteval auto is_function_parameter(info) -> bool;
 consteval auto return_type_of(info) -> info;
@@ -594,6 +600,8 @@ enum : unsigned {
   __metafn_token_type,
   __metafn_tokens_equal,
   __metafn_default_argument_of,
+  __metafn_is_overload_set,
+  __metafn_make_overload_set,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1221,7 +1229,7 @@ consteval auto is_accessible(info r, access_context ctx) -> bool {
 // the count, then the reflections written into the vector.
 enum class __member_query : size_t {
   members, bases, static_data_members, nonstatic_data_members, subobjects,
-  hidden_friends
+  hidden_friends, overloads
 };
 consteval auto __gather_members(info r, access_context ctx,
                                 __member_query q) -> vector<info> {
@@ -1283,6 +1291,36 @@ consteval auto subobjects_of(info r, access_context ctx) -> vector<info> {
     throw "Namespaces cannot have base classes";
 
   return __gather_members(r, ctx, __member_query::subobjects);
+}
+
+// Whether r reflects an overload set: two or more functions and function
+// templates, as ^^f captures when f names several, or make_overload_set
+// assembles.
+consteval auto is_overload_set(info r) -> bool {
+  return __metafunction(detail::__metafn_is_overload_set, r);
+}
+
+// The candidates of an overload set, in declaration order. A function or
+// function template is its own only candidate.
+consteval auto overloads_of(info r) -> vector<info> {
+  return __gather_members(r, access_context::unchecked(),
+                          __member_query::overloads);
+}
+
+// The overload set of the given functions, function templates, and overload
+// sets (whose candidates it includes), without duplicates. A single candidate
+// is reflected as itself; none is not a constant. If any candidate is a
+// non-static member function, all must be members of its class.
+template <reflection_range R = initializer_list<info>>
+consteval auto make_overload_set(R &&r) -> info {
+  if constexpr (ranges::contiguous_range<R>) {
+    return __metafunction(detail::__metafn_make_overload_set,
+                          ranges::data(r), ranges::size(r));
+  } else {
+    vector<info> v(from_range, r);
+    return __metafunction(detail::__metafn_make_overload_set, v.data(),
+                          v.size());
+  }
 }
 
 // The hidden friends of a class: the functions and function templates first

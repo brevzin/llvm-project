@@ -617,6 +617,9 @@ public:
     return isReflection() &&
            getReflectionKind() == ReflectionKind::Expression;
   }
+  bool isReflectedOverloadSet() const {
+    return isReflection() && getReflectionKind() == ReflectionKind::OverloadSet;
+  }
 
   void dump() const;
   void dump(raw_ostream &OS, const ASTContext &Context) const;
@@ -846,6 +849,7 @@ public:
     return *(const TokenSequenceData *)(const char *)&Data;
   }
   Expr *getReflectedExpression() const;
+  const OverloadSetData *getReflectedOverloadSet() const;
 
   void setInt(APSInt I) {
     assert(isInt() && "Invalid accessor");
@@ -995,6 +999,15 @@ private:
   setMemberPointerUninit(const ValueDecl *Member, bool IsDerivedMember,
                          unsigned Size);
 };
+
+/// A reflection of the overload set of these candidates (functions, function
+/// templates, or using declarations naming them): each is replaced by the
+/// canonical declaration of the function or function template it denotes,
+/// duplicates are dropped, and the rest are put in declaration order. A single
+/// remaining candidate is reflected as itself -- a function, or a function
+/// template -- not as a set; none gives the null reflection.
+APValue makeOverloadSetReflection(ASTContext &C,
+                                  ArrayRef<NamedDecl *> Candidates);
 
 } // end namespace clang.
 

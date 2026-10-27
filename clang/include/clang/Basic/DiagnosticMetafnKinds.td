@@ -137,4 +137,10 @@ def metafn_cannot_clone_declaration : Note<
 def metafn_cannot_forward_declaration : Note<
   "cannot generate a forwarding call: %0">;
 
+def metafn_overload_set_empty : Note<
+  "an overload set needs at least one function or function template">;
+def metafn_overload_set_mixed_members : Note<
+  "cannot form an overload set of %0, a non-static member function, and %1, "
+  "which is not a member of the same class or its bases">;
+
 }  // end of metafn component

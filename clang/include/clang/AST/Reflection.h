@@ -131,8 +131,32 @@ enum class ReflectionKind {
   ///
   /// Corresponds to an Expr*.
   Expression,
+
+  /// \brief A reflection of an overload set (P2996 ext): two or more
+  /// functions and function templates, captured where the reflection was
+  /// formed (^^f) or assembled (std::meta::make_overload_set).
+  ///
+  /// Corresponds to an OverloadSetData.
+  OverloadSet,
 };
 
+/// \brief The candidates of a reflected overload set: two or more functions
+/// and function templates (their canonical declarations, never a using
+/// declaration's shadow), without duplicates, in declaration order. Uniqued in
+/// the ASTContext, so reflections of the same set share one OverloadSetData.
+class OverloadSetData : public llvm::FoldingSetNode {
+  ArrayRef<NamedDecl *> Decls;
+
+public:
+  explicit OverloadSetData(ArrayRef<NamedDecl *> Decls) : Decls(Decls) {}
+  ArrayRef<NamedDecl *> decls() const { return Decls; }
+
+  void Profile(llvm::FoldingSetNodeID &ID) const { Profile(ID, Decls); }
+  static void Profile(llvm::FoldingSetNodeID &ID, ArrayRef<NamedDecl *> Ds) {
+    for (NamedDecl *D : Ds)
+      ID.AddPointer(D);
+  }
+};
 
 /// \brief Representation of a captured token sequence from ^^{ ... }.
 /// Essentially an ArrayRef<Token> allocated in the ASTContext.

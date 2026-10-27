@@ -1298,32 +1298,37 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
   }
 
   CXXScopeSpec SS;
-  NamedDecl *ND = nullptr;
+  // The members named: one, or an overload set's candidates.
+  SmallVector<NamedDecl *, 4> Members;
   TemplateArgumentListInfo TemplateArgs(RHS->getBeginLoc(), RHS->getEndLoc());
   if (auto *DRE = dyn_cast<DeclRefExpr>(RHS->getModel())) {
     ValueDecl *D = DRE->getDecl();
     if (isa<FieldDecl>(D) || isa<IndirectFieldDecl>(D) || isa<CXXMethodDecl>(D)
      || (isa<VarDecl>(D) && DRE->getQualifierLoc())) {
-      ND = D;
+      Members.push_back(D);
       // NOTE(P2996): Uncomment the following line for static dispatch.
       // SS.Adopt(DRE->getQualifierLoc());
     }
   } else if (auto *ULE = dyn_cast<UnresolvedLookupExpr>(RHS->getModel())) {
-    assert(ULE->getNumDecls() == 1);
-
-    ND = (*ULE->decls_begin());
+    Members.append(ULE->decls_begin(), ULE->decls_end());
     ULE->copyTemplateArgumentsInto(TemplateArgs);
     SS.Adopt(ULE->getQualifierLoc());
   }
 
-  if (!ND || (SS.isSet() && SS.isInvalid())) {
+  // Every candidate must be a member (an overload set's free functions
+  // cannot be called with member syntax).
+  if (Members.empty() || (SS.isSet() && SS.isInvalid()) ||
+      llvm::any_of(Members, [](NamedDecl *D) {
+        return !D->getDeclContext()->getRedeclContext()->isRecord();
+      })) {
     Diag(RHS->getExprLoc(), diag::err_member_access_splice_not_class_member);
     return ExprError();
   }
+  NamedDecl *ND = Members.front();
 
   DeclarationNameInfo NameInfo(cast<NamedDecl>(ND)->getDeclName(),
                                ND->getLocation());
-  {
+  for (NamedDecl *M : Members) {
     CXXRecordDecl *DerivedRecord = [](QualType QT) {
       if (QualType PT = QT->getPointeeType(); !PT.isNull())
         QT = PT;
@@ -1336,7 +1341,7 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
         assert(DC);
       }
       return cast<CXXRecordDecl>(DC)->getCanonicalDecl();
-    }(ND);
+    }(M);
     if (BaseRecord != DerivedRecord &&
         !IsDerivedFrom(Base->getExprLoc(), DerivedRecord, BaseRecord)) {
       Diag(Base->getExprLoc(), diag::err_class_not_derived_from_base)
@@ -1352,12 +1357,13 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
   // that no later check -- overload resolution over a member template, in
   // particular -- rechecks it from this context.
   LookupResult LR(*this, NameInfo, LookupMemberName);
-  LR.addDecl(ND, AS_public);
+  for (NamedDecl *M : Members)
+    LR.addDecl(M, AS_public);
   LR.resolveKind();
 
   // Obnoxious translating of TemplateArgumentList to TemplateArgumentListInfo..
   if (auto *FD = dyn_cast<FunctionDecl>(ND);
-      FD && TemplateArgs.size() == 0) {
+      FD && Members.size() == 1 && TemplateArgs.size() == 0) {
     if (const TemplateArgumentList *TAs = FD->getTemplateSpecializationArgs())
       for (const TemplateArgument &TA : TAs->asArray()) {
         TemplateArgumentLoc TAL =

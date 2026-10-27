@@ -25,6 +25,7 @@
 #include "clang/AST/ExternalASTSource.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/RawCommentList.h"
+#include "clang/AST/Reflection.h"
 #include "clang/AST/SYCLKernelInfo.h"
 #include "clang/AST/TemplateName.h"
 #include "clang/AST/Type.h"
@@ -234,6 +235,7 @@ class ASTContext : public RefCountedBase<ASTContext> {
 
   mutable SmallVector<Type *, 0> Types;
   mutable llvm::FoldingSet<ExtQuals> ExtQualNodes;
+  mutable llvm::FoldingSet<OverloadSetData> OverloadSets;
   mutable llvm::FoldingSet<ComplexType> ComplexTypes;
   mutable llvm::FoldingSet<PointerType> PointerTypes{GeneralTypesLog2InitSize};
   mutable llvm::FoldingSet<AdjustedType> AdjustedTypes;
@@ -1373,6 +1375,11 @@ public:
   CanQualType VoidPtrTy, NullPtrTy;
   CanQualType MetaInfoTy, TokenSequenceTy, MetaTokenTy;
   CanQualType NoReturnTy; // std::noreturn_t (P3549)
+
+  /// The uniqued overload set of exactly these candidates, which must already
+  /// be canonical, deduplicated, and in declaration order (see
+  /// makeOverloadSetReflection, which is the way to build one).
+  const OverloadSetData *getOverloadSet(ArrayRef<NamedDecl *> Decls) const;
   CanQualType DependentTy, OverloadTy, BoundMemberTy, UnresolvedTemplateTy,
       UnknownAnyTy;
   CanQualType BuiltinFnTy;

@@ -5123,6 +5123,16 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
   }
   case ReflectionKind::Expression:
     llvm_unreachable("token sequences and identifiers cannot be mangled");
+  case ReflectionKind::OverloadSet: {
+    // TODO: a mangling needs the candidates in a TU-independent order, and
+    // overloaded function templates distinguished by signature.
+    DiagnosticsEngine &Diags = Context.getDiags();
+    Diags.Report(Diags.getCustomDiagID(
+        DiagnosticsEngine::Error,
+        "cannot yet mangle a reflection of an overload set as a template "
+        "argument"));
+    break;
+  }
   }
   Out << 'E';
 }

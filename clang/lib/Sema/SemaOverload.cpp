@@ -16563,6 +16563,21 @@ ExprResult Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
       TemplateArgs = &TemplateArgsBuffer;
     }
 
+    // Each candidate's implicit object parameter is of the most derived class
+    // among the candidates' (as for a member a using-declaration brings into
+    // a derived class). Lookup only finds candidates of one class -- those of
+    // a base come as using-declarations' shadows -- so this matters only for
+    // a spliced overload set (P2996 ext), whose candidates are the functions
+    // themselves.
+    CXXRecordDecl *MostDerivedDC = nullptr;
+    for (NamedDecl *D : UnresExpr->decls()) {
+      auto *DC = cast<CXXRecordDecl>(D->getDeclContext());
+      if (!MostDerivedDC ||
+          (DC->getCanonicalDecl() != MostDerivedDC->getCanonicalDecl() &&
+           DC->hasDefinition() && DC->isDerivedFrom(MostDerivedDC)))
+        MostDerivedDC = DC;
+    }
+
     for (UnresolvedMemberExpr::decls_iterator I = UnresExpr->decls_begin(),
            E = UnresExpr->decls_end(); I != E; ++I) {
 
@@ -16570,6 +16585,10 @@ ExprResult Sema::BuildCallToMemberFunction(Scope *S, Expr *MemExprE,
 
       NamedDecl *Func = *I;
       CXXRecordDecl *ActingDC = cast<CXXRecordDecl>(Func->getDeclContext());
+      if (ActingDC->getCanonicalDecl() != MostDerivedDC->getCanonicalDecl() &&
+          MostDerivedDC->hasDefinition() &&
+          MostDerivedDC->isDerivedFrom(ActingDC))
+        ActingDC = MostDerivedDC;
       if (isa<UsingShadowDecl>(Func))
         Func = cast<UsingShadowDecl>(Func)->getTargetDecl();
 

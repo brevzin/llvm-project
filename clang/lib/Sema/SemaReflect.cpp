@@ -2503,6 +2503,20 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
   return CXXReflectExpr::Create(Context, OperatorLoc, OperandLoc, RV);
 }
 
+// The reflection of the overload set these candidates form, if they are all
+// functions and function templates (P2996 ext): the set as lookup found it
+// here. Otherwise, a null expression.
+static Expr *BuildOverloadSetReflection(Sema &S, SourceLocation OperatorLoc,
+                                        SourceRange OperandRange,
+                                        ArrayRef<NamedDecl *> Candidates) {
+  for (NamedDecl *ND : Candidates)
+    if (!isa<FunctionDecl, FunctionTemplateDecl>(ND->getUnderlyingDecl()))
+      return nullptr;
+  return CXXReflectExpr::Create(
+      S.Context, OperatorLoc, OperandRange,
+      makeOverloadSetReflection(S.Context, Candidates));
+}
+
 // TODO(P2996): Capture whole SourceRange of declaration naming.
 ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
                                      SourceLocation OperandLoc, Decl *D) {
@@ -2510,6 +2524,11 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
   // using-declarator.
   if (auto *UD = dyn_cast<UsingDecl>(D)) {
     if (UD->shadow_size() > 1) {
+      SmallVector<NamedDecl *, 8> Candidates(UD->shadows());
+      if (Expr *E = BuildOverloadSetReflection(
+              *this, OperatorLoc, SourceRange(OperandLoc, OperandLoc),
+              Candidates))
+        return E;
       Diag(OperandLoc, diag::err_reflect_overload_set);
       return ExprError();
     }
@@ -2539,6 +2558,12 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
                                      SourceLocation OperandLoc,
                                      const TemplateName Template) {
   if (Template.getKind() == TemplateName::OverloadedTemplate) {
+    OverloadedTemplateStorage *OTS = Template.getAsOverloadedTemplate();
+    SmallVector<NamedDecl *, 8> Candidates(OTS->begin(), OTS->end());
+    if (Expr *E = BuildOverloadSetReflection(
+            *this, OperatorLoc, SourceRange(OperandLoc, OperandLoc),
+            Candidates))
+      return E;
     Diag(OperandLoc, diag::err_reflect_overload_set);
     return ExprError();
   }
@@ -2576,6 +2601,18 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc, Expr *E) {
   if (auto *ULE = dyn_cast<UnresolvedLookupExpr>(E))
     return BuildCXXReflectExpr(OperatorLoc, ULE);
 
+  // An overloaded member named inside a member function ('^^f' for an
+  // implicit 'this->f'): its overload set.
+  if (auto *UME = dyn_cast<UnresolvedMemberExpr>(E);
+      UME && !UME->hasExplicitTemplateArgs()) {
+    SmallVector<NamedDecl *, 8> Candidates(UME->decls_begin(),
+                                           UME->decls_end());
+    if (Expr *R = BuildOverloadSetReflection(
+            *this, OperatorLoc, UME->getMemberNameInfo().getSourceRange(),
+            Candidates))
+      return R;
+  }
+
   // All other expressions are disallowed.
   Diag(E->getExprLoc(), diag::err_reflect_general_expression)
       << E->getSourceRange();
@@ -2588,6 +2625,18 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
   // will be no means of choosing between them. Raise an error indicating
   // lack of support for reflection of overload sets at this time.
   auto *ULE = cast<UnresolvedLookupExpr>(E);
+
+  // A name denoting several functions or function templates reflects its
+  // overload set, as lookup found it here (P2996 ext). With explicit template
+  // arguments, it must still resolve to a single specialization.
+  if (!ULE->hasExplicitTemplateArgs() && ULE->getNumDecls() > 1) {
+    SmallVector<NamedDecl *, 8> Candidates(ULE->decls_begin(),
+                                           ULE->decls_end());
+    if (Expr *R = BuildOverloadSetReflection(
+            *this, OperatorLoc, ULE->getNameInfo().getSourceRange(),
+            Candidates))
+      return R;
+  }
 
   // On the other hand, a unique candidate Decl might refer to a specialized
   // function template. Begin by inventing a 'VarDecl' for a 'const auto'
@@ -2962,7 +3011,8 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
 
     bool RequireTemplate = TemplateKWLoc.isValid() ||
                            Splice->isSpecialization();
-    if (RequireTemplate && !Refl.isReflectedTemplate()) {
+    if (RequireTemplate && !Refl.isReflectedTemplate() &&
+        !Refl.isReflectedOverloadSet()) {
       Diag(Splice->getBeginLoc(),
            diag::err_unexpected_reflection_kind_in_splice) << 3;
       return ExprError();
@@ -3106,6 +3156,70 @@ ExprResult Sema::BuildReflectionSpliceExpr(SourceLocation TemplateKWLoc,
 
       Result = CXXSpliceExpr::Create(Context, VK_LValue, TemplateKWLoc,
                                      Splice, Result, AllowMemberReference);
+      break;
+    }
+    case ReflectionKind::OverloadSet: {
+      // Overload resolution among exactly the set's candidates: no
+      // argument-dependent lookup, and (as for any splice) no access check.
+      ArrayRef<NamedDecl *> Candidates =
+          Refl.getReflectedOverloadSet()->decls();
+      auto IsInstanceMember = [](NamedDecl *D) {
+        auto *MD = dyn_cast<CXXMethodDecl>(D->getAsFunction());
+        return MD && MD->isInstance();
+      };
+      if (!AllowMemberReference && llvm::all_of(Candidates, IsInstanceMember)) {
+        Diag(Splice->getBeginLoc(),
+             diag::err_dependent_splice_implicit_member_reference)
+            << Splice->getSourceRange();
+        Diag(Splice->getBeginLoc(),
+             diag::note_dependent_splice_explicit_this_may_fix)
+            << Splice->getSourceRange();
+        return ExprError();
+      }
+
+      // Members of one class are named as that class's.
+      CXXScopeSpec ScopeSpec;
+      DeclContext *DC = Candidates.front()->getDeclContext();
+      if (auto *RD = dyn_cast<CXXRecordDecl>(DC);
+          RD && llvm::all_of(Candidates, [&](NamedDecl *D) {
+            return D->getDeclContext() == DC;
+          })) {
+        TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(
+            Context.getCanonicalTagType(RD), Splice->getBeginLoc());
+        ScopeSpec.Make(Context, TSI->getTypeLoc(), Splice->getBeginLoc());
+      }
+
+      TemplateArgumentListInfo TAListInfo;
+      if (Splice->isSpecialization()) {
+        TAListInfo.setLAngleLoc(Splice->getLAngleLoc());
+        TAListInfo.setRAngleLoc(Splice->getRAngleLoc());
+        for (const auto &Arg : Splice->getTemplateArgs()->arguments())
+          TAListInfo.addArgument(Arg);
+      }
+
+      // The most recent declarations, which have every default argument.
+      // With template arguments, only the function templates are candidates
+      // (as only templates are found for a name followed by '<').
+      UnresolvedSet<8> DeclSet;
+      for (NamedDecl *D : Candidates)
+        if (!Splice->isSpecialization() || isa<FunctionTemplateDecl>(D))
+          DeclSet.addDecl(cast<NamedDecl>(D->getMostRecentDecl()), AS_public);
+      if (DeclSet.empty()) {
+        Diag(Splice->getBeginLoc(),
+             diag::err_unexpected_reflection_kind_in_splice)
+            << 3 << Splice->getSourceRange();
+        return ExprError();
+      }
+      DeclarationNameInfo NameInfo(Candidates.front()->getDeclName(),
+                                   Splice->getBeginLoc());
+      Result = UnresolvedLookupExpr::Create(
+          Context, /*NamingClass=*/nullptr,
+          ScopeSpec.getWithLocInContext(Context), SourceLocation(), NameInfo,
+          /*RequiresADL=*/false,
+          Splice->isSpecialization() ? &TAListInfo : nullptr, DeclSet.begin(),
+          DeclSet.end(), false, false);
+      Result = CXXSpliceExpr::Create(Context, VK_LValue, TemplateKWLoc, Splice,
+                                     Result, AllowMemberReference);
       break;
     }
     case ReflectionKind::BaseSpecifier:
@@ -3935,6 +4049,7 @@ DeclContext *Sema::TryFindDeclContextOf(SpliceSpecifier *Splice) {
   case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Annotation:
   case ReflectionKind::Expression:
+  case ReflectionKind::OverloadSet:
     Diag(Splice->getBeginLoc(), diag::err_expected_class_or_namespace)
         << "spliced entity" << getLangOpts().CPlusPlus;
     return nullptr;

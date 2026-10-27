@@ -18,10 +18,12 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/LocInfoType.h"
 #include "clang/AST/Type.h"
+#include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Token.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -578,6 +580,7 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Annotation:
   case ReflectionKind::Expression:
+  case ReflectionKind::OverloadSet:
     ID.AddPointer(V.getOpaqueReflectionData());
     return;
   case ReflectionKind::DataMemberSpec: {
@@ -1050,6 +1053,51 @@ Expr *APValue::getReflectedExpression() const {
           const_cast<void *>(getOpaqueReflectionData()));
 }
 
+const OverloadSetData *APValue::getReflectedOverloadSet() const {
+  assert(getReflectionKind() == ReflectionKind::OverloadSet &&
+         "not a reflection of an overload set");
+  return reinterpret_cast<const OverloadSetData *>(getOpaqueReflectionData());
+}
+
+APValue clang::makeOverloadSetReflection(ASTContext &C,
+                                         ArrayRef<NamedDecl *> Candidates) {
+  SmallVector<NamedDecl *, 8> Decls;
+  for (NamedDecl *ND : Candidates) {
+    ND = ND->getUnderlyingDecl();
+    if (auto *FD = dyn_cast<FunctionDecl>(ND))
+      ND = FD->getCanonicalDecl();
+    else if (auto *FTD = dyn_cast<FunctionTemplateDecl>(ND))
+      ND = FTD->getCanonicalDecl();
+    else
+      llvm_unreachable("overload set candidate is not a function or template");
+    if (!llvm::is_contained(Decls, ND))
+      Decls.push_back(ND);
+  }
+
+  // Declaration order; declarations sharing a location (e.g., hidden friends
+  // instantiated from one pattern) are ordered by identity, so that the same
+  // candidates always give the same sequence.
+  SourceManager &SM = C.getSourceManager();
+  llvm::sort(Decls, [&](NamedDecl *A, NamedDecl *B) {
+    SourceLocation LA = A->getLocation(), LB = B->getLocation();
+    if (LA.isValid() != LB.isValid())
+      return LA.isValid();
+    if (LA.isValid() && LA != LB)
+      return SM.isBeforeInTranslationUnit(LA, LB);
+    return std::less<NamedDecl *>()(A, B);
+  });
+
+  if (Decls.empty())
+    return APValue(ReflectionKind::Null, nullptr);
+  if (Decls.size() == 1) {
+    if (auto *FTD = dyn_cast<FunctionTemplateDecl>(Decls[0]))
+      return APValue(ReflectionKind::Template,
+                     TemplateName(FTD).getAsVoidPointer());
+    return APValue(ReflectionKind::Declaration, Decls[0]);
+  }
+  return APValue(ReflectionKind::OverloadSet, C.getOverloadSet(Decls));
+}
+
 static double GetApproxValue(const llvm::APFloat &F) {
   llvm::APFloat V = F;
   bool ignored;
@@ -1436,6 +1484,9 @@ void APValue::printPretty(raw_ostream &Out, const PrintingPolicy &Policy,
     case ReflectionKind::Expression:
       Repr = "expression";
       break;
+    case ReflectionKind::OverloadSet:
+      Repr = "overload-set";
+      break;
     }
     Out << "^^(" << Repr << ")";
     return;
@@ -1774,6 +1825,7 @@ void APValue::setReflection(ReflectionKind RK, const void *Ptr) {
   case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Annotation:
   case ReflectionKind::Expression:
+  case ReflectionKind::OverloadSet:
     SelfData.Kind = RK;
     SelfData.Data = Ptr;
     return;

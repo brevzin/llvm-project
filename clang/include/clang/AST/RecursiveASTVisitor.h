@@ -3213,6 +3213,7 @@ DEF_TRAVERSE_STMT(CXXReflectExpr, {
     case ReflectionKind::DataMemberSpec:
     case ReflectionKind::DeclarationSpec:
     case ReflectionKind::Expression:
+    case ReflectionKind::OverloadSet:
       break;
     }
   }

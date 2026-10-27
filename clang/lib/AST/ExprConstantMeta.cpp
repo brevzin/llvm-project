@@ -861,6 +861,16 @@ static bool default_argument_of(APValue &Result, ASTContext &C,
                                 DiagFn Diagnoser, bool AllowInjection,
                                 QualType ResultTy, SourceRange Range,
                                 ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool is_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
+                            EvalFn Evaluator, DiagFn Diagnoser,
+                            bool AllowInjection, QualType ResultTy,
+                            SourceRange Range, ArrayRef<Expr *> Args,
+                            Decl *ContainingDecl);
+static bool make_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
+                              EvalFn Evaluator, DiagFn Diagnoser,
+                              bool AllowInjection, QualType ResultTy,
+                              SourceRange Range, ArrayRef<Expr *> Args,
+                              Decl *ContainingDecl);
 
 static bool tokens_equal(APValue &Result, ASTContext &C, MetaActions &Meta,
                          EvalFn Evaluator, DiagFn Diagnoser,
@@ -1092,6 +1102,8 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_token, 0, 0, token_type},
     {Metafunction::MFRK_bool, 2, 2, tokens_equal},
     {Metafunction::MFRK_metaInfo, 1, 1, default_argument_of},
+    {Metafunction::MFRK_bool, 1, 1, is_overload_set},
+    {Metafunction::MFRK_metaInfo, 2, 2, make_overload_set},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -1926,9 +1938,26 @@ StringRef DescriptionOf(APValue RV, bool Granular = true) {
   case ReflectionKind::Expression: {
     return "an expression";
   }
+  case ReflectionKind::OverloadSet: {
+    return "an overload set";
+  }
   }
   llvm_unreachable("unknown reflection kind");
 }
+
+// An overload set answers a query about a property its candidates share --
+// their name, their scope -- as each of them would: this gives the first
+// candidate if all of them agree on Key(candidate), and null otherwise.
+template <typename KeyFn>
+static NamedDecl *agreeingCandidate(const OverloadSetData *OS, KeyFn Key) {
+  ArrayRef<NamedDecl *> Ds = OS->decls();
+  for (NamedDecl *D : Ds.drop_front())
+    if (Key(D) != Key(Ds.front()))
+      return nullptr;
+  return Ds.front();
+}
+static auto NameOfCandidate = [](NamedDecl *D) { return D->getDeclName(); };
+static auto ScopeOfCandidate = [](NamedDecl *D) { return D->getDeclContext(); };
 
 bool DiagnoseReflectionKind(DiagFn Diagnoser, SourceRange Range,
                             StringRef Expected, StringRef Instead = "") {
@@ -1988,6 +2017,7 @@ bool get_begin_enumerator_decl_of(APValue &Result, ASTContext &C,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
   {
     return DiagnoseReflectionKind(Diagnoser, Range, "an enum type",
@@ -2033,6 +2063,7 @@ bool get_next_enumerator_decl_of(APValue &Result, ASTContext &C,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
   {
     llvm_unreachable("should have failed in 'get_begin_enumerator_decl_of'");
@@ -2108,6 +2139,7 @@ bool get_ith_base_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return DiagnoseReflectionKind(Diagnoser, Range, "a class type",
                                   DescriptionOf(RV));
@@ -2171,6 +2203,7 @@ bool get_ith_template_argument_of(APValue &Result, ASTContext &C,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return DiagnoseReflectionKind(Diagnoser, Range, "a template specialization",
                                   DescriptionOf(RV));
@@ -2279,6 +2312,7 @@ bool get_begin_member_decl_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return true;
   }
@@ -2808,6 +2842,28 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
     return false;
   };
 
+  // The candidates of an overload set, in declaration order; a function or
+  // function template is its own only candidate.
+  auto Overloads = [&]() {
+    APValue RU = MaybeUnproxy(C, R);
+    if (RU.isReflectedOverloadSet()) {
+      for (NamedDecl *D : RU.getReflectedOverloadSet()->decls())
+        Out.push_back(makeReflection(D));
+      return false;
+    }
+    if ((RU.isReflectedDecl() && isa<FunctionDecl>(RU.getReflectedDecl())) ||
+        (RU.isReflectedTemplate() &&
+         isa_and_nonnull<FunctionTemplateDecl>(
+             RU.getReflectedTemplate().getAsTemplateDecl()))) {
+      Out.push_back(RU);
+      return false;
+    }
+    return DiagnoseReflectionKind(Diagnoser, Range,
+                                  "a function, function template, or overload "
+                                  "set",
+                                  DescriptionOf(RU));
+  };
+
   bool Failed = false;
   switch (Kind) {
   case 0:
@@ -2827,6 +2883,9 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
     break;
   case 5:
     Failed = HiddenFriends();
+    break;
+  case 6:
+    Failed = Overloads();
     break;
   default:
     llvm_unreachable("unknown member query");
@@ -2967,6 +3026,10 @@ bool identifier_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   }
 
   RV = MaybeUnproxy(C, RV, /*Dealias=*/false);
+  if (RV.isReflectedOverloadSet())
+    if (NamedDecl *ND =
+            agreeingCandidate(RV.getReflectedOverloadSet(), NameOfCandidate))
+      RV = makeReflection(ND);
 
   std::string Name;
   switch (RV.getReflectionKind()) {
@@ -3076,6 +3139,7 @@ bool identifier_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                      diag::metafn_name_of_unnamed_singleton) << 0 << Range;
   case ReflectionKind::Object:
   case ReflectionKind::Value:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
   case ReflectionKind::Expression:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_have_name)
@@ -3105,6 +3169,10 @@ bool has_identifier(APValue &Result, ASTContext &C, MetaActions &Meta,
     return true;
 
   RV = MaybeUnproxy(C, RV, /*Dealias=*/false);
+  if (RV.isReflectedOverloadSet())
+    if (NamedDecl *ND =
+            agreeingCandidate(RV.getReflectedOverloadSet(), NameOfCandidate))
+      RV = makeReflection(ND);
 
   bool HasIdentifier = false;
   switch (RV.getReflectionKind()) {
@@ -3175,6 +3243,7 @@ bool has_identifier(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Object:
   case ReflectionKind::Value:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     break;
   case ReflectionKind::EntityProxy:
@@ -3234,6 +3303,10 @@ bool source_location_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   if (!Evaluator(RV, Args[0], true))
     return true;
 
+  // An overload set's location is its first candidate's.
+  if (RV.isReflectedOverloadSet())
+    RV = makeReflection(RV.getReflectedOverloadSet()->decls().front());
+
   switch (RV.getReflectionKind()) {
   case ReflectionKind::Type:
     return findTypeDeclLoc(Result, C, Evaluator, ResultTy,
@@ -3269,6 +3342,7 @@ bool source_location_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   }
   case ReflectionKind::Object:
   case ReflectionKind::Value:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Null:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
@@ -3294,6 +3368,7 @@ bool type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Namespace:
   case ReflectionKind::EntityProxy:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
     return Diagnoser(Range.getBegin(), diag::metafn_no_associated_property)
         << DescriptionOf(RV) << 0 << Range;
   case ReflectionKind::Object:
@@ -3385,12 +3460,18 @@ bool parent_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     return DiagId > 0;
   };
 
+  if (RV.isReflectedOverloadSet())
+    if (NamedDecl *ND =
+            agreeingCandidate(RV.getReflectedOverloadSet(), ScopeOfCandidate))
+      RV = makeReflection(ND);
+
   switch (RV.getReflectionKind()) {
   case ReflectionKind::Null:
   case ReflectionKind::Object:
   case ReflectionKind::Value:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     if (Diagnoser)
       return Diagnoser(Range.getBegin(), diag::metafn_no_associated_property)
@@ -3460,6 +3541,7 @@ bool underlying_entity_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, RV);
   case ReflectionKind::Type: {
@@ -3503,6 +3585,7 @@ bool proxied_entity_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return DiagnoseReflectionKind(Diagnoser, Range, "an entity proxy");
   case ReflectionKind::EntityProxy:
@@ -3560,6 +3643,7 @@ bool object_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
         << 1 << DescriptionOf(RV) << Range;
@@ -3713,6 +3797,7 @@ bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     }
     return SetAndSucceed(Result, Constant.Lift(ConstantTy));
   }
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Null:
   case ReflectionKind::Type:
   case ReflectionKind::Template:
@@ -4460,6 +4545,7 @@ bool template_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return DiagnoseReflectionKind(Diagnoser, Range, "a template specialization",
                                   DescriptionOf(RV));
@@ -4485,6 +4571,7 @@ static bool CanActAsTemplateArg(const APValue &RV) {
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
   case ReflectionKind::Null:
     return false;
@@ -4930,6 +5017,7 @@ bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
                            {}, false, false));
     }
   }
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Null:
   case ReflectionKind::Type:
   case ReflectionKind::Template:
@@ -4991,6 +5079,7 @@ bool is_ACCESS(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Parameter:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
   case ReflectionKind::Namespace:
     return SetAndSucceed(Result, makeBool(C, false));
@@ -5088,6 +5177,7 @@ bool is_virtual(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, IsVirtual));
   }
@@ -5304,6 +5394,7 @@ bool is_const(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, false));
   case ReflectionKind::Type: {
@@ -5343,6 +5434,7 @@ bool is_volatile(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, false));
   case ReflectionKind::Type: {
@@ -5729,6 +5821,7 @@ bool is_static_member(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, result));
   case ReflectionKind::EntityProxy:
@@ -5861,6 +5954,7 @@ bool is_alias(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Parameter:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
   case ReflectionKind::EntityProxy:
     return SetAndSucceed(Result, makeBool(C, false));
@@ -5941,6 +6035,7 @@ bool has_complete_definition(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     break;
   case ReflectionKind::EntityProxy:
@@ -5982,6 +6077,7 @@ bool is_enumerable_type(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     break;
   case ReflectionKind::EntityProxy:
@@ -6279,6 +6375,7 @@ bool has_template_arguments(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, false));
   }
@@ -6388,6 +6485,7 @@ bool is_constructor(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, false));
   case ReflectionKind::Declaration: {
@@ -6539,6 +6637,7 @@ bool is_destructor(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, false));
   case ReflectionKind::Declaration: {
@@ -6573,6 +6672,7 @@ bool is_special_member_function(APValue &Result, ASTContext &C,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, false));
   case ReflectionKind::Declaration: {
@@ -6944,6 +7044,7 @@ bool offset_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return DiagnoseReflectionKind(Diagnoser, Range, "a non-static data member",
                                   DescriptionOf(RV));
@@ -7018,6 +7119,7 @@ bool size_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::EntityProxy:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Parameter:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
         << 3 << DescriptionOf(RV);
@@ -7046,6 +7148,7 @@ bool bit_offset_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return DiagnoseReflectionKind(Diagnoser, Range, "a non-static data member",
                                   DescriptionOf(RV));
@@ -7118,6 +7221,7 @@ bool bit_size_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::EntityProxy:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Parameter:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
         << 3 << DescriptionOf(RV);
@@ -7184,6 +7288,7 @@ bool alignment_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::EntityProxy:
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::Parameter:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
         << 4 << DescriptionOf(RV) << Range;
@@ -7246,6 +7351,7 @@ bool get_ith_parameter_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return true;
   }
@@ -7276,6 +7382,7 @@ bool has_ellipsis_parameter(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
       << 5 << DescriptionOf(RV) << Range;
@@ -7326,6 +7433,7 @@ bool has_default_argument(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::BaseSpecifier:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return DiagnoseReflectionKind(Diagnoser, Range, "a function parameter",
                                   DescriptionOf(RV));
@@ -7442,6 +7550,7 @@ bool return_type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
         << 6 << DescriptionOf(RV) << Range;
@@ -7554,6 +7663,7 @@ bool get_ith_annotation_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_query_property)
         << 7 << DescriptionOf(RV) << Range;
@@ -7628,6 +7738,7 @@ bool annotate(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
   case ReflectionKind::EntityProxy:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_annotate)
@@ -7802,6 +7913,7 @@ bool is_accessible(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, true));
   }
@@ -7867,6 +7979,7 @@ bool is_access_specified(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return SetAndSucceed(Result, makeBool(C, false));
   }
@@ -8045,6 +8158,7 @@ bool reflect_invoke(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Parameter:
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
   case ReflectionKind::Annotation:
     return Diagnoser(Range.getBegin(), diag::metafn_cannot_invoke)
         << DescriptionOf(FnRefl) << Range;
@@ -8260,6 +8374,100 @@ bool string_literal_from(APValue &Result, ASTContext &C, MetaActions &Meta,
   return SetAndSucceed(Result,
                        APValue((const ValueDecl *)nullptr, CharUnits::Zero(),
                                APValue::NoLValuePath(), /*IsNullPtr=*/true));
+}
+
+bool is_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
+                     EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                     QualType ResultTy, SourceRange Range,
+                     ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  return SetAndSucceed(Result, makeBool(C, RV.isReflectedOverloadSet()));
+}
+
+// make_overload_set(data, n): the overload set of the n functions, function
+// templates, and overload sets (whose candidates are included) at data. One
+// candidate is reflected as itself.
+bool make_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
+                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                       QualType ResultTy, SourceRange Range,
+                       ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  APValue NumV;
+  if (!Evaluator(NumV, Args[1], true))
+    return true;
+  uint64_t N = NumV.getInt().getZExtValue();
+
+  SmallVector<NamedDecl *, 8> Candidates;
+  for (uint64_t K = 0; K != N; ++K) {
+    llvm::APInt Idx(C.getTypeSize(C.getSizeType()), K, false);
+    Expr *Element =
+        IntegerLiteral::Create(C, Idx, C.getSizeType(), Args[0]->getExprLoc());
+    Element =
+        new (C) ArraySubscriptExpr(Args[0], Element, C.MetaInfoTy, VK_LValue,
+                                   OK_Ordinary, Range.getBegin());
+    APValue E;
+    if (!Evaluator(E, Element, true))
+      return true;
+    E = MaybeUnproxy(C, E);
+
+    if (E.isReflectedOverloadSet()) {
+      llvm::append_range(Candidates, E.getReflectedOverloadSet()->decls());
+      continue;
+    }
+    NamedDecl *ND = nullptr;
+    if (E.isReflectedDecl())
+      ND = dyn_cast<FunctionDecl>(E.getReflectedDecl());
+    else if (E.isReflectedTemplate())
+      ND = dyn_cast_or_null<FunctionTemplateDecl>(
+          E.getReflectedTemplate().getAsTemplateDecl());
+    // Constructors and destructors are not found by name lookup, so they are
+    // never candidates.
+    if (!ND || isa<CXXConstructorDecl, CXXDestructorDecl>(ND->getAsFunction()))
+      return DiagnoseReflectionKind(Diagnoser, Range,
+                                    "a function, function template, or "
+                                    "overload set",
+                                    DescriptionOf(E));
+    Candidates.push_back(ND);
+  }
+  if (Candidates.empty())
+    return Diagnoser(Range.getBegin(), diag::metafn_overload_set_empty)
+           << Range;
+
+  // Member call syntax (obj.[: r :]) needs a class for the object: if any
+  // candidate is a non-static member function, all must be members of one
+  // class or of its bases (as lookup of a member name can find).
+  auto ClassOf = [](NamedDecl *D) {
+    return dyn_cast<CXXRecordDecl>(D->getDeclContext()->getRedeclContext());
+  };
+  auto *NonStatic = llvm::find_if(Candidates, [](NamedDecl *D) {
+    auto *MD = dyn_cast<CXXMethodDecl>(D->getAsFunction());
+    return MD && MD->isInstance();
+  });
+  if (NonStatic != Candidates.end()) {
+    auto IsOrDerivesFrom = [](CXXRecordDecl *X, CXXRecordDecl *Y) {
+      return X->getCanonicalDecl() == Y->getCanonicalDecl() ||
+             (X->hasDefinition() && X->isDerivedFrom(Y));
+    };
+    // The most derived class among the candidates', if there is one.
+    CXXRecordDecl *Object = nullptr;
+    for (NamedDecl *D : Candidates) {
+      CXXRecordDecl *RD = ClassOf(D);
+      if (!RD)
+        return Diagnoser(Range.getBegin(),
+                         diag::metafn_overload_set_mixed_members)
+               << *NonStatic << D << Range;
+      if (!Object || IsOrDerivesFrom(RD, Object))
+        Object = RD;
+    }
+    for (NamedDecl *D : Candidates)
+      if (!IsOrDerivesFrom(Object, ClassOf(D)))
+        return Diagnoser(Range.getBegin(),
+                         diag::metafn_overload_set_mixed_members)
+               << *NonStatic << D << Range;
+  }
+
+  return SetAndSucceed(Result, makeOverloadSetReflection(C, Candidates));
 }
 
 }  // end namespace clang
