@@ -347,6 +347,10 @@ consteval auto default_argument_of(info) -> info;
 consteval auto hidden_friends_of(info) -> vector<info>;
 consteval auto interface_of(info, access_context) -> vector<info>;
 
+// name lookup (P2996 ext)
+consteval auto lookup(info, string_view, access_context) -> optional<info>;
+consteval auto lookup(info, operators, access_context) -> optional<info>;
+
 // overload sets (P2996 ext)
 consteval auto is_overload_set(info) -> bool;
 consteval auto overloads_of(info) -> vector<info>;
@@ -602,6 +606,7 @@ enum : unsigned {
   __metafn_default_argument_of,
   __metafn_is_overload_set,
   __metafn_make_overload_set,
+  __metafn_lookup,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1321,6 +1326,31 @@ consteval auto make_overload_set(R &&r) -> info {
     return __metafunction(detail::__metafn_make_overload_set, v.data(),
                           v.size());
   }
+}
+
+// Qualified name lookup of 'name' in 'scope' (a namespace, class, or
+// enumeration), as for 'scope::name': what it finds, reflected as ^^ would --
+// an entity, or an overload set. Nothing if the lookup finds nothing, is
+// ambiguous, or finds nothing accessible in 'ctx' (of an overloaded name,
+// only the accessible candidates are kept).
+consteval auto lookup(info scope, string_view name, access_context ctx)
+    -> optional<info> {
+  info r = __metafunction(detail::__metafn_lookup, scope, name.data(),
+                          name.size(), size_t(0), ctx.scope(),
+                          ctx.designating_class());
+  if (r == info())
+    return nullopt;
+  return r;
+}
+
+// As above, for an operator function name: 'operator==', say.
+consteval auto lookup(info scope, operators op, access_context ctx)
+    -> optional<info> {
+  info r = __metafunction(detail::__metafn_lookup, scope, "", size_t(0),
+                          size_t(op), ctx.scope(), ctx.designating_class());
+  if (r == info())
+    return nullopt;
+  return r;
 }
 
 // The hidden friends of a class: the functions and function templates first

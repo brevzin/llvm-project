@@ -861,6 +861,10 @@ static bool default_argument_of(APValue &Result, ASTContext &C,
                                 DiagFn Diagnoser, bool AllowInjection,
                                 QualType ResultTy, SourceRange Range,
                                 ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool lookup(APValue &Result, ASTContext &C, MetaActions &Meta,
+                   EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                   QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                   Decl *ContainingDecl);
 static bool is_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
                             EvalFn Evaluator, DiagFn Diagnoser,
                             bool AllowInjection, QualType ResultTy,
@@ -1104,6 +1108,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_metaInfo, 1, 1, default_argument_of},
     {Metafunction::MFRK_bool, 1, 1, is_overload_set},
     {Metafunction::MFRK_metaInfo, 2, 2, make_overload_set},
+    {Metafunction::MFRK_metaInfo, 6, 6, lookup},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -8468,6 +8473,138 @@ bool make_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
   }
 
   return SetAndSucceed(Result, makeOverloadSetReflection(C, Candidates));
+}
+
+// lookup(scope, name, length, op, ctx-scope, ctx-designating-class): what
+// qualified lookup of the name -- an identifier, or (for a nonzero 'op') an
+// operator function name -- in a namespace, class, or enumeration finds, as
+// ^^scope::name would reflect it: an entity, or an overload set. The null
+// reflection if nothing is found, the lookup is ambiguous, or nothing found
+// is accessible in the context. (Of an overloaded name, the accessible
+// candidates.)
+bool lookup(APValue &Result, ASTContext &C, MetaActions &Meta, EvalFn Evaluator,
+            DiagFn Diagnoser, bool AllowInjection, QualType ResultTy,
+            SourceRange Range, ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  APValue ScopeV, LenV, OpV, CtxScope, CtxDesignating;
+  if (!Evaluator(ScopeV, Args[0], true) || !Evaluator(LenV, Args[2], true) ||
+      !Evaluator(OpV, Args[3], true) || !Evaluator(CtxScope, Args[4], true) ||
+      !Evaluator(CtxDesignating, Args[5], true))
+    return true;
+  auto NotFound = [&] {
+    return SetAndSucceed(Result, makeReflection(nullptr));
+  };
+
+  // The scope.
+  ScopeV = MaybeUnproxy(C, ScopeV);
+  DeclContext *DC = nullptr;
+  if (ScopeV.isReflectedNamespace()) {
+    Decl *D = ScopeV.getReflectedNamespace();
+    if (auto *NAD = dyn_cast<NamespaceAliasDecl>(D))
+      D = NAD->getNamespace();
+    DC = cast<DeclContext>(D);
+  } else if (ScopeV.isReflectedType()) {
+    QualType QT = ScopeV.getReflectedType();
+    if (isTypeAlias(QT))
+      QT = desugarType(QT, /*UnwrapAliases=*/true, /*DropCV=*/false,
+                       /*DropRefs=*/false);
+    ensureDeclared(C, QT, Range.getBegin());
+    Decl *TD = findTypeDecl(QT);
+    if (auto *RD = dyn_cast_or_null<CXXRecordDecl>(TD)) {
+      // As for members_of: a class being defined has what it has declared so
+      // far; any other class is completed (instantiated) first.
+      if (!RD->isBeingDefined() && !Meta.EnsureInstantiated(RD, Range))
+        return true;
+      if (CXXRecordDecl *Def = RD->getDefinition())
+        DC = Def;
+      else if (RD->isBeingDefined())
+        DC = RD;
+    } else if (auto *ED = dyn_cast_or_null<EnumDecl>(TD)) {
+      DC = ED->getDefinition();
+    }
+  }
+  if (!DC)
+    return DiagnoseReflectionKind(
+        Diagnoser, Range,
+        "a namespace, complete class type, or enumeration type",
+        DescriptionOf(ScopeV));
+
+  // The name.
+  DeclarationName Name;
+  if (uint64_t OpIndex = OpV.getInt().getZExtValue()) {
+    OverloadedOperatorKind OO = getOverloadedOperatorForMetaIndex(OpIndex);
+    if (OO == OO_None)
+      return DiagnoseReflectionKind(Diagnoser, Range, "an operator");
+    Name = C.DeclarationNames.getCXXOperatorName(OO);
+  } else {
+    uint64_t Length = LenV.getInt().getZExtValue();
+    std::string Identifier(Length, '\0');
+    for (uint64_t K = 0; K != Length; ++K) {
+      llvm::APInt Idx(C.getTypeSize(C.getSizeType()), K, false);
+      Expr *Char = IntegerLiteral::Create(C, Idx, C.getSizeType(),
+                                          Args[1]->getExprLoc());
+      Char = new (C) ArraySubscriptExpr(
+          Args[1], Char, Args[1]->getType()->getPointeeType(), VK_LValue,
+          OK_Ordinary, Range.getBegin());
+      APValue CharV;
+      if (!Evaluator(CharV, Char, true))
+        return true;
+      Identifier[K] = static_cast<char>(CharV.getInt().getExtValue());
+    }
+    Lexer Lex(Range.getBegin(), C.getLangOpts(), Identifier.data(),
+              Identifier.data(), Identifier.data() + Identifier.size(), false);
+    if (!Lex.validateIdentifier(Identifier))
+      return Diagnoser(Range.getBegin(), diag::metafn_name_invalid_identifier)
+             << Identifier << Range;
+    Name = &C.Idents.get(Identifier);
+  }
+
+  SmallVector<NamedDecl *, 4> Found;
+  if (!Meta.LookupQualified(DC, Name, Range.getBegin(), Found))
+    return NotFound();
+
+  // Access, in a class: keep what the context may name.
+  if (auto *RD = dyn_cast<CXXRecordDecl>(DC);
+      RD && !CtxScope.isNullReflection()) {
+    DeclContext *AccessDC = nullptr;
+    if (CtxScope.isReflectedType())
+      AccessDC = dyn_cast_or_null<DeclContext>(
+          findTypeDecl(CtxScope.getReflectedType()));
+    else if (CtxScope.isReflectedNamespace())
+      AccessDC = dyn_cast<DeclContext>(CtxScope.getReflectedNamespace());
+    else if (CtxScope.isReflectedDecl())
+      AccessDC = dyn_cast<DeclContext>(CtxScope.getReflectedDecl());
+    CXXRecordDecl *NamingCls = RD;
+    CtxDesignating = MaybeUnproxy(C, CtxDesignating);
+    if (CtxDesignating.isReflectedType())
+      if (auto *D = dyn_cast_or_null<CXXRecordDecl>(
+              findTypeDecl(CtxDesignating.getReflectedType())))
+        NamingCls = D->getDefinition() ? D->getDefinition() : D;
+    if (AccessDC)
+      llvm::erase_if(Found, [&](NamedDecl *D) {
+        return !Meta.IsAccessible(D, AccessDC, NamingCls);
+      });
+    if (Found.empty())
+      return NotFound();
+  }
+
+  // Functions and function templates: their overload set (or the one).
+  if (llvm::all_of(Found, [](NamedDecl *D) {
+        return isa<FunctionDecl, FunctionTemplateDecl>(D->getUnderlyingDecl());
+      }))
+    return SetAndSucceed(Result, makeOverloadSetReflection(C, Found));
+  if (Found.size() != 1)
+    return NotFound();
+
+  // Anything else, as ^^ reflects it.
+  NamedDecl *D = Found.front();
+  if (isa<UsingShadowDecl>(D)) {
+    if (C.getLangOpts().EntityProxyReflection)
+      return SetAndSucceed(Result, makeReflection(D));
+    D = D->getUnderlyingDecl();
+  }
+  if (auto *TyDecl = dyn_cast<TypeDecl>(D))
+    return SetAndSucceed(Result, makeReflection(C.getTypeDeclType(TyDecl)));
+  return SetAndSucceed(Result, makeReflection(D->getCanonicalDecl()));
 }
 
 }  // end namespace clang

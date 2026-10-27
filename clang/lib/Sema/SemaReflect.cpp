@@ -535,6 +535,18 @@ public:
     return Result.get();
   }
 
+  bool LookupQualified(DeclContext *DC, DeclarationName Name,
+                       SourceLocation Loc,
+                       SmallVectorImpl<NamedDecl *> &Found) override {
+    LookupResult R(S, Name, Loc, Sema::LookupOrdinaryName);
+    R.suppressDiagnostics();
+    if (!S.LookupQualifiedName(R, DC) || R.isAmbiguous())
+      return false;
+    for (NamedDecl *D : R)
+      Found.push_back(D);
+    return !Found.empty();
+  }
+
   Expr *DefaultArgument(ParmVarDecl *Param, SourceLocation Loc) override {
     auto *FD = dyn_cast<FunctionDecl>(Param->getDeclContext());
     if (!FD)

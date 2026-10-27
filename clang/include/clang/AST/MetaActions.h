@@ -151,6 +151,14 @@ public:
   // invocation of the macro being evaluated (else at \p Loc). Null on error.
   virtual Expr *DefaultArgument(ParmVarDecl *Param, SourceLocation Loc) = 0;
 
+  // Qualified name lookup of \p Name in \p DC, as for 'DC::Name'
+  // ([namespace.qual], [class.member.lookup]): the declarations found, as
+  // found (a using-declaration's shadow, say). False, without diagnostics, if
+  // nothing is found or the lookup is ambiguous.
+  virtual bool LookupQualified(DeclContext *DC, DeclarationName Name,
+                               SourceLocation Loc,
+                               SmallVectorImpl<NamedDecl *> &Found) = 0;
+
   // =======================
   // Class Synthesis Support
   // =======================
