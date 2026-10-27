@@ -2473,6 +2473,18 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     Introduced = NewFTD;
   }
 
+  // As for any declaration (see CheckFunctionDeclaration): a placeholder
+  // return type of a templated function is dependent until the definition is
+  // instantiated. (A clone of a member template with a deduced return type,
+  // say a generic lambda's call operator, is one.)
+  if (getLangOpts().CPlusPlus14 && Method->isDependentContext() &&
+      Method->getReturnType()->isUndeducedType()) {
+    const auto *FPT = Method->getType()->castAs<FunctionProtoType>();
+    Method->setType(
+        Context.getFunctionType(SubstAutoTypeDependent(FPT->getReturnType()),
+                                FPT->getParamTypes(), FPT->getExtProtoInfo()));
+  }
+
   PushOnScopeChains(Introduced, S, /*AddToContext=*/true);
   return Introduced;
 }

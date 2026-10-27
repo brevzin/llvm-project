@@ -308,6 +308,7 @@ static_assert(W{}.g<int>(11, 0) == 11);
 // instantiated when a call uses it (the source itself is callable with the
 // argument supplied, so the clone must be as well).
 template <class T>
+
 struct Outer2 {
   constexpr int h(int x = sizeof(T)) const { return x; }
   template <class V>
@@ -623,6 +624,31 @@ int use_mangling_heads() {
 }
 
 }  // namespace mangling
+
+// A member template with a deduced return type (a generic lambda's call
+// operator, say) clones: its placeholder is dependent until instantiation.
+struct GenericSource {
+  template <class T> constexpr auto twice(T x) const { return x + x; }
+};
+struct GenericClone {
+  GenericSource src;
+  consteval {
+    auto d = declaration_of(^^GenericSource::twice);
+    queue_injection(^^{ \(d) { return src.twice(\(argument_list_for(d))); } });
+  }
+};
+static_assert(GenericClone{}.twice(2) == 4 && GenericClone{}.twice(1.5) == 3.0);
+constexpr auto generic_lambda = [](auto x) { return x; };
+struct LambdaClone {
+  decltype(generic_lambda) f;
+  consteval {
+    auto d = declaration_of(*std::meta::lookup(^^decltype(generic_lambda),
+                                    std::meta::operators::op_parentheses,
+                                    std::meta::access_context::unchecked()));
+    queue_injection(^^{ \(d) { return f(\(argument_list_for(d))); } });
+  }
+};
+static_assert(LambdaClone{}(7) == 7);
 
 int main() {
   if (use_all() != 1)
