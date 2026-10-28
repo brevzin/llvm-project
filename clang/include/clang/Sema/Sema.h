@@ -6646,6 +6646,14 @@ public:
   /// type, by (sugared) type.
   llvm::DenseMap<void *, CXXMethodDecl *> FunctionTypePrototypes;
 
+  /// An interpolation already made (an expression an evaluated token
+  /// sequence carries), appearing in a token sequence being parsed: what to
+  /// interpolate so that it comes out the same. A declaration's interpolation
+  /// is a reference to it, which re-interpolated would mean its *value*; it
+  /// becomes the declaration's reflection, which interpolates as the same
+  /// reference. Anything else (a constant) is unchanged.
+  Expr *ActOnReinterpolation(Expr *E);
+
   /// Whether \p T is an implicit-lifetime type ([basic.types.general]p9).
   /// \p T must be complete (or an array or void).
   bool isImplicitLifetimeType(QualType T);

@@ -195,12 +195,17 @@ writer-side diagnostic).
     extra move;
   - a non-movable by-value parameter can be initialized from a prvalue, even
     for a `final` callable.
-- Two problems found while writing it, not yet fixed:
-  - interpolating a by-reference lambda capture (in a helper lambda inside
-    the generator) fails with "read of non-const variable";
-  - `\\(m)` of a member function reflection in member-access position
-    (`$self.src.\\(m)(...)`) makes the generated macro fail. Splicing
-    `id(identifier_of(m))` works.
+- Two problems found while writing it, since fixed:
+  - Interpolating a lambda's capture failed once the lambda was in a template
+    being instantiated. The instantiation evaluated interpolations in an
+    unevaluated context, so the use didn't capture.
+  - A generator's `\\(m)`, for a function, variable or member reflection
+    `m`, failed in a generated macro. The outer evaluation interpolates `m` as
+    a reference to the declaration, which the inner literal then
+    re-interpolated as a *value*. A pre-interpolated reference in a literal
+    being parsed now becomes the declaration's reflection
+    (`Sema::ActOnReinterpolation`). Instantiation also leaves an
+    already-evaluated interpolation (a `ConstantExpr`) alone.
 
 ## The problem
 

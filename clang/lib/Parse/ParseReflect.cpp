@@ -278,6 +278,20 @@ ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
         continue;
       }
 
+      // An interpolation already made -- by the evaluation of an enclosing
+      // literal, a generator writing this one -- must come out the same when
+      // this literal is evaluated in turn.
+      if (Tok.is(tok::annot_token_seq_expr)) {
+        Token Reinterpolated = Tok;
+        ExprResult E = getExprAnnotation(Tok);
+        if (!E.isInvalid() && E.get())
+          setExprAnnotation(Reinterpolated,
+                            Actions.ActOnReinterpolation(E.get()));
+        Tokens.push_back(Reinterpolated);
+        ConsumeAnyToken();
+        continue;
+      }
+
       Tokens.push_back(Tok);
       ConsumeAnyToken();
     }

@@ -717,7 +717,7 @@ struct MacroDest {
     for (info m : {^^MacroSource::c, ^^MacroSource::nc, ^^MacroSource::lref,
                    ^^MacroSource::rref, ^^MacroSource::tmpl}) {
       auto md = make_macro(declaration_of(m));
-      ts += ^^{ \(md) { return ^^{ $self.src.\\(id(identifier_of(m)))(\\(argument_list_for(md))) }; } };
+      ts += ^^{ \(md) { return ^^{ $self.src.\\(m)(\\(argument_list_for(md))) }; } };
     }
     auto fn = make_macro(declaration_of(^^int(int, int) const,
                                         {.name = operators::op_parentheses}));

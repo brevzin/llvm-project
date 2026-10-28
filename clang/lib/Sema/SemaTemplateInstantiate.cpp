@@ -2730,6 +2730,14 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
     Expr *SubExpr = static_cast<Expr *>(Tok.getAnnotationValue());
     if (!SubExpr)
       continue;
+    // A value already interpolated by the evaluation of an enclosing literal
+    // (a generator writing this sequence into a macro, say) is a ConstantExpr
+    // holding it, and complete. Transforming it would discard the value and
+    // re-evaluate its source expression -- which may name a local of that
+    // finished evaluation.
+    if (auto *CE = dyn_cast<ConstantExpr>(SubExpr);
+        CE && CE->hasAPValueResult() && !CE->isValueDependent())
+      continue;
     ExprResult Transformed = TransformExpr(SubExpr);
     if (Transformed.isInvalid())
       return ExprError();

@@ -2283,6 +2283,16 @@ bool Sema::ActOnInjectedTemplateParameters(
   return false;
 }
 
+Expr *Sema::ActOnReinterpolation(Expr *E) {
+  auto *DRE = dyn_cast<DeclRefExpr>(E);
+  if (!DRE || DRE->isValueDependent())
+    return E;
+  auto *OVE = new (Context)
+      OpaqueValueExpr(DRE->getExprLoc(), Context.MetaInfoTy, VK_PRValue);
+  return ConstantExpr::Create(
+      Context, OVE, APValue(ReflectionKind::Declaration, DRE->getDecl()));
+}
+
 NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
                                                AccessSpecifier AS,
                                                SourceLocation Loc) {
