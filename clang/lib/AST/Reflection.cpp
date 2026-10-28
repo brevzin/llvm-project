@@ -148,7 +148,8 @@ bool FunctionDeclSpec::operator==(FunctionDeclSpec const &Rhs) const {
           ParameterPrefix == Rhs.ParameterPrefix &&
           NameOperator == Rhs.NameOperator &&
           MarkOverride == Rhs.MarkOverride &&
-          MarkNoexcept == Rhs.MarkNoexcept && MarkConst == Rhs.MarkConst);
+          MarkNoexcept == Rhs.MarkNoexcept && MarkConst == Rhs.MarkConst &&
+          MarkMacro == Rhs.MarkMacro);
 }
 
 bool FunctionDeclSpec::operator!=(FunctionDeclSpec const &Rhs) const {

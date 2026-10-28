@@ -271,6 +271,9 @@ struct FunctionDeclSpec {
   bool MarkNoexcept = false;
   /// std::meta::make_const: declare the clone a const member function.
   bool MarkConst = false;
+  /// std::meta::make_macro: declare the clone as a member expression macro
+  /// (with an explicit object parameter 'self') instead of a function.
+  bool MarkMacro = false;
 
   bool operator==(FunctionDeclSpec const &Rhs) const;
   bool operator!=(FunctionDeclSpec const &Rhs) const;

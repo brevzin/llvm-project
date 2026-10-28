@@ -85,10 +85,79 @@ static_assert(!callable_with<decltype(o), Final>); // no viable candidate
 constexpr auto p = overload(Final{}, &free_fn, [](double) { return 32; });
 static_assert(p('c') == 20 && p(1) == 30 && p(1.5) == 32);
 
+template <class... Fs> struct overload_macro {
+  std::tuple<Fs...> fs;
+  constexpr overload_macro(Fs... f) : fs{f...} {}
+
+  consteval {
+    std::size_t i = 0;
+    for (info F : {^^Fs...}) {
+      // The descriptions of F's call operators; each becomes a macro.
+      std::vector<info> calls;
+      if (is_pointer_type(F) && is_function_type(remove_pointer(F)))
+        calls.push_back(make_const(declaration_of(
+            remove_pointer(F), {.name = operators::op_parentheses})));
+      else if (auto call = lookup(F, operators::op_parentheses,
+                                  access_context::unchecked()))
+        for (info m : overloads_of(*call))
+          calls.push_back(declaration_of(m));
+      // The expansion: the i-th callable, called with the caller's argument
+      // expressions. ('$self' is the macro's object; '\\(...)' reaches out
+      // to this generator.)
+      for (info d : calls) {
+        auto md = make_macro(d);
+        auto args = argument_list_for(md);
+        queue_injection(^^{ $md { return ^^{ std::get<$$i>($self.fs)($$args) }; } });
+      }
+      ++i;
+    }
+  }
+};
+template <class... Fs> overload_macro(Fs...) -> overload_macro<Fs...>;
+
+// The same best matches as overload...
+constexpr auto om = overload_macro(
+    [](int) { return 1; }, [](double) { return 2; },
+    [](std::string const &) { return 3; }, Named{},
+    [](auto *p) requires(!std::is_same_v<decltype(p), char const *>) {
+      return 4;
+    });
+static_assert(om(1) == 1 && om(1.0) == 2 && om(1L) == 10 && om("lit") == 11);
+static_assert(om(&om) == 4);
+static_assert(!callable_with<decltype(om), Final>);
+// ... for final classes and function pointers too, and a non-movable
+// parameter initialized from a prvalue (which a forwarding call operator
+// can't do: it would have to move its parameter into the callable's), even
+// when its callable is final.
+struct Pinned {
+  int v;
+  constexpr Pinned(int v) : v(v) {}
+  Pinned(Pinned &&) = delete;
+};
+constexpr Pinned make_pinned() { return Pinned(5); }
+struct FinalPinned final {
+  constexpr int operator()(Pinned pin) const { return pin.v * 10; }
+};
+constexpr auto pm = overload_macro(Final{}, &free_fn, FinalPinned{});
+static_assert(pm('c') == 20 && pm(1) == 30 && pm(make_pinned()) == 50);
+// A non-const call operator is not selected for a const object.
+constexpr auto counting = [] {
+  return overload_macro([count = 0](std::string const &) mutable {
+                          return ++count;
+                        },
+                        [](int i) { return i; });
+};
+static_assert(callable_with<decltype(counting()) &, std::string>);
+static_assert(!callable_with<decltype(counting()) const &, std::string>);
+static_assert(callable_with<decltype(counting()) const &, int>);
+
 int main(int, char **) {
   int calls = 0;
   auto r = overload([&calls](std::string const &) { return ++calls; },
                     [](int i) { return i; });
   assert(r(std::string("x")) == 1 && r(5) == 5 && calls == 1);
+  auto rm = overload_macro([&calls](std::string const &) { return ++calls; },
+                           [](int i) { return i; });
+  assert(rm(std::string("x")) == 2 && rm(5) == 5 && calls == 2);
   return 0;
 }

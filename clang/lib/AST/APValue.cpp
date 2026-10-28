@@ -609,6 +609,7 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
     ID.AddBoolean(FDS->MarkOverride);
     ID.AddBoolean(FDS->MarkNoexcept);
     ID.AddBoolean(FDS->MarkConst);
+    ID.AddBoolean(FDS->MarkMacro);
     return;
   }
   case ReflectionKind::Object:

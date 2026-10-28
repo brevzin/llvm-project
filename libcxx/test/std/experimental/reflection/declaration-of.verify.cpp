@@ -200,3 +200,13 @@ struct BadOperator {
   }
 };
 // expected-error@*:* {{overloaded 'operator==' must be a binary operator (has 4 parameters)}}
+
+// make_macro refusals.
+template <class T> struct MacroHead {};
+constexpr auto mm1 = std::meta::make_macro(std::meta::declaration_of(^^MacroHead));
+// expected-error@-1 {{constexpr variable 'mm1' must be initialized by a constant expression}}
+// expected-note@*:* {{a class template head description cannot be a macro}}
+struct MacroVolatile { void v() volatile; };
+constexpr auto mm2 = std::meta::make_macro(std::meta::declaration_of(^^MacroVolatile::v));
+// expected-error@-1 {{constexpr variable 'mm2' must be initialized by a constant expression}}
+// expected-note@*:* {{a volatile-qualified member function cannot be a macro}}

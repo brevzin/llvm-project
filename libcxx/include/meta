@@ -610,6 +610,7 @@ enum : unsigned {
   __metafn_make_overload_set,
   __metafn_lookup,
   __metafn_make_const,
+  __metafn_make_macro,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3706,8 +3707,9 @@ struct clone_naming {
 //   p1, ..., per 'naming';
 // - the exception specification is never part of the description (the new
 //   body has its own); make_noexcept asks for noexcept explicitly;
-// - the transformations below (make_override, make_noexcept, make_const)
-//   each give a new description, leaving the original unchanged.
+// - the transformations below (make_override, make_noexcept, make_const,
+//   make_macro) each give a new description, leaving the original
+//   unchanged.
 consteval auto declaration_of(info fn, clone_naming naming = {}) -> info {
   string_view __tp = naming.template_parameter_prefix;
   string_view __p = naming.parameter_prefix;
@@ -3753,6 +3755,27 @@ consteval auto make_override(info d) -> info {
 // its own to clone.
 consteval auto make_const(info d) -> info {
   return __metafunction(detail::__metafn_make_const, d);
+}
+
+// make_macro: the injected clone is a member *expression macro* rather than a
+// function: same name, template head, and parameters, plus an explicit object
+// parameter 'self' (of type 'Self&&', 'Self' a template parameter after the
+// source's), constrained to accept the objects the source's cv- and
+// ref-qualifiers would (a non-const member function's macro isn't selected for
+// a const object). It takes part in overload resolution exactly like the
+// function would; once selected, its arguments are bound to its parameters
+// unevaluated, and its body -- written by the generator, returning the
+// expansion -- replaces the call. So a forwarding macro hands the caller's
+// argument expressions straight to the callee: no parameter object of its own
+// to copy or move.
+//
+//   auto md = make_macro(declaration_of(m));
+//   ^^{ \(md) { return ^^{ $self.impl(\\(argument_list_for(md))) }; } }
+//
+// Inside the macro's own literal, '$self' (or '\(self)') is the macro's object
+// expression; '\\(...)' reaches out to the generator's level.
+consteval auto make_macro(info d) -> info {
+  return __metafunction(detail::__metafn_make_macro, d);
 }
 
 // make_noexcept: the injected clone is declared noexcept. declaration_of
@@ -3824,6 +3847,13 @@ struct argument_list_options {
   // parameter named as an lvalue (p0) -- for callees that should not consume
   // the arguments, or when the body uses them again after the call.
   bool forward = true;
+  //
+  // For a macro (make_macro), neither: each parameter's *argument expression*
+  // is interpolated -- '\(p0), \(p1...)' -- for the expansion written in the
+  // macro's body, since its parameters aren't variables where it expands (and
+  // an interpolated expression keeps its own value category). That is the
+  // only correct spelling there, so it's chosen from the description; 'forward'
+  // doesn't apply.
 };
 
 // The description's parameters spelled as call arguments:

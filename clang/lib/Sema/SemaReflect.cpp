@@ -2368,6 +2368,26 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
                                            NewRC);
   }
 
+  // A macro (make_macro) takes its object through an explicit object
+  // parameter 'self' of type 'Self&&': a template parameter appended to the
+  // head (after the source's own, so explicit template arguments still mean
+  // what they did), making a non-template source a template.
+  TemplateTypeParmDecl *SelfParam = nullptr;
+  if (Spec->MarkMacro) {
+    SmallVector<NamedDecl *, 8> Params;
+    Expr *RC = nullptr;
+    if (NewTPL) {
+      Params.append(NewTPL->begin(), NewTPL->end());
+      RC = NewTPL->getRequiresClause();
+    }
+    SelfParam = TemplateTypeParmDecl::Create(
+        Context, RD, Loc, Loc, /*Depth=*/0, /*Index=*/Params.size(),
+        &Context.Idents.get(Spec->TemplateParameterPrefix + "Self"),
+        /*Typename=*/false, /*ParameterPack=*/false);
+    Params.push_back(SelfParam);
+    NewTPL = TemplateParameterList::Create(Context, Loc, Loc, Params, Loc, RC);
+  }
+
   // Clone the function parameters with new names.
   SmallVector<ParmVarDecl *, 8> NewParms;
   SmallVector<QualType, 8> NewParamTys;
@@ -2423,10 +2443,35 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     NewParamTys.push_back(AdjustedTy);
   }
 
-  // The return type, remapped for the new head.
+  QualType SelfTy;
+  if (SelfParam) {
+    SelfTy =
+        Context.getTemplateTypeParmType(0, SelfParam->getIndex(),
+                                        /*ParameterPack=*/false, SelfParam);
+    QualType ObjTy = Context.getRValueReferenceType(SelfTy);
+    auto *Self = ParmVarDecl::Create(
+        Context, CurContext, Loc, Loc, &Context.Idents.get("self"), ObjTy,
+        Context.getTrivialTypeSourceInfo(ObjTy, Loc), SC_None,
+        /*DefArg=*/nullptr);
+    Self->setExplicitObjectParameterLoc(Loc);
+    // Not written by the user: an expansion that ignores it isn't a mistake.
+    Self->addAttr(UnusedAttr::CreateImplicit(Context));
+    NewParms.insert(NewParms.begin(), Self);
+    NewParamTys.insert(NewParamTys.begin(), ObjTy);
+    for (unsigned I = 0, N = NewParms.size(); I != N; ++I)
+      NewParms[I]->setScopeInfo(0, I);
+  }
+
+  // The return type, remapped for the new head. (A macro's is the macro
+  // return type: its body produces the expansion.)
   QualType NewRet = SrcProto->getReturnType();
   if (SrcFTD) {
     NewRet = SubstType(NewRet, Args, Loc, DeclarationName());
+    if (NewRet.isNull())
+      return Fail();
+  }
+  if (Spec->MarkMacro) {
+    NewRet = getMacroReturnType();
     if (NewRet.isNull())
       return Fail();
   }
@@ -2443,6 +2488,15 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   // make_const.
   if (Spec->MarkConst)
     EPI.TypeQuals.addConst();
+  // A macro has an explicit object parameter instead of qualifiers (they
+  // become constraints on it, below), and no exception specification.
+  Qualifiers MacroObjectQuals = EPI.TypeQuals;
+  RefQualifierKind MacroObjectRef = EPI.RefQualifier;
+  if (Spec->MarkMacro) {
+    EPI.TypeQuals = Qualifiers();
+    EPI.RefQualifier = RQ_None;
+    EPI.ExceptionSpec = FunctionProtoType::ExceptionSpecInfo();
+  }
   QualType NewFT = Context.getFunctionType(NewRet, NewParamTys, EPI);
   TypeSourceInfo *NewFTSI = Context.getTrivialTypeSourceInfo(NewFT, Loc);
   if (auto ProtoLoc =
@@ -2472,6 +2526,49 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     }
   }
 
+  // A macro's object parameter accepts what the source's implicit object
+  // parameter would: a non-const member function is not selected for a const
+  // object, an '&'-qualified one not for an rvalue, an '&&'-qualified one not
+  // for an lvalue.
+  if (Spec->MarkMacro) {
+    auto Trait = [&](TypeTrait TT, QualType T) -> Expr * {
+      return TypeTraitExpr::Create(Context, Context.BoolTy, Loc, TT,
+                                   {Context.getTrivialTypeSourceInfo(T, Loc)},
+                                   Loc, false);
+    };
+    auto Not = [&](Expr *E) -> Expr * {
+      return UnaryOperator::Create(
+          Context, new (Context) ParenExpr(Loc, Loc, E), UO_LNot,
+          Context.BoolTy, VK_PRValue, OK_Ordinary, Loc, false,
+          FPOptionsOverride());
+    };
+    SmallVector<Expr *, 2> Conjuncts;
+    bool Const = MacroObjectQuals.hasConst();
+    if (!Const) {
+      QualType Referent = BuildUnaryTransformType(
+          SelfTy, UnaryTransformType::RemoveReference, Loc);
+      Conjuncts.push_back(Not(Trait(UTT_IsConst, Referent)));
+    }
+    if (MacroObjectRef == RQ_LValue && !Const)
+      Conjuncts.push_back(Trait(UTT_IsLvalueReference, SelfTy));
+    if (MacroObjectRef == RQ_RValue)
+      Conjuncts.push_back(Not(Trait(UTT_IsLvalueReference, SelfTy)));
+    Expr *Constraint =
+        NewTRC ? const_cast<Expr *>(NewTRC.ConstraintExpr) : nullptr;
+    for (Expr *C : Conjuncts) {
+      Expr *Paren = new (Context) ParenExpr(Loc, Loc, C);
+      Constraint =
+          Constraint
+              ? BinaryOperator::Create(
+                    Context, new (Context) ParenExpr(Loc, Loc, Constraint),
+                    Paren, BO_LAnd, Context.BoolTy, VK_PRValue, OK_Ordinary,
+                    Loc, FPOptionsOverride())
+              : Paren;
+    }
+    if (Constraint)
+      NewTRC = AssociatedConstraint(Constraint);
+  }
+
   DeclarationName Name = SrcMD->getDeclName();
   if (Spec->Name)
     Name = DeclarationName(&Context.Idents.get(*Spec->Name));
@@ -2479,9 +2576,13 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     Name = Context.DeclarationNames.getCXXOperatorName(Spec->NameOperator);
 
   auto *Method = CXXMethodDecl::Create(
-      Context, RD, Loc, DeclarationNameInfo(Name, Loc), NewFT, NewFTSI,
-      SC_None, SrcMD->UsesFPIntrin(), /*isInline=*/true,
-      SrcMD->getConstexprKind(), Loc, NewTRC);
+      Context, RD, Loc, DeclarationNameInfo(Name, Loc), NewFT, NewFTSI, SC_None,
+      SrcMD->UsesFPIntrin(), /*isInline=*/true,
+      Spec->MarkMacro ? ConstexprSpecKind::Consteval
+                      : SrcMD->getConstexprKind(),
+      Loc, NewTRC);
+  if (Spec->MarkMacro)
+    Method->addAttr(ExpressionMacroAttr::CreateImplicit(Context, Loc));
   for (ParmVarDecl *P : NewParms)
     P->setOwningFunction(Method);
   Method->setParams(NewParms);
@@ -2495,7 +2596,7 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   // abstract base). Register the overrides as an ordinary declaration
   // would, and enforce a make_override transformation like a written
   // 'override' specifier.
-  if (!SrcFTD) {
+  if (!NewTPL) {
     AddOverriddenMethods(RD, Method);
     if (Spec->MarkOverride)
       Method->addAttr(OverrideAttr::Create(Context, Loc));
@@ -2503,7 +2604,7 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   }
 
   NamedDecl *Introduced = Method;
-  if (SrcFTD) {
+  if (NewTPL) {
     auto *NewFTD = FunctionTemplateDecl::Create(Context, RD, Loc, Name, NewTPL,
                                                 Method);
     Method->setDescribedFunctionTemplate(NewFTD);

@@ -23,6 +23,7 @@
 // arguments, real parameter types and default arguments, and named
 // constraints.
 
+#include <functional>
 #include <meta>
 #include <array>
 #include <concepts>
@@ -698,6 +699,48 @@ struct ComputedName {
   }
 };
 static_assert(ComputedName{}.call_again(2) == 3);
+
+// make_macro: a member expression macro with the source's signature and an
+// explicit object parameter 'self', constrained by the source's qualifiers.
+struct MacroSource {
+  constexpr int c(int x) const { return x; }
+  constexpr int nc(int x) { return x + 1; }
+  constexpr int lref(int x) & { return x + 2; }
+  constexpr int rref(int x) && { return x + 3; }
+  template <class T> constexpr T tmpl(T x) const { return x; }
+};
+struct MacroDest {
+  MacroSource src;
+  consteval {
+    using namespace std::meta;
+    token_sequence ts;
+    for (info m : {^^MacroSource::c, ^^MacroSource::nc, ^^MacroSource::lref,
+                   ^^MacroSource::rref, ^^MacroSource::tmpl}) {
+      auto md = make_macro(declaration_of(m));
+      ts += ^^{ \(md) { return ^^{ $self.src.\\(id(identifier_of(m)))(\\(argument_list_for(md))) }; } };
+    }
+    auto fn = make_macro(declaration_of(^^int(int, int) const,
+                                        {.name = operators::op_parentheses}));
+    ts += ^^{ \(fn) { return ^^{ std::plus<>{}(\\(argument_list_for(fn))) }; } };
+    queue_injection(ts);
+  }
+};
+// (A named member macro is invoked with '!'; an operator macro, with the
+// operator.)
+template <class T>
+concept has_nc = requires(T t) { static_cast<T &&>(t).nc!(1); };
+template <class T>
+concept has_lref = requires(T t) { static_cast<T &&>(t).lref!(1); };
+template <class T>
+concept has_rref = requires(T t) { static_cast<T &&>(t).rref!(1); };
+constexpr MacroDest macro_dest{};
+static_assert(macro_dest.c!(5) == 5 && MacroDest{}.nc!(5) == 6);
+static_assert(MacroDest{}.rref!(5) == 8 && macro_dest.tmpl!(2.5) == 2.5);
+static_assert(macro_dest(1, 2) == 3);
+static_assert(has_nc<MacroDest &> && !has_nc<MacroDest const &>);
+static_assert(has_lref<MacroDest &> && !has_lref<MacroDest &&> &&
+              !has_lref<MacroDest const &>);
+static_assert(has_rref<MacroDest &&> && !has_rref<MacroDest &>);
 
 int main() {
   if (use_all() != 1)

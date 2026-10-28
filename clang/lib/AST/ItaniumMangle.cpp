@@ -5123,6 +5123,8 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
       Out << 'X';
     if (FDS->MarkConst)
       Out << 'K';
+    if (FDS->MarkMacro)
+      Out << 'M';
     break;
   }
   case ReflectionKind::Expression:

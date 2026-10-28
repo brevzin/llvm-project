@@ -869,6 +869,10 @@ static bool make_const(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                        QualType ResultTy, SourceRange Range,
                        ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool make_macro(APValue &Result, ASTContext &C, MetaActions &Meta,
+                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                       QualType ResultTy, SourceRange Range,
+                       ArrayRef<Expr *> Args, Decl *ContainingDecl);
 static bool is_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
                             EvalFn Evaluator, DiagFn Diagnoser,
                             bool AllowInjection, QualType ResultTy,
@@ -1114,6 +1118,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_metaInfo, 2, 2, make_overload_set},
     {Metafunction::MFRK_metaInfo, 6, 6, lookup},
     {Metafunction::MFRK_metaInfo, 1, 1, make_const},
+    {Metafunction::MFRK_metaInfo, 1, 1, make_macro},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -4331,6 +4336,36 @@ bool make_const(APValue &Result, ASTContext &C, MetaActions &Meta,
       });
 }
 
+bool make_macro(APValue &Result, ASTContext &C, MetaActions &Meta,
+                EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                Decl *ContainingDecl) {
+  return transformDeclSpec(
+      Result, C, Evaluator, Diagnoser, Range, Args[0],
+      [](FunctionDeclSpec &FDS, const char *&WhyNot) {
+        if (isa<ClassTemplateDecl>(FDS.Source)) {
+          WhyNot = "a class template head description cannot be a macro";
+          return false;
+        }
+        if (FDS.MarkOverride) {
+          WhyNot = "a macro cannot override a virtual function";
+          return false;
+        }
+        const auto *FPT =
+            FDS.Source->getAsFunction()->getType()->castAs<FunctionProtoType>();
+        if (FPT->getMethodQuals().hasVolatile()) {
+          WhyNot = "a volatile-qualified member function cannot be a macro";
+          return false;
+        }
+        if (FPT->isVariadic()) {
+          WhyNot = "a C variadic function cannot be a macro";
+          return false;
+        }
+        FDS.MarkMacro = true;
+        return true;
+      });
+}
+
 // Resolve the template parameter list a description's source carries, for
 // the fragment accessors. Null with a reason if the source is not a
 // template.
@@ -4432,20 +4467,30 @@ bool template_argument_list_for(APValue &Result, ASTContext &C,
 
 // The spelling of the description's parameters as call arguments:
 // 'static_cast<decltype(p0)&&>(p0), p1...' when forwarding, 'p0, p1...' as
-// lvalues. Packs expand positionally, so (unlike a template argument list)
-// a nonterminal pack is fine here.
+// lvalues -- or, for a macro (make_macro), '\(p0), \(p1...)': in the
+// expansion, each parameter's argument expression, interpolated (a macro's
+// parameters are not variables at the expansion site; an interpolated
+// expression keeps its own value category, so 'Forward' doesn't apply).
+// Packs expand positionally, so (unlike a template argument list) a
+// nonterminal pack is fine here.
 static std::string buildArgumentList(const FunctionDeclSpec *FDS,
                                      const CXXMethodDecl *MD, bool Forward) {
+  bool Interpolate = FDS->MarkMacro;
   std::string List;
   for (unsigned I = 0, N = MD->getNumParams(); I != N; ++I) {
     if (I)
       List += ", ";
     std::string PName = FDS->ParameterPrefix + std::to_string(I);
+    bool Pack = MD->getParamDecl(I)->isParameterPack();
+    if (Interpolate) {
+      List += "\\(" + PName + (Pack ? "...)" : ")");
+      continue;
+    }
     if (Forward)
       List += "static_cast<decltype(" + PName + ")&&>(" + PName + ")";
     else
       List += PName;
-    if (MD->getParamDecl(I)->isParameterPack())
+    if (Pack)
       List += "...";
   }
   return List;

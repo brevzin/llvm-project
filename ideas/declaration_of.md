@@ -171,6 +171,37 @@ writer-side diagnostic).
 - The `<meta>` comment on `declaration_of` now enumerates every kind of
   reflection it accepts, and what the description is for each.
 
+**`make_macro`** (added 2026-10-29): a description can declare a member
+*expression macro* instead of a function.
+- What changes: the same name, template head and parameters, plus an
+  explicit object parameter `self` (type `Self&&`, with `Self` appended to the
+  head after the source's own parameters).
+- The source's cv- and ref-qualifiers become constraints on `Self`. A
+  non-const source isn't selected for a const object, an `&`-qualified one
+  not for an rvalue, and so on.
+- `argument_list_for(md)` spells the parameters as
+  interpolations (`\(p0), \(p1...)`) for the expansion written in the macro's
+  body. Inside the macro's literal, the generator reaches its own level with
+  `\\(...)`, and `$self` is the macro's object expression.
+- `overload_macro` in
+  [overload-object.pass.cpp](../libcxx/test/std/experimental/reflection/overload-object.pass.cpp)
+  uses it. Its call operators are macros with the callables' signatures:
+  - overload resolution ranks them like functions;
+  - the selected one expands to a direct call of the callable with the
+    caller's argument expressions, so there is no intermediate parameter
+    object;
+  - at -O2 it matches the classic inheritance version instruction for
+    instruction, including the lvalue case where a forwarding clone keeps an
+    extra move;
+  - a non-movable by-value parameter can be initialized from a prvalue, even
+    for a `final` callable.
+- Two problems found while writing it, not yet fixed:
+  - interpolating a by-reference lambda capture (in a helper lambda inside
+    the generator) fails with "read of non-const variable";
+  - `\\(m)` of a member function reflection in member-access position
+    (`$self.src.\\(m)(...)`) makes the generated macro fail. Splicing
+    `id(identifier_of(m))` works.
+
 ## The problem
 
 The forwarding-wrapper exercise (Alexandrescu's `LoggingVector<T>`: wrap
