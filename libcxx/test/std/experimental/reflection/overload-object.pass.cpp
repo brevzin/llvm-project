@@ -17,7 +17,8 @@
 // came from. Overload resolution among them is ordinary overload resolution,
 // so the best match wins, exactly as with 'struct overload : Fs... { using
 // Fs::operator()...; }'. Unlike that, it also takes final classes and
-// function pointers.
+// function pointers (whose call operator is declared from the pointee's
+// function type).
 
 #include <cassert>
 #include <meta>
@@ -27,31 +28,27 @@
 
 using namespace std::meta;
 
-// A function pointer, as a callable class with the pointer's signature.
-template <class F> struct fn_ptr;
-template <class R, class... A> struct fn_ptr<R (*)(A...)> {
-  R (*p)(A...);
-  constexpr R operator()(A... a) const { return p(static_cast<A &&>(a)...); }
-};
-template <class F> struct as_callable { using type = F; };
-template <class R, class... A> struct as_callable<R (*)(A...)> {
-  using type = fn_ptr<R (*)(A...)>;
-};
-
 template <class... Fs> struct overload {
-  std::tuple<typename as_callable<Fs>::type...> fs;
+  std::tuple<Fs...> fs;
   constexpr overload(Fs... f) : fs{f...} {}
 
   consteval {
     token_sequence ts;
     std::size_t i = 0;
-    for (info F : {^^typename as_callable<Fs>::type...}) {
-      if (auto call = lookup(F, operators::op_parentheses,
-                             access_context::unchecked()))
+    for (info F : {^^Fs...}) {
+      // A function pointer: a call operator of its function type.
+      if (is_pointer_type(F) && is_function_type(remove_pointer(F))) {
+        auto d = make_const(
+            declaration_of(remove_pointer(F), {.name = operators::op_parentheses}));
+        ts += ^^{ \(d) { return std::get<\(i)>(fs)(\(argument_list_for(d))); } };
+      } else if (auto call = lookup(F, operators::op_parentheses,
+                                    access_context::unchecked())) {
+        // A class: each of its call operators.
         for (info m : overloads_of(*call)) {
           auto d = declaration_of(m);
           ts += ^^{ \(d) { return std::get<\(i)>(fs)(\(argument_list_for(d))); } };
         }
+      }
       ++i;
     }
     queue_injection(ts);

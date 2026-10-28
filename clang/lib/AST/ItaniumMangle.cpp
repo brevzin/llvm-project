@@ -5113,12 +5113,16 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
       mangleRequiresClause(TRC);
     if (FDS->Name)
       Out << "N$" << *FDS->Name << '$';
+    if (FDS->NameOperator != OO_None)
+      Out << "Op$" << unsigned(FDS->NameOperator) << '$';
     Out << "T$" << FDS->TemplateParameterPrefix << '$';
     Out << "P$" << FDS->ParameterPrefix << '$';
     if (FDS->MarkOverride)
       Out << 'O';
     if (FDS->MarkNoexcept)
       Out << 'X';
+    if (FDS->MarkConst)
+      Out << 'K';
     break;
   }
   case ReflectionKind::Expression:

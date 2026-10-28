@@ -180,7 +180,7 @@ struct Renamed {
   mutable int calls = 0;
 
   consteval {
-    auto d = declaration_of(^^Impl::plain, {.name = ^^{ renamed_plain }});
+    auto d = declaration_of(^^Impl::plain, {.name = "renamed_plain"});
     auto call = forwarding_call_for(d, ^^{ impl });
     queue_injection(^^{
       \(d) {
@@ -511,14 +511,14 @@ struct W {
 
   consteval {
     // Forwarded: the by-value Tracer is moved into the inner call.
-    auto fd = std::meta::declaration_of(^^U::take, {.name = ^^{ fwd }});
+    auto fd = std::meta::declaration_of(^^U::take, {.name = "fwd"});
     queue_injection(^^{
       \(fd) { return \(std::meta::forwarding_call_for(fd, ^^{ impl })); }
     });
 
     // Lvalue mode: the same call copies, and the wrapper can still use the
     // argument afterwards.
-    auto ld = std::meta::declaration_of(^^U::take, {.name = ^^{ lval }});
+    auto ld = std::meta::declaration_of(^^U::take, {.name = "lval"});
     queue_injection(^^{
       \(ld) {
         int r = (impl).take(\(std::meta::argument_list_for(
@@ -528,7 +528,7 @@ struct W {
     });
 
     // forwarding_call_for grew the same option.
-    auto cd = std::meta::declaration_of(^^U::take, {.name = ^^{ lcall }});
+    auto cd = std::meta::declaration_of(^^U::take, {.name = "lcall"});
     queue_injection(^^{
       \(cd) {
         return \(std::meta::forwarding_call_for(cd, ^^{ impl },
@@ -649,6 +649,55 @@ struct LambdaClone {
   }
 };
 static_assert(LambdaClone{}(7) == 7);
+
+// A function type: a member function of that type, its qualifiers included,
+// named as given (often an operator).
+struct FromFunctionTypes {
+  consteval {
+    using std::meta::declaration_of;
+    queue_injection(^^{
+      \(declaration_of(^^int(int, double), {.name = "f"})) { return p0 + int(p1); }
+      \(declaration_of(^^int(int) const, {.name = std::meta::operators::op_parentheses})) { return p0 * 2; }
+      \(declaration_of(^^bool(FromFunctionTypes const&) const, {.name = std::meta::operators::op_equals_equals})) { return &p0 == &p0; }
+      \(std::meta::make_const(declaration_of(^^int(long), {.name = "g"}))) { return int(p0) + 6; }
+    });
+  }
+};
+static_assert(FromFunctionTypes{}.f(1, 2.5) == 3);
+static_assert(FromFunctionTypes{} == FromFunctionTypes{});
+constexpr FromFunctionTypes from_function_types;
+static_assert(from_function_types(21) == 42); // const, from the type
+static_assert(from_function_types.g(1L) == 7); // const, from make_const
+static_assert(!std::meta::has_identifier(std::meta::declaration_of(
+    ^^int(), {.name = std::meta::operators::op_parentheses})));
+static_assert(std::meta::identifier_of(std::meta::declaration_of(
+                  ^^int(), {.name = "h"})) == "h");
+
+// Renaming a member function to an operator.
+struct CallSource {
+  constexpr int call(int x) const { return x + 1; }
+};
+struct CallDest {
+  CallSource s;
+  consteval {
+    auto d = std::meta::declaration_of(^^CallSource::call,
+                                       {.name = std::meta::operators::op_parentheses});
+    queue_injection(^^{ \(d) { return s.call(\(std::meta::argument_list_for(d))); } });
+  }
+};
+static_assert(CallDest{}(1) == 2);
+
+// A computed name (not a literal: read from the string's buffer).
+struct ComputedName {
+  CallSource s;
+  consteval {
+    std::string name = "call";
+    name += "_again";
+    auto d = std::meta::declaration_of(^^CallSource::call, {.name = name});
+    queue_injection(^^{ \(d) { return s.call(\(std::meta::argument_list_for(d))); } });
+  }
+};
+static_assert(ComputedName{}.call_again(2) == 3);
 
 int main() {
   if (use_all() != 1)

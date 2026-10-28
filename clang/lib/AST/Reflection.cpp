@@ -143,12 +143,12 @@ bool TagDataMemberSpec::operator!=(TagDataMemberSpec const &Rhs) const {
 }
 
 bool FunctionDeclSpec::operator==(FunctionDeclSpec const &Rhs) const {
-  return (Source == Rhs.Source &&
-          Name == Rhs.Name &&
+  return (Source == Rhs.Source && Name == Rhs.Name &&
           TemplateParameterPrefix == Rhs.TemplateParameterPrefix &&
           ParameterPrefix == Rhs.ParameterPrefix &&
+          NameOperator == Rhs.NameOperator &&
           MarkOverride == Rhs.MarkOverride &&
-          MarkNoexcept == Rhs.MarkNoexcept);
+          MarkNoexcept == Rhs.MarkNoexcept && MarkConst == Rhs.MarkConst);
 }
 
 bool FunctionDeclSpec::operator!=(FunctionDeclSpec const &Rhs) const {

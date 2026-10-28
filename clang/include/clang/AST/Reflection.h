@@ -248,11 +248,16 @@ struct TagDataMemberSpec {
 /// description creates fresh declarations each time.
 struct FunctionDeclSpec {
   /// The source: a CXXMethodDecl or a FunctionTemplateDecl whose templated
-  /// declaration is a CXXMethodDecl.
+  /// declaration is a CXXMethodDecl. (For a description of a function type,
+  /// an implicit prototype member of that type; see
+  /// MetaActions::FunctionTypePrototype.)
   NamedDecl *Source;
 
   /// Replacement declaration name; empty means keep the source's name.
   std::optional<std::string> Name;
+
+  /// Replacement operator function name (instead of an identifier).
+  OverloadedOperatorKind NameOperator = OO_None;
 
   /// Prefixes for renaming template parameters (-> T0, T1, ...) and function
   /// parameters (-> p0, p1, ...).
@@ -264,6 +269,8 @@ struct FunctionDeclSpec {
   /// 'override', and/or declare it noexcept.
   bool MarkOverride = false;
   bool MarkNoexcept = false;
+  /// std::meta::make_const: declare the clone a const member function.
+  bool MarkConst = false;
 
   bool operator==(FunctionDeclSpec const &Rhs) const;
   bool operator!=(FunctionDeclSpec const &Rhs) const;

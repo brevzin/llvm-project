@@ -6642,6 +6642,10 @@ public:
 
   bool isAbstractType(SourceLocation Loc, QualType T);
 
+  /// Implicit prototype members for std::meta::declaration_of of a function
+  /// type, by (sugared) type.
+  llvm::DenseMap<void *, CXXMethodDecl *> FunctionTypePrototypes;
+
   /// Whether \p T is an implicit-lifetime type ([basic.types.general]p9).
   /// \p T must be complete (or an array or void).
   bool isImplicitLifetimeType(QualType T);

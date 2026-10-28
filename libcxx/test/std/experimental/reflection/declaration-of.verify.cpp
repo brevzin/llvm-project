@@ -51,9 +51,9 @@ constexpr auto r4 = std::meta::declaration_of(^^S::field);
 // expected-note@*:* {{cannot produce a declaration description: operand does not designate a function or function template}}
 
 constexpr auto r5 = std::meta::declaration_of(
-    ^^S::ok, {.name = ^^{ not one token }});
+    ^^S::ok, {.name = "not one token"});
 // expected-error@-2 {{constexpr variable 'r5' must be initialized by a constant expression}}
-// expected-note@*:* {{cannot produce a declaration description: the replacement name must be a single identifier token}}
+// expected-note@*:* {{'not one token' is not a valid identifier}}
 
 constexpr auto r6 = std::meta::declaration_of(^^Dependent<int>::member);
 // OK: member of a concrete specialization.
@@ -112,7 +112,7 @@ constexpr auto h = std::meta::declaration_of(^^CT);
 static_assert(std::meta::is_declaration_spec(h));
 
 // Renaming a head description is meaningless.
-constexpr auto h1 = std::meta::declaration_of(^^CT, {.name = ^^{ renamed }});
+constexpr auto h1 = std::meta::declaration_of(^^CT, {.name = "renamed"});
 // expected-error@-1 {{constexpr variable 'h1' must be initialized by a constant expression}}
 // expected-note@*:* {{cannot produce a declaration description: a class template head description cannot be renamed}}
 
@@ -178,3 +178,25 @@ struct LazyW {
 static_assert(LazyW{}.k<void>(7) == 7);  // the default is not needed
 constexpr int lazy_bad = LazyW{}.k<void>();
 // expected-note@-1 {{in instantiation of default function argument expression for 'k<void>' required here}}
+
+// Function types: a name is required, and it must be an identifier or an
+// operator function name; C variadic function types are refused.
+constexpr auto ft1 = std::meta::declaration_of(^^int(int));
+// expected-error@-1 {{constexpr variable 'ft1' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: a function type has no name: a replacement name is required}}
+constexpr auto ft2 = std::meta::declaration_of(^^int(int), {.name = ""});
+// expected-error@-1 {{constexpr variable 'ft2' must be initialized by a constant expression}}
+// expected-note@*:* {{'' is not a valid identifier}}
+constexpr auto ft3 = std::meta::declaration_of(^^int(int, ...), {.name = "f"});
+// expected-error@-1 {{constexpr variable 'ft3' must be initialized by a constant expression}}
+// expected-note@*:* {{cannot produce a declaration description: C variadic function types are not supported}}
+
+// A clone renamed to an operator must be a valid operator declaration.
+struct BadOperator {
+  consteval {
+    queue_injection(^^{
+      \(std::meta::declaration_of(^^bool(int, int, int), {.name = std::meta::operators::op_equals_equals})) { return true; }
+    });
+  }
+};
+// expected-error@*:* {{overloaded 'operator==' must be a binary operator (has 4 parameters)}}

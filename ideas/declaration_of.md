@@ -141,6 +141,36 @@ redeclaration/overload checking against existing members is not performed;
 descriptions do not serialize to PCH (round-trip as null with the usual
 writer-side diagnostic).
 
+**Function types, operator names, `make_const`** (added 2026-10-29):
+
+- `declaration_of(^^R(A...), {.name = ...})` describes a non-template,
+  constexpr, non-static member function of that type. A qualified type
+  (`int(int) const &`) gives the member its cv- and ref-qualifiers. A name is
+  required, and C variadic types are refused.
+  - Implementation: Sema makes an implicit prototype member of exactly that
+    type, in a hidden class, cached per type
+    (`MetaActions::FunctionTypePrototype`). The description's `Source` stays
+    a `CXXMethodDecl`, so every consumer (clone, `argument_list_for`,
+    mangling, equality) works unchanged.
+- `clone_naming::name` is an `optional<declaration_name>`: an identifier
+  (`"name"`, ordinary or UTF-8) or an operator (`operators::op_parentheses`).
+  It replaced a `token_sequence`, which accepted anything and couldn't be
+  computed from a string without `id(...)`. `lookup` takes the same type.
+  A `declaration_name` views its characters rather than copying them, and
+  the compiler copies a string literal's bytes directly, so a literal name
+  costs no allocation and no per-character evaluation. An operator clone is
+  checked like a written operator declaration (arity, etc.).
+- `make_const(d)`, beside `make_noexcept`/`make_override`, declares the clone
+  `const`. A call operator made from a function pointer's function type needs
+  it, since there's no metafunction to add `const` to a function type.
+- The motivating use is `overload(fs...)`
+  ([overload-object.pass.cpp](../libcxx/test/std/experimental/reflection/overload-object.pass.cpp)):
+  a function pointer's call operator is
+  `make_const(declaration_of(remove_pointer(F), {.name = operators::op_parentheses}))`,
+  with no wrapper class.
+- The `<meta>` comment on `declaration_of` now enumerates every kind of
+  reflection it accepts, and what the description is for each.
+
 ## The problem
 
 The forwarding-wrapper exercise (Alexandrescu's `LoggingVector<T>`: wrap
@@ -283,9 +313,9 @@ The name is a declaration-name token sequence, validated for the kind of
 declaration being cloned:
 
 ```cpp
-auto renamed = declaration_of(m, {.name = ^^{ renamed }});
-auto plus = declaration_of(m, {.name = ^^{ operator+ }}); // if the signature permits
-auto computed = declaration_of(m, {.name = ^^{ \(id("prefix_", identifier_of(m))) }});
+auto renamed = declaration_of(m, {.name = "renamed"});
+auto plus = declaration_of(m, {.name = operators::op_plus}); // if the signature permits
+auto computed = declaration_of(m, {.name = "prefix_" + std::string(identifier_of(m))});
 ```
 
 The result is an `info` describing a declaration to be introduced, analogous

@@ -535,6 +535,39 @@ public:
     return Result.get();
   }
 
+  CXXMethodDecl *FunctionTypePrototype(QualType FnTy,
+                                       SourceLocation Loc) override {
+    CXXMethodDecl *&MD = S.FunctionTypePrototypes[FnTy.getAsOpaquePtr()];
+    if (MD)
+      return MD;
+    ASTContext &Ctx = S.Context;
+    auto *RD = CXXRecordDecl::Create(
+        Ctx, TagTypeKind::Struct, Ctx.getTranslationUnitDecl(), Loc, Loc,
+        &Ctx.Idents.get("__function_type_prototype"));
+    RD->setImplicit();
+    RD->startDefinition();
+    TypeSourceInfo *TSI = Ctx.getTrivialTypeSourceInfo(FnTy, Loc);
+    MD = CXXMethodDecl::Create(
+        Ctx, RD, Loc, DeclarationNameInfo(&Ctx.Idents.get("__call"), Loc), FnTy,
+        TSI, SC_None, /*UsesFPIntrin=*/false, /*isInline=*/true,
+        ConstexprSpecKind::Constexpr, Loc);
+    const auto *FPT = FnTy->castAs<FunctionProtoType>();
+    SmallVector<ParmVarDecl *, 4> Params;
+    for (QualType PT : FPT->getParamTypes()) {
+      auto *P = ParmVarDecl::Create(Ctx, MD, Loc, Loc, nullptr, PT,
+                                    Ctx.getTrivialTypeSourceInfo(PT, Loc),
+                                    SC_None, nullptr);
+      P->setScopeInfo(0, Params.size());
+      Params.push_back(P);
+    }
+    MD->setParams(Params);
+    MD->setAccess(AS_public);
+    MD->setImplicit();
+    RD->addDecl(MD);
+    RD->completeDefinition();
+    return MD;
+  }
+
   bool LookupQualified(DeclContext *DC, DeclarationName Name,
                        SourceLocation Loc,
                        SmallVectorImpl<NamedDecl *> &Found) override {
@@ -2406,6 +2439,10 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   // ... unless the description was transformed with make_noexcept.
   if (Spec->MarkNoexcept)
     EPI.ExceptionSpec = FunctionProtoType::ExceptionSpecInfo(EST_BasicNoexcept);
+  // ... and declared const if the description was transformed with
+  // make_const.
+  if (Spec->MarkConst)
+    EPI.TypeQuals.addConst();
   QualType NewFT = Context.getFunctionType(NewRet, NewParamTys, EPI);
   TypeSourceInfo *NewFTSI = Context.getTrivialTypeSourceInfo(NewFT, Loc);
   if (auto ProtoLoc =
@@ -2438,6 +2475,8 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
   DeclarationName Name = SrcMD->getDeclName();
   if (Spec->Name)
     Name = DeclarationName(&Context.Idents.get(*Spec->Name));
+  else if (Spec->NameOperator != OO_None)
+    Name = Context.DeclarationNames.getCXXOperatorName(Spec->NameOperator);
 
   auto *Method = CXXMethodDecl::Create(
       Context, RD, Loc, DeclarationNameInfo(Name, Loc), NewFT, NewFTSI,
@@ -2471,6 +2510,15 @@ NamedDecl *Sema::ActOnInjectedFunctionDeclSpec(Scope *S, FunctionDeclSpec *Spec,
     NewFTD->setAccess(AS);
     NewFTD->setLexicalDeclContext(CurContext);
     Introduced = NewFTD;
+  }
+
+  // Renamed to an operator: it must be a valid declaration of one, as a
+  // written one would have to be.
+  // (That check diagnoses what's wrong.)
+  if (Spec->NameOperator != OO_None &&
+      CheckOverloadedOperatorDeclaration(Method)) {
+    Method->setInvalidDecl();
+    return nullptr;
   }
 
   // As for any declaration (see CheckFunctionDeclaration): a placeholder

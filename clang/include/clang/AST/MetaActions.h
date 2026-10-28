@@ -151,6 +151,13 @@ public:
   // invocation of the macro being evaluated (else at \p Loc). Null on error.
   virtual Expr *DefaultArgument(ParmVarDecl *Param, SourceLocation Loc) = 0;
 
+  // The source std::meta::declaration_of clones for a function type \p FnTy
+  // (possibly cv- and ref-qualified): an implicit, constexpr, non-static
+  // member function of exactly that type, in an implicit class of its own,
+  // not visible to lookup. The same one for the same type.
+  virtual CXXMethodDecl *FunctionTypePrototype(QualType FnTy,
+                                               SourceLocation Loc) = 0;
+
   // Qualified name lookup of \p Name in \p DC, as for 'DC::Name'
   // ([namespace.qual], [class.member.lookup]): the declarations found, as
   // found (a using-declaration's shadow, say). False, without diagnostics, if

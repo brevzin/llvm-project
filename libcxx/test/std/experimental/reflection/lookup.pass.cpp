@@ -18,6 +18,8 @@
 
 #include <meta>
 #include <optional>
+#include <string>
+#include <string_view>
 
 using std::meta::info;
 using std::meta::operators;
@@ -66,6 +68,21 @@ static_assert(lookup(^^::, "N", unchecked) == ^^N);
 static_assert([: *lookup(^^N, "two", unchecked) :](1.0) == 2);
 static_assert(sizeof(typename[: *lookup(^^N, "C", unchecked) :]) ==
               sizeof(N::C));
+
+// A computed name, not only a literal: in a string's own buffer, on the heap,
+// or in a local array.
+consteval bool computed_names() {
+  std::string small = "var";
+  std::string large = "var";
+  large.reserve(100); // now in a heap allocation
+  const char buf[] = {'o', 'n', 'e'};
+  // (Parenthesized: '^^N::var && ...' misparses; a separate parser issue.)
+  return (lookup(^^N, small, unchecked) == ^^N::var) &&
+         (lookup(^^N, large, unchecked) == ^^N::var) &&
+         (lookup(^^N, std::string_view(buf, 3), unchecked) == ^^N::one) &&
+         (lookup(^^N, u8"var", unchecked) == ^^N::var);
+}
+static_assert(computed_names());
 
 // Classes.
 struct Base {

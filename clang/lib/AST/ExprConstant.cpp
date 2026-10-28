@@ -11712,8 +11712,14 @@ public:
       } else if (Tok.is(tok::annot_decl_spec)) {
         const auto *FDS =
             static_cast<const FunctionDeclSpec *>(Tok.getAnnotationValue());
-        OS << "<declaration of '" << FDS->Source->getQualifiedNameAsString()
-           << "'>";
+        // (A function type's description clones an implicit prototype.)
+        if (FDS->Source->isImplicit())
+          OS << "<declaration of function type '"
+             << cast<FunctionDecl>(FDS->Source)->getType().getAsString(Policy)
+             << "'>";
+        else
+          OS << "<declaration of '" << FDS->Source->getQualifiedNameAsString()
+             << "'>";
       } else if (Tok.is(tok::annot_template_param_spec)) {
         const auto *TPS = static_cast<const TemplateParamListSpec *>(
             Tok.getAnnotationValue());

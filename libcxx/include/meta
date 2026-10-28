@@ -347,9 +347,11 @@ consteval auto default_argument_of(info) -> info;
 consteval auto hidden_friends_of(info) -> vector<info>;
 consteval auto interface_of(info, access_context) -> vector<info>;
 
+// names of declarations (P2996 ext)
+class declaration_name;
+
 // name lookup (P2996 ext)
-consteval auto lookup(info, string_view, access_context) -> optional<info>;
-consteval auto lookup(info, operators, access_context) -> optional<info>;
+consteval auto lookup(info, declaration_name, access_context) -> optional<info>;
 
 // overload sets (P2996 ext)
 consteval auto is_overload_set(info) -> bool;
@@ -607,6 +609,7 @@ enum : unsigned {
   __metafn_is_overload_set,
   __metafn_make_overload_set,
   __metafn_lookup,
+  __metafn_make_const,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1022,6 +1025,45 @@ enum class operators {
   op_less_less_equals, op_greater_greater_equals, op_plus_plus, op_minus_minus,
   op_comma,
 };
+
+// The name of a declaration, as the metafunctions that look up or declare
+// one take it: an identifier -- an ordinary or UTF-8 string ("name") -- or an
+// operator function name (operators::op_parentheses for 'operator()').
+//
+// It refers to the characters it was given rather than copying them (a
+// string literal costs nothing), so they must outlive its use: normally the
+// full-expression it's created in.
+class declaration_name {
+  operators __op_ = {};
+  bool __is_u8_ = false;
+  string_view __s_;
+  u8string_view __u8_;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-private-field"
+  info __consteval_only_ = ^^::;
+#pragma clang diagnostic pop
+
+public:
+  consteval declaration_name(operators __op) : __op_(__op) {}
+
+  template <class _Tp>
+    requires convertible_to<_Tp, string_view>
+  consteval declaration_name(_Tp&& __s) : __s_(string_view(__s)) {}
+
+  template <class _Tp>
+    requires(convertible_to<_Tp, u8string_view> &&
+             !convertible_to<_Tp, string_view>)
+  consteval declaration_name(_Tp&& __s)
+      : __is_u8_(true), __u8_(u8string_view(__s)) {}
+
+  // For the metafunctions: the operator (zero for an identifier), and the
+  // identifier's characters.
+  consteval auto __operator() const -> size_t { return size_t(__op_); }
+  consteval auto __is_u8() const -> bool { return __is_u8_; }
+  consteval auto __chars() const -> string_view { return __s_; }
+  consteval auto __u8chars() const -> u8string_view { return __u8_; }
+};
+
 using enum operators;
 
 // Returns the operator overloaded by the represented operator function or
@@ -1332,22 +1374,19 @@ consteval auto make_overload_set(R &&r) -> info {
 // enumeration), as for 'scope::name': what it finds, reflected as ^^ would --
 // an entity, or an overload set. Nothing if the lookup finds nothing, is
 // ambiguous, or finds nothing accessible in 'ctx' (of an overloaded name,
-// only the accessible candidates are kept).
-consteval auto lookup(info scope, string_view name, access_context ctx)
+// only the accessible candidates are kept). 'name' is an identifier ("x") or
+// an operator function name (operators::op_equals_equals).
+consteval auto lookup(info scope, declaration_name name, access_context ctx)
     -> optional<info> {
-  info r = __metafunction(detail::__metafn_lookup, scope, name.data(),
-                          name.size(), size_t(0), ctx.scope(),
-                          ctx.designating_class());
-  if (r == info())
-    return nullopt;
-  return r;
-}
-
-// As above, for an operator function name: 'operator==', say.
-consteval auto lookup(info scope, operators op, access_context ctx)
-    -> optional<info> {
-  info r = __metafunction(detail::__metafn_lookup, scope, "", size_t(0),
-                          size_t(op), ctx.scope(), ctx.designating_class());
+  info r = name.__is_u8()
+               ? __metafunction(detail::__metafn_lookup, scope,
+                                name.__u8chars().data(),
+                                name.__u8chars().size(), name.__operator(),
+                                ctx.scope(), ctx.designating_class())
+               : __metafunction(detail::__metafn_lookup, scope,
+                                name.__chars().data(), name.__chars().size(),
+                                name.__operator(), ctx.scope(),
+                                ctx.designating_class());
   if (r == info())
     return nullopt;
   return r;
@@ -3612,9 +3651,11 @@ consteval auto expand_at_instantiation() -> void {
 
 // Naming policy for declaration_of.
 struct clone_naming {
-  // Replacement declaration name; an empty sequence keeps the source's name
-  // (including operator names).
-  token_sequence name;
+  // Replacement declaration name: an identifier ("name") or an operator
+  // function name (operators::op_parentheses). Without one, the source's name
+  // is kept (including an operator name); a function type, which has no name
+  // of its own, requires one.
+  optional<declaration_name> name;
 
   // Renaming prefixes: template parameters become T0, T1, ...; function
   // parameters become p0, p1, ....
@@ -3622,26 +3663,68 @@ struct clone_naming {
   string_view parameter_prefix = "p";
 };
 
-// Returns a reflection describing a clone of the member function (or member
-// function template) designated by 'fn': same template head, constraints,
-// parameters (with their default arguments), cv/ref-qualifiers, and return
-// type, with template and function parameters renamed per 'naming'. noexcept
-// is deliberately not cloned: the new body has its own exception behavior.
-//
-// The description does not yet declare anything. Interpolating it with \(d)
-// in member-declaration position of a class definition declares the described
-// function there, followed by its new body:
+// declaration_of(r, naming): a *declaration description* -- a reflection that
+// declares nothing yet. Interpolated with \(d) in member-declaration position
+// of a class definition, it declares the described member function there,
+// followed by a body (or ';'):
 //
 //   ^^{ \(d) { return \(call); } }
 //
-// Reusing the description in another class creates fresh declarations.
+// Each interpolation declares a fresh function; one description can be used
+// in many classes. The fragment accessors below (argument_list_for,
+// forwarding_call_for, ...) spell calls and lists that match it.
+//
+// What 'r' may reflect, and what the description is:
+//
+// 1. A non-static member function -- not a constructor, destructor, or
+//    conversion function, and not deleted or defaulted (a pure virtual one
+//    is fine). The description is a member function with the same
+//    parameters (types and default arguments), return type, cv- and
+//    ref-qualifiers, constexpr-ness, and trailing requires-clause, and the
+//    same name unless renamed.
+//
+// 2. A non-static member function template. As (1), and with the same
+//    template head: its template parameters (kinds, defaults,
+//    type-constraints) and requires-clause. A lambda's call operator is a
+//    member function (1) or, for a generic lambda, a member function
+//    template (2).
+//
+// 3. A function type 'R(A...)', possibly cv- and ref-qualified
+//    ('int(int) const &'). The description is a non-template, constexpr,
+//    non-static member function of that type: parameters of the types A...,
+//    return type R, and the type's qualifiers as its cv- and ref-qualifiers.
+//    A function type has no name: 'naming.name' is required (an operator
+//    name, often: operators::op_parentheses). Not a C variadic function type
+//    ('R(A..., ...)').
+//
+// 4. A class template. The description is only its template head, for
+//    template_parameter_list_for and template_argument_list_for; it can't be
+//    interpolated or renamed.
+//
+// In every case:
+// - template parameters are renamed T0, T1, ... and function parameters p0,
+//   p1, ..., per 'naming';
+// - the exception specification is never part of the description (the new
+//   body has its own); make_noexcept asks for noexcept explicitly;
+// - the transformations below (make_override, make_noexcept, make_const)
+//   each give a new description, leaving the original unchanged.
 consteval auto declaration_of(info fn, clone_naming naming = {}) -> info {
-  return __metafunction(detail::__metafn_declaration_of, fn,
-                        naming.name,
-                        naming.template_parameter_prefix.size(),
-                        naming.template_parameter_prefix.data(),
-                        naming.parameter_prefix.size(),
-                        naming.parameter_prefix.data());
+  string_view __tp = naming.template_parameter_prefix;
+  string_view __p = naming.parameter_prefix;
+  if (!naming.name)
+    return __metafunction(detail::__metafn_declaration_of, fn, false, "",
+                          size_t(0), size_t(0), __tp.size(), __tp.data(),
+                          __p.size(), __p.data());
+  const declaration_name& __n = *naming.name;
+  if (__n.__is_u8())
+    return __metafunction(detail::__metafn_declaration_of, fn, true,
+                          __n.__u8chars().data(), __n.__u8chars().size(),
+                          __n.__operator(), __tp.size(), __tp.data(),
+                          __p.size(), __p.data());
+  return __metafunction(detail::__metafn_declaration_of, fn, true,
+                        __n.__chars().data(), __n.__chars().size(),
+                        __n.__operator(), __tp.size(), __tp.data(), __p.size(),
+                        __p.data());
 }
 
 // Returns true if 'r' is a declaration description produced by
@@ -3663,6 +3746,13 @@ consteval auto is_declaration_spec(info r) -> bool {
 // template descriptions (a template cannot be virtual).
 consteval auto make_override(info d) -> info {
   return __metafunction(detail::__metafn_make_override, d);
+}
+
+// make_const: the injected clone is declared a const member function -- for
+// a call operator made from a function type, say, which has no 'const' of
+// its own to clone.
+consteval auto make_const(info d) -> info {
+  return __metafunction(detail::__metafn_make_const, d);
 }
 
 // make_noexcept: the injected clone is declared noexcept. declaration_of

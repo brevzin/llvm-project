@@ -865,6 +865,10 @@ static bool lookup(APValue &Result, ASTContext &C, MetaActions &Meta,
                    EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                    QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
                    Decl *ContainingDecl);
+static bool make_const(APValue &Result, ASTContext &C, MetaActions &Meta,
+                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                       QualType ResultTy, SourceRange Range,
+                       ArrayRef<Expr *> Args, Decl *ContainingDecl);
 static bool is_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
                             EvalFn Evaluator, DiagFn Diagnoser,
                             bool AllowInjection, QualType ResultTy,
@@ -1086,7 +1090,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_metaInfo, 1, 1, as_lvalue},
     {Metafunction::MFRK_metaInfo, 0, 0, macro_expansion_context,
      /*WantsMacroExpansionContext=*/true},
-    {Metafunction::MFRK_metaInfo, 6, 6, declaration_of},
+    {Metafunction::MFRK_metaInfo, 9, 9, declaration_of},
     {Metafunction::MFRK_tokenSequence, 3, 3, forwarding_call_for},
     {Metafunction::MFRK_bool, 1, 1, is_declaration_spec},
     {Metafunction::MFRK_metaInfo, 1, 1, make_override},
@@ -1109,6 +1113,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_bool, 1, 1, is_overload_set},
     {Metafunction::MFRK_metaInfo, 2, 2, make_overload_set},
     {Metafunction::MFRK_metaInfo, 6, 6, lookup},
+    {Metafunction::MFRK_metaInfo, 1, 1, make_const},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3127,6 +3132,9 @@ bool identifier_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     FunctionDeclSpec *FDS = RV.getReflectedFunctionDeclSpec();
     if (FDS->Name)
       Name = *FDS->Name;
+    else if (FDS->NameOperator != OO_None)
+      return Diagnoser(Range.getBegin(), diag::metafn_name_is_not_identifier)
+             << 3 << Range;
     else if (IdentifierInfo *II = FDS->Source->getIdentifier())
       Name = II->getName();
     break;
@@ -3241,7 +3249,9 @@ bool has_identifier(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::DeclarationSpec: {
     FunctionDeclSpec *FDS = RV.getReflectedFunctionDeclSpec();
     HasIdentifier = FDS->Name ? !FDS->Name->empty()
-                              : FDS->Source->getIdentifier() != nullptr;
+                    : FDS->NameOperator != OO_None
+                        ? false
+                        : FDS->Source->getIdentifier() != nullptr;
     break;
   }
   case ReflectionKind::Null:
@@ -3951,30 +3961,87 @@ bool expand_at_instantiation(APValue &Result, ASTContext &C, MetaActions &Meta,
 // Reads a (length, const char *) argument pair produced by flattening a
 // string_view in the library wrapper. Mirrors the technique used by
 // data_member_spec.
+// Reads 'Len' characters (char or char8_t) at the pointer 'DataArg'. A string
+// literal -- the usual case for a name -- is copied directly; anything else
+// (a std::string's buffer, say) is read one character at a time.
+static bool readCharacters(ASTContext &C, EvalFn Evaluator, SourceRange Range,
+                           Expr *DataArg, uint64_t Len, std::string &Out) {
+  Out.clear();
+  if (Len == 0)
+    return true;
+
+  // (The pointer itself, which may point into a local or heap object: no
+  // constant-expression check on it.)
+  APValue Ptr;
+  if (!Evaluator(Ptr, DataArg, /*ConvertToRValue=*/false))
+    return false;
+  if (Ptr.isLValue() && !Ptr.isNullPointer())
+    if (const auto *E = Ptr.getLValueBase().dyn_cast<const Expr *>())
+      if (const auto *SL = dyn_cast<StringLiteral>(E);
+          SL && SL->getCharByteWidth() == 1) {
+        uint64_t Offset = Ptr.getLValueOffset().getQuantity();
+        StringRef Bytes = SL->getBytes();
+        if (Offset + Len <= Bytes.size()) {
+          Out.assign(Bytes.data() + Offset, Len);
+          return true;
+        }
+      }
+
+  QualType CharTy = DataArg->getType()->getPointeeType();
+  Out.assign(Len, '\0');
+  for (uint64_t K = 0; K < Len; ++K) {
+    llvm::APInt Idx(C.getTypeSize(C.getSizeType()), K, false);
+    Expr *Synthesized = IntegerLiteral::Create(C, Idx, C.getSizeType(),
+                                               DataArg->getExprLoc());
+    Synthesized = new (C) ArraySubscriptExpr(
+        DataArg, Synthesized, CharTy, VK_LValue, OK_Ordinary, Range.getBegin());
+    if (Synthesized->isValueDependent() || Synthesized->isTypeDependent())
+      return false;
+    APValue Char;
+    if (!Evaluator(Char, Synthesized, true))
+      return false;
+    Out[K] = static_cast<char>(Char.getInt().getExtValue());
+  }
+  return true;
+}
+
 static bool readStringArguments(ASTContext &C, EvalFn Evaluator,
                                 SourceRange Range, Expr *LenArg, Expr *DataArg,
                                 std::string &Out) {
   APValue Scratch;
   if (!Evaluator(Scratch, LenArg, true))
     return false;
-  size_t Len = Scratch.getInt().getExtValue();
-  Out.assign(Len, '\0');
+  return readCharacters(C, Evaluator, Range, DataArg,
+                        Scratch.getInt().getZExtValue(), Out);
+}
 
-  for (uint64_t K = 0; K < Len; ++K) {
-    llvm::APInt Idx(C.getTypeSize(C.getSizeType()), K, false);
-    Expr *Synthesized = IntegerLiteral::Create(C, Idx, C.getSizeType(),
-                                               DataArg->getExprLoc());
-    Synthesized = new (C) ArraySubscriptExpr(DataArg, Synthesized,
-                                             C.getConstType(C.CharTy),
-                                             VK_LValue, OK_Ordinary,
-                                             Range.getBegin());
-    if (Synthesized->isValueDependent() || Synthesized->isTypeDependent())
-      return false;
-    if (!Evaluator(Scratch, Synthesized, true))
-      return false;
-    Out[K] = static_cast<char>(Scratch.getInt().getExtValue());
+// Reads a std::meta::declaration_name, passed as (data, size, operator): an
+// operator function name if 'operator' is nonzero, else an identifier, which
+// must be valid. Returns true on error (diagnosed, or evaluation failure).
+static bool readDeclarationName(ASTContext &C, EvalFn Evaluator,
+                                DiagFn Diagnoser, SourceRange Range,
+                                Expr *DataArg, Expr *SizeArg, Expr *OpArg,
+                                DeclarationName &Name) {
+  APValue OpV;
+  if (!Evaluator(OpV, OpArg, true))
+    return true;
+  if (uint64_t OpIndex = OpV.getInt().getZExtValue()) {
+    OverloadedOperatorKind OO = getOverloadedOperatorForMetaIndex(OpIndex);
+    if (OO == OO_None)
+      return DiagnoseReflectionKind(Diagnoser, Range, "an operator");
+    Name = C.DeclarationNames.getCXXOperatorName(OO);
+    return false;
   }
-  return true;
+  std::string Identifier;
+  if (!readStringArguments(C, Evaluator, Range, SizeArg, DataArg, Identifier))
+    return true;
+  Lexer Lex(Range.getBegin(), C.getLangOpts(), Identifier.data(),
+            Identifier.data(), Identifier.data() + Identifier.size(), false);
+  if (!Lex.validateIdentifier(Identifier))
+    return Diagnoser(Range.getBegin(), diag::metafn_name_invalid_identifier)
+           << Identifier << Range;
+  Name = &C.Idents.get(Identifier);
+  return false;
 }
 
 // Lexes 'Text' as C++ source and appends the resulting tokens, following the
@@ -4109,6 +4176,20 @@ bool declaration_of(APValue &Result, ASTContext &C, MetaActions &Meta,
       Source = CTD;
     }
   }
+  // A function type: the description of a member function of that type
+  // (its qualifiers become the member's), cloned from an implicit prototype.
+  // It has no name of its own, so one must be given.
+  bool FromFunctionType = false;
+  if (!Source && RV.isReflectedType()) {
+    QualType QT = RV.getReflectedType();
+    if (const auto *FPT = QT->getAs<FunctionProtoType>()) {
+      if (FPT->isVariadic())
+        return Refuse("C variadic function types are not supported");
+      MD = Meta.FunctionTypePrototype(QT, Range.getBegin());
+      Source = MD;
+      FromFunctionType = true;
+    }
+  }
   if (!Source) {
     const char *WhyNot = nullptr;
     MD = resolveCloneSource(RV, Source, WhyNot);
@@ -4116,25 +4197,34 @@ bool declaration_of(APValue &Result, ASTContext &C, MetaActions &Meta,
       return Refuse(WhyNot);
   }
 
-  // The replacement name: an empty token sequence keeps the source's name;
-  // otherwise a single identifier token.
-  APValue NameTS;
-  if (!Evaluator(NameTS, Args[1], true) || !NameTS.isTokenSequence())
+  // The replacement name, if any (a std::meta::declaration_name): an
+  // identifier or an operator function name. Without one, the source's name
+  // is kept -- and a function type has no name of its own.
+  APValue HasNameV;
+  if (!Evaluator(HasNameV, Args[1], true))
     return true;
   std::optional<std::string> Name;
-  TokenSequenceData NameTSD = NameTS.getTokenSequence();
-  if (!NameTSD.empty()) {
+  OverloadedOperatorKind NameOperator = OO_None;
+  if (HasNameV.getInt().getBoolValue()) {
     if (!MD)
       return Refuse("a class template head description cannot be renamed");
-    if (NameTSD.size() != 1 || !NameTSD.front().is(tok::identifier))
-      return Refuse("the replacement name must be a single identifier token");
-    Name = NameTSD.front().getIdentifierInfo()->getName().str();
+    DeclarationName DN;
+    if (readDeclarationName(C, Evaluator, Diagnoser, Range, Args[2], Args[3],
+                            Args[4], DN))
+      return true;
+    if (DN.getNameKind() == DeclarationName::CXXOperatorName)
+      NameOperator = DN.getCXXOverloadedOperator();
+    else
+      Name = DN.getAsIdentifierInfo()->getName().str();
+  } else if (FromFunctionType) {
+    return Refuse("a function type has no name: a replacement name is "
+                  "required");
   }
 
   std::string TemplateParamPrefix, ParamPrefix;
-  if (!readStringArguments(C, Evaluator, Range, Args[2], Args[3],
+  if (!readStringArguments(C, Evaluator, Range, Args[5], Args[6],
                            TemplateParamPrefix) ||
-      !readStringArguments(C, Evaluator, Range, Args[4], Args[5], ParamPrefix))
+      !readStringArguments(C, Evaluator, Range, Args[7], Args[8], ParamPrefix))
     return true;
 
   for (const std::string &Prefix : {TemplateParamPrefix, ParamPrefix}) {
@@ -4145,9 +4235,9 @@ bool declaration_of(APValue &Result, ASTContext &C, MetaActions &Meta,
       return Refuse("naming prefixes must be valid identifiers");
   }
 
-  FunctionDeclSpec *FDS = new (C) FunctionDeclSpec{
-      Source, std::move(Name), std::move(TemplateParamPrefix),
-      std::move(ParamPrefix)};
+  FunctionDeclSpec *FDS = new (C)
+      FunctionDeclSpec{Source, std::move(Name), NameOperator,
+                       std::move(TemplateParamPrefix), std::move(ParamPrefix)};
   return SetAndSucceed(Result, makeReflection(FDS));
 }
 
@@ -4220,6 +4310,23 @@ bool make_noexcept(APValue &Result, ASTContext &C, MetaActions &Meta,
           return false;
         }
         FDS.MarkNoexcept = true;
+        return true;
+      });
+}
+
+bool make_const(APValue &Result, ASTContext &C, MetaActions &Meta,
+                EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                Decl *ContainingDecl) {
+  return transformDeclSpec(
+      Result, C, Evaluator, Diagnoser, Range, Args[0],
+      [](FunctionDeclSpec &FDS, const char *&WhyNot) {
+        if (isa<ClassTemplateDecl>(FDS.Source)) {
+          WhyNot = "a class template head description cannot be declared "
+                   "const";
+          return false;
+        }
+        FDS.MarkConst = true;
         return true;
       });
 }
@@ -8485,9 +8592,9 @@ bool make_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
 bool lookup(APValue &Result, ASTContext &C, MetaActions &Meta, EvalFn Evaluator,
             DiagFn Diagnoser, bool AllowInjection, QualType ResultTy,
             SourceRange Range, ArrayRef<Expr *> Args, Decl *ContainingDecl) {
-  APValue ScopeV, LenV, OpV, CtxScope, CtxDesignating;
-  if (!Evaluator(ScopeV, Args[0], true) || !Evaluator(LenV, Args[2], true) ||
-      !Evaluator(OpV, Args[3], true) || !Evaluator(CtxScope, Args[4], true) ||
+  APValue ScopeV, CtxScope, CtxDesignating;
+  if (!Evaluator(ScopeV, Args[0], true) ||
+      !Evaluator(CtxScope, Args[4], true) ||
       !Evaluator(CtxDesignating, Args[5], true))
     return true;
   auto NotFound = [&] {
@@ -8530,33 +8637,9 @@ bool lookup(APValue &Result, ASTContext &C, MetaActions &Meta, EvalFn Evaluator,
 
   // The name.
   DeclarationName Name;
-  if (uint64_t OpIndex = OpV.getInt().getZExtValue()) {
-    OverloadedOperatorKind OO = getOverloadedOperatorForMetaIndex(OpIndex);
-    if (OO == OO_None)
-      return DiagnoseReflectionKind(Diagnoser, Range, "an operator");
-    Name = C.DeclarationNames.getCXXOperatorName(OO);
-  } else {
-    uint64_t Length = LenV.getInt().getZExtValue();
-    std::string Identifier(Length, '\0');
-    for (uint64_t K = 0; K != Length; ++K) {
-      llvm::APInt Idx(C.getTypeSize(C.getSizeType()), K, false);
-      Expr *Char = IntegerLiteral::Create(C, Idx, C.getSizeType(),
-                                          Args[1]->getExprLoc());
-      Char = new (C) ArraySubscriptExpr(
-          Args[1], Char, Args[1]->getType()->getPointeeType(), VK_LValue,
-          OK_Ordinary, Range.getBegin());
-      APValue CharV;
-      if (!Evaluator(CharV, Char, true))
-        return true;
-      Identifier[K] = static_cast<char>(CharV.getInt().getExtValue());
-    }
-    Lexer Lex(Range.getBegin(), C.getLangOpts(), Identifier.data(),
-              Identifier.data(), Identifier.data() + Identifier.size(), false);
-    if (!Lex.validateIdentifier(Identifier))
-      return Diagnoser(Range.getBegin(), diag::metafn_name_invalid_identifier)
-             << Identifier << Range;
-    Name = &C.Idents.get(Identifier);
-  }
+  if (readDeclarationName(C, Evaluator, Diagnoser, Range, Args[1], Args[2],
+                          Args[3], Name))
+    return true;
 
   SmallVector<NamedDecl *, 4> Found;
   if (!Meta.LookupQualified(DC, Name, Range.getBegin(), Found))
