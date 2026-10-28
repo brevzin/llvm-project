@@ -2709,8 +2709,6 @@ TemplateInstantiator::TransformCXXReflectExpr(CXXReflectExpr *E) {
 ExprResult
 TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
   Sema::ConstevalOnlyRecorder RecordConsteval(getSema());
-  EnterExpressionEvaluationContext Context(
-      getSema(), Sema::ExpressionEvaluationContext::ReflectionContext);
 
   TokenSequenceData TSD = E->getTokenSequence();
   ArrayRef<TokenSequenceParamBinding> Bindings = E->getParamBindings();
@@ -2755,6 +2753,13 @@ TemplateInstantiator::TransformCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
 
     Tok.setAnnotationValue(static_cast<void *>(Transformed.get()));
   }
+
+  // (The interpolated expressions above are transformed in the enclosing
+  // context, as they were parsed: a use of a local in one, inside a lambda,
+  // is a potentially-evaluated use, which implicitly captures it. The rest of
+  // the sequence is raw tokens, not evaluated.)
+  EnterExpressionEvaluationContext Context(
+      getSema(), Sema::ExpressionEvaluationContext::ReflectionContext);
 
   // Replace each identifier that named a template parameter where the
   // sequence was written by that parameter's argument. (Matching on
