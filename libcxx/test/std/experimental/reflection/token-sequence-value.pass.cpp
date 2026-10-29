@@ -219,4 +219,12 @@ __macro sizes(token_sequence... args) {
 }
 static_assert(sizes!(a, b c, d e f) == 123);
 
+// --------------------------------------------------------------- stringize ----
+
+static_assert(std::is_same_v<decltype(std::meta::stringize(^^{ a })),
+                             std::string_view>);
+static_assert(std::meta::stringize(^^{ a  +  b }) == "a + b");
+static_assert(std::meta::stringize(^^{ }).empty());
+static_assert(std::meta::stringize((^^{ x += 1 })[1]) == "+=");
+
 int main(int, char**) { return 0; }

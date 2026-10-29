@@ -7292,7 +7292,7 @@ static InterceptedMetaFnPtr getInterceptedMetaFn(const FunctionDecl *FDecl) {
       {"id", &Sema::ActOnCXXBuiltinId},
       {"str_lit", &Sema::ActOnCXXBuiltinStrLiteral},
       {"tokenize", &Sema::ActOnCXXBuiltinTokenize},
-      {"stringize", &Sema::ActOnCXXBuiltinStringize},
+      {"__stringize", &Sema::ActOnCXXBuiltinStringize},
       {"queue_injection", &Sema::ActOnCXXBuiltinInject},
       {"report_tokens", &Sema::ActOnCXXBuiltinReportTokens},
   };

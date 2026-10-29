@@ -3465,8 +3465,16 @@ consteval auto tokenize(Ts const&...) -> token_sequence;
 
 // Convert a token_sequence back into a string.
 // Preserves whitespace between tokens.
-consteval auto stringize(token_sequence) -> char const*;
-consteval auto stringize(token) -> char const*;
+// The compiler builtins behind stringize: the text as a string literal.
+consteval auto __stringize(token_sequence) -> char const*;
+consteval auto __stringize(token) -> char const*;
+
+consteval auto stringize(token_sequence tokens) -> string_view {
+  return __stringize(tokens);
+}
+consteval auto stringize(token tok) -> string_view {
+  return __stringize(tok);
+}
 
 // Queue token injection into the current or specified namespace.
 // Accepts any type convertible to token_sequence.

@@ -2980,7 +2980,7 @@ void StmtPrinter::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *S) {
 }
 
 void StmtPrinter::VisitCXXBuiltinStringizeExpr(CXXBuiltinStringizeExpr *S) {
-  OS << "std::meta::stringize(";
+  OS << "std::meta::__stringize(";
   PrintExpr(S->getOperand());
   OS << ")";
 }

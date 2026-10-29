@@ -6319,8 +6319,9 @@ public:
   }
 };
 
-/// CXXBuiltinStringizeExpr - Represents a call to std::meta::stringize().
-/// Converts a token_sequence to a string literal (char const*).
+/// CXXBuiltinStringizeExpr - Represents a call to std::meta::__stringize(),
+/// the builtin behind std::meta::stringize(). Converts a token_sequence to a
+/// string literal (char const*).
 class CXXBuiltinStringizeExpr : public Expr {
   Stmt *Operand;
   SourceLocation KwLoc;

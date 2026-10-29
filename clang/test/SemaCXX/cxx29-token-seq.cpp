@@ -15,7 +15,10 @@ namespace std::meta {
     template <class... Ts>
     consteval auto tokenize(Ts const&...) -> token_sequence;
 
-    consteval auto stringize(token_sequence) -> char const*;
+    consteval auto __stringize(token_sequence) -> char const*;
+    consteval auto stringize(token_sequence t) -> char const* {
+      return __stringize(t);
+    }
 
     consteval auto queue_injection(token_sequence) -> void;
     consteval auto queue_injection(info target_ns, token_sequence) -> void;
