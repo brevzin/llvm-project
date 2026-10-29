@@ -18,9 +18,11 @@
 #include <__ranges/data.h>
 #include <__ranges/empty.h>
 #include <__ranges/enable_borrowed_range.h>
+#include <__ranges/for_direction.h>
 #include <__ranges/size.h>
 #include <__ranges/view_interface.h>
 #include <__type_traits/remove_cvref.h>
+#include <__utility/forward_like.h>
 #include <__utility/move.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
@@ -52,6 +54,15 @@ public:
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr _Rp& base() & noexcept { return __r_; }
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr const _Rp& base() const& noexcept { return __r_; }
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr _Rp&& base() && noexcept { return std::move(__r_); }
+
+#  if _LIBCPP_HAS_OPERATOR_FOR
+  // -foperator-for: the loop, in place.
+  template <direction _Dir = direction::forward>
+  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
+    for <_Dir> (auto&& __e : std::forward_like<decltype(__self)>(__self.__r_))
+      __body(static_cast<decltype(__e)&&>(__e));
+  }
+#  endif
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr const _Rp&& base() const&& noexcept { return std::move(__r_); }
 
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr iterator_t<_Rp> begin() { return ranges::begin(__r_); }

@@ -55,6 +55,7 @@ def ObjCAutoreleasePoolStmt : StmtNode<Stmt>;
 def CXXCatchStmt : StmtNode<Stmt>;
 def CXXTryStmt : StmtNode<Stmt>;
 def CXXForRangeStmt : StmtNode<Stmt>;
+def CXXForExpansionStmt : StmtNode<Stmt>;
 
 // C++ Coroutines statements
 def CoroutineBodyStmt : StmtNode<Stmt>;
@@ -207,6 +208,7 @@ def CXXBuiltinStrLiteralExpr : StmtNode<Expr>;
 def CXXBuiltinTokenizeExpr : StmtNode<Expr>;
 def CXXBuiltinStringizeExpr : StmtNode<Expr>;
 def CXXMacroInvocationExpr : StmtNode<Expr>;
+def CXXStmtInsertExpr : StmtNode<Expr>;
 def StackLocationExpr : StmtNode<Expr>;
 def ExtractLValueExpr : StmtNode<Expr>;
 def ExplDependentCallExpr : StmtNode<Expr>;

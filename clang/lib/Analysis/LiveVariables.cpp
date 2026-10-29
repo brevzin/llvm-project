@@ -203,6 +203,8 @@ static const Expr *LookThroughExpr(const Expr *E) {
       continue;
     }
     if (const OpaqueValueExpr *OVE = dyn_cast<OpaqueValueExpr>(E)) {
+      if (!OVE->getSourceExpr())
+        break;
       E = OVE->getSourceExpr();
       continue;
     }

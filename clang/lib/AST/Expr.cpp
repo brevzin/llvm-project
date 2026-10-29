@@ -3878,6 +3878,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case CoawaitExprClass:
   case DependentCoawaitExprClass:
   case CoyieldExprClass:
+  case CXXStmtInsertExprClass:
     // These always have a side-effect.
     return true;
 

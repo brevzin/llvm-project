@@ -62,6 +62,52 @@ CXXForRangeStmt::CXXForRangeStmt(Stmt *Init, DeclStmt *Range,
   SubExprs[INC] = Inc;
   SubExprs[LOOPVAR] = LoopVar;
   SubExprs[BODY] = Body;
+  SubExprs[DIRECTION] = nullptr;
+}
+
+CXXForExpansionStmt::CXXForExpansionStmt(const ASTContext &C, Stmt *Init,
+                                         DeclStmt *Range, DeclStmt *LoopVar,
+                                         Expr *Call, Expr *Direction,
+                                         ArrayRef<Insertion> Ins,
+                                         SourceLocation FL, SourceLocation CL,
+                                         SourceLocation RPL)
+    : Stmt(CXXForExpansionStmtClass), ForLoc(FL), ColonLoc(CL), RParenLoc(RPL) {
+  SubStmts[INIT] = Init;
+  SubStmts[RANGE] = Range;
+  SubStmts[LOOPVAR] = LoopVar;
+  SubStmts[CALL] = Call;
+  SubStmts[BODY] = nullptr;
+  SubStmts[DIRECTION] = Direction;
+  NumInsertions = Ins.size();
+  Insertions = new (C) Insertion[Ins.size()];
+  llvm::copy(Ins, Insertions);
+}
+
+VarDecl *CXXForExpansionStmt::getRangeVar() const {
+  return cast<VarDecl>(getRangeStmt()->getSingleDecl());
+}
+
+Expr *CXXForExpansionStmt::getRangeInit() const {
+  return getRangeVar()->getInit();
+}
+
+VarDecl *CXXForExpansionStmt::getLoopVariable() const {
+  return cast<VarDecl>(getLoopVarStmt()->getSingleDecl());
+}
+
+FunctionDecl *CXXForExpansionStmt::getOperatorFor() const {
+  Expr *E = getCall()->IgnoreImplicit();
+  if (auto *Call = dyn_cast<CallExpr>(E))
+    return Call->getDirectCallee();
+  return nullptr;
+}
+
+const CXXForExpansionStmt::Insertion &
+CXXForExpansionStmt::getInsertion(const CXXStmtInsertExpr *E) const {
+  for (const Insertion &I : insertions())
+    if (I.Insert == E)
+      return I;
+  llvm_unreachable("not one of this loop's insertions");
 }
 
 Expr *CXXForRangeStmt::getRangeInit() {

@@ -407,6 +407,19 @@ void Sema::Initialize() {
       PushOnScopeChains(Context.getUInt128Decl(), TUScope);
   }
 
+  // -foperator-for: '__stmt', the type of a statement parameter -- an empty
+  // class, known by identity, which nothing ever creates an object of.
+  if (getLangOpts().CPlusPlus && getLangOpts().OperatorFor &&
+      !Context.StmtParamDecl) {
+    auto *RD = CXXRecordDecl::Create(
+        Context, TagTypeKind::Struct, Context.getTranslationUnitDecl(),
+        SourceLocation(), SourceLocation(), &Context.Idents.get("__stmt"));
+    RD->setImplicit();
+    RD->startDefinition();
+    RD->completeDefinition();
+    Context.StmtParamDecl = RD;
+    PushOnScopeChains(RD, TUScope);
+  }
 
   // Initialize predefined Objective-C types:
   if (getLangOpts().ObjC) {

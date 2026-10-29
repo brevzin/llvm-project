@@ -19,6 +19,7 @@
 #include <__ranges/all.h>
 #include <__ranges/concepts.h>
 #include <__ranges/enable_borrowed_range.h>
+#include <__ranges/for_direction.h>
 #include <__ranges/non_propagating_cache.h>
 #include <__ranges/range_adaptor.h>
 #include <__ranges/size.h>
@@ -27,6 +28,7 @@
 #include <__type_traits/conditional.h>
 #include <__type_traits/remove_cvref.h>
 #include <__utility/forward.h>
+#include <__utility/forward_like.h>
 #include <__utility/move.h>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
@@ -66,6 +68,15 @@ public:
   }
 
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
+
+#  if _LIBCPP_HAS_OPERATOR_FOR
+  // -foperator-for: the loop, in place: the base's, the other way.
+  template <direction _Dir = direction::forward>
+  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
+    for <!_Dir> (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
+      __body(static_cast<decltype(__e)&&>(__e));
+  }
+#  endif
 
   _LIBCPP_HIDE_FROM_ABI constexpr reverse_iterator<iterator_t<_View>> begin() {
     if constexpr (_UseCache)

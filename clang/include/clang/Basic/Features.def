@@ -391,6 +391,7 @@ FEATURE(template_strings, LangOpts.TemplateStrings)
 FEATURE(annotation_attributes, LangOpts.AnnotationAttributes)
 FEATURE(entity_proxy_reflection, LangOpts.EntityProxyReflection)
 FEATURE(consteval_operations, LangOpts.ConstevalOperations)
+FEATURE(operator_for, LangOpts.OperatorFor)
 
 // CUDA/HIP Features
 FEATURE(cuda_noinline_keyword, LangOpts.CUDA)

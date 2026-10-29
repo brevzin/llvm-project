@@ -28,6 +28,7 @@
 #include <__ranges/all.h>
 #include <__ranges/concepts.h>
 #include <__ranges/empty.h>
+#include <__ranges/for_direction.h>
 #include <__ranges/movable_box.h>
 #include <__ranges/range_adaptor.h>
 #include <__ranges/size.h>
@@ -41,6 +42,7 @@
 #include <__type_traits/maybe_const.h>
 #include <__type_traits/remove_cvref.h>
 #include <__utility/forward.h>
+#include <__utility/forward_like.h>
 #include <__utility/in_place.h>
 #include <__utility/move.h>
 
@@ -94,6 +96,17 @@ public:
     return __base_;
   }
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
+
+#  if _LIBCPP_HAS_OPERATOR_FOR
+  // -foperator-for: the loop, in place: the base's, with the body given the
+  // function's result.
+  template <direction _Dir = direction::forward>
+  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
+    auto&& __func = *__self.__func_;
+    for <_Dir> (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
+      __body(std::invoke(__func, static_cast<decltype(__e)&&>(__e)));
+  }
+#  endif
 
   _LIBCPP_HIDE_FROM_ABI constexpr __iterator<false> begin() { return __iterator<false>{*this, ranges::begin(__base_)}; }
   _LIBCPP_HIDE_FROM_ABI constexpr __iterator<true> begin() const

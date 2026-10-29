@@ -250,6 +250,7 @@ static Cl::Kinds ClassifyInternal(ASTContext &Ctx, const Expr *E) {
   case Expr::CXXBuiltinStrLiteralExprClass:
   case Expr::CXXBuiltinTokenizeExprClass:
   case Expr::CXXBuiltinStringizeExprClass:
+  case Expr::CXXStmtInsertExprClass:
   case Expr::CXXMacroInvocationExprClass:
     return Cl::CL_PRValue;
 

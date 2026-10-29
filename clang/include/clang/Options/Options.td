@@ -3993,6 +3993,13 @@ defm entity_proxy_reflection : BoolFOption<"entity-proxy-reflection",
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
           "Enable proposed reflection of entity proxies as described by P3XYZ">,
   NegFlag<SetFalse>>;
+defm operator_for : BoolFOption<"operator-for",
+  LangOpts<"OperatorFor">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Enable experimental 'operator for': a range-based for loop over a "
+          "type with an 'operator for' expands it, with the loop body as its "
+          "'__stmt' parameter">,
+  NegFlag<SetFalse>>;
 defm consteval_operations : BoolFOption<"consteval-operations",
   LangOpts<"ConstevalOperations">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],

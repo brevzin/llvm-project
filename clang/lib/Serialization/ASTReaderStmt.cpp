@@ -638,6 +638,21 @@ void ASTStmtReader::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *E) {
     E->setArg(I, Record.readSubExpr());
 }
 
+void ASTStmtReader::VisitCXXStmtInsertExpr(CXXStmtInsertExpr *E) {
+  VisitExpr(E);
+  Record.skipInts(1);
+  E->setParam(readDeclAs<ParmVarDecl>());
+  SourceLocation B = readSourceLocation();
+  SourceLocation R = readSourceLocation();
+  E->setLocs(B, R);
+  for (unsigned I = 0, N = E->getNumArgs(); I != N; ++I)
+    E->setArg(I, Record.readSubExpr());
+}
+
+void ASTStmtReader::VisitCXXForExpansionStmt(CXXForExpansionStmt *S) {
+  llvm_unreachable("'operator for' loops are not serialized");
+}
+
 void ASTStmtReader::VisitCXXBuiltinStringizeExpr(CXXBuiltinStringizeExpr *E) {
   VisitExpr(E);
   E->setKwLoc(Record.readSourceLocation());
@@ -2054,6 +2069,7 @@ void ASTStmtReader::VisitCXXForRangeStmt(CXXForRangeStmt *S) {
   S->setInc(Record.readSubExpr());
   S->setLoopVarStmt(Record.readSubStmt());
   S->setBody(Record.readSubStmt());
+  S->setDirection(Record.readSubExpr());
 }
 
 void ASTStmtReader::VisitMSDependentExistsStmt(MSDependentExistsStmt *S) {
@@ -4956,6 +4972,11 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
     }
     case EXPR_BUILTIN_STRINGIZE: {
       S = CXXBuiltinStringizeExpr::CreateEmpty(Context);
+      break;
+    }
+    case EXPR_STMT_INSERT: {
+      unsigned NumArgs = Record[ASTStmtReader::NumExprFields];
+      S = CXXStmtInsertExpr::CreateEmpty(Context, NumArgs);
       break;
     }
     case EXPR_MACRO_INVOCATION: {

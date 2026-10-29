@@ -15809,3 +15809,7 @@ void ASTContext::recordOffsetOfEvaluation(const OffsetOfExpr *E) {
   if (FieldDecl *FD = Comp.getField(); isPFPField(FD))
     PFPFieldsWithEvaluatedOffset.insert(FD);
 }
+
+bool ASTContext::isStmtParamType(QualType T) const {
+  return StmtParamDecl && T->getAsCXXRecordDecl() == StmtParamDecl;
+}

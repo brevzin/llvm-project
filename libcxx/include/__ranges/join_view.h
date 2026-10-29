@@ -27,6 +27,7 @@
 #include <__ranges/all.h>
 #include <__ranges/concepts.h>
 #include <__ranges/empty.h>
+#include <__ranges/for_direction.h>
 #include <__ranges/non_propagating_cache.h>
 #include <__ranges/range_adaptor.h>
 #include <__ranges/view_interface.h>
@@ -43,6 +44,7 @@
 
 _LIBCPP_PUSH_MACROS
 #include <__undef_macros>
+#include <__utility/forward_like.h>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
@@ -107,6 +109,17 @@ public:
   }
 
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
+
+#  if _LIBCPP_HAS_OPERATOR_FOR
+  // -foperator-for: the loop, in place: each inner range's, in turn. (A break
+  // in the body leaves both loops: it is the body's.)
+  template <direction _Dir = direction::forward>
+  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
+    for <_Dir> (auto&& __inner : std::forward_like<decltype(__self)>(__self.__base_))
+      for <_Dir> (auto&& __e : __inner)
+        __body(static_cast<decltype(__e)&&>(__e));
+  }
+#  endif
 
   _LIBCPP_HIDE_FROM_ABI constexpr auto begin() {
     if constexpr (forward_range<_View>) {

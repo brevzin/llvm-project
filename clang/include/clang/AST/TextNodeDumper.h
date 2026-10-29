@@ -294,6 +294,7 @@ public:
   void VisitAddrLabelExpr(const AddrLabelExpr *Node);
   void VisitCXXNamedCastExpr(const CXXNamedCastExpr *Node);
   void VisitCXXBoolLiteralExpr(const CXXBoolLiteralExpr *Node);
+  void VisitCXXStmtInsertExpr(const CXXStmtInsertExpr *Node);
   void VisitCXXThisExpr(const CXXThisExpr *Node);
   void VisitCXXFunctionalCastExpr(const CXXFunctionalCastExpr *Node);
   void VisitCXXStaticCastExpr(const CXXStaticCastExpr *Node);

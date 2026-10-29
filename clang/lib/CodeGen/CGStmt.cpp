@@ -87,6 +87,17 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
   // Generate a stoppoint if we are emitting debug info.
   EmitStopPoint(S);
 
+  // -foperator-for: 'body(e);' in an expanded 'operator for'.
+  if (const auto *E = dyn_cast<Expr>(S)) {
+    const auto *EWC = dyn_cast<ExprWithCleanups>(E);
+    if (const auto *IE =
+            dyn_cast<CXXStmtInsertExpr>(EWC ? EWC->getSubExpr() : E)) {
+      RunCleanupsScope Scope(*this);
+      EmitStmtInsert(*IE);
+      return;
+    }
+  }
+
   // Ignore all OpenMP directives except for simd if OpenMP with Simd is
   // enabled.
   if (getLangOpts().OpenMP && getLangOpts().OpenMPSimd) {
@@ -207,6 +218,9 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
     break;
   case Stmt::CXXForRangeStmtClass:
     EmitCXXForRangeStmt(cast<CXXForRangeStmt>(*S), Attrs);
+    break;
+  case Stmt::CXXForExpansionStmtClass:
+    EmitCXXForExpansionStmt(cast<CXXForExpansionStmt>(*S), Attrs);
     break;
   case Stmt::CXXIndeterminateExpansionStmtClass:
     llvm_unreachable("should have been replaced during instantiation");
@@ -1522,6 +1536,169 @@ CodeGenFunction::EmitCXXForRangeStmt(const CXXForRangeStmt &S,
   }
 }
 
+void CodeGenFunction::EmitCXXForExpansionStmt(const CXXForExpansionStmt &S,
+                                              ArrayRef<const Attr *> Attrs) {
+  JumpDest Exit = getJumpDestInCurrentScope("for.expand.end");
+  LexicalScope ForScope(*this, S.getSourceRange());
+  if (S.getInit())
+    EmitStmt(S.getInit());
+  EmitStmt(S.getRangeStmt());
+
+  const auto *Call = cast<CallExpr>(S.getCall()->IgnoreImplicit());
+  const FunctionDecl *OpFor = S.getOperatorFor();
+  const FunctionDecl *FD = nullptr;
+  if (!OpFor || !OpFor->isDefined(FD) || !FD->getBody()) {
+    CGM.ErrorUnsupported(&S, "'operator for' without a definition");
+    return;
+  }
+  const ParmVarDecl *StmtParam = nullptr;
+  for (const ParmVarDecl *P : FD->parameters())
+    if (getContext().isStmtParamType(P->getType()))
+      StmtParam = P;
+
+  ForExpansionFrame Frame{&S,           StmtParam,      Exit, ExpansionReturn,
+                          CXXThisValue, CXXABIThisValue};
+
+  // The expansion's parameters and locals are its own: the same
+  // 'operator for' may be expanded more than once in this function, or even
+  // inside its own expansion (a loop over the same type in the body). Set
+  // aside an enclosing expansion's, and forget these on the way out.
+  SmallVector<std::pair<const Decl *, Address>, 8> SetAside;
+  if (!FD->parameters().empty() && LocalDeclMap.count(FD->parameters().front()))
+    for (auto &KV : LocalDeclMap)
+      if (KV.first->getParentFunctionOrMethod() == FD)
+        SetAside.push_back({KV.first, KV.second});
+  for (auto &KV : SetAside)
+    LocalDeclMap.erase(KV.first);
+  DoExprEmittedLocals.emplace_back();
+  auto Restore = llvm::make_scope_exit([&] {
+    for (const VarDecl *VD : DoExprEmittedLocals.back())
+      LocalDeclMap.erase(VD);
+    DoExprEmittedLocals.pop_back();
+    for (auto &KV : SetAside)
+      LocalDeclMap.insert({KV.first, KV.second});
+    CXXThisValue = Frame.OuterThis;
+    CXXABIThisValue = Frame.OuterABIThis;
+  });
+
+  // The parameters, bound to the call's arguments: the object argument (the
+  // range) and any others. (The statement parameter's is a placeholder.)
+  ArrayRef<const Expr *> Args(Call->getArgs(), Call->getNumArgs());
+  if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(Call)) {
+    LValue Object = EmitLValue(MCE->getImplicitObjectArgument());
+    llvm::Value *This = Object.getPointer(*this);
+    CXXThisValue = CXXABIThisValue = This;
+  }
+  for (unsigned I = 0, N = FD->getNumParams(); I != N && I != Args.size();
+       ++I) {
+    const ParmVarDecl *P = FD->getParamDecl(I);
+    if (P == StmtParam)
+      continue;
+    QualType Ty = P->getType();
+    Address Slot = CreateMemTemp(Ty, P->getName());
+    if (Ty->isReferenceType()) {
+      RValue Ref = EmitReferenceBindingToExpr(Args[I]);
+      Builder.CreateStore(Ref.getScalarVal(), Slot);
+    } else {
+      EmitAnyExprToMem(Args[I], Slot, Ty.getQualifiers(), /*IsInit=*/true);
+      if (QualType::DestructionKind DK = Ty.isDestructedType())
+        pushDestroy(DK, Slot, Ty);
+    }
+    setAddrOfLocalVar(P, Slot);
+  }
+
+  ForExpansionStack.push_back(Frame);
+  std::optional<JumpDest> SavedReturn = ExpansionReturn;
+  ExpansionReturn = Exit;
+  EmitStmt(FD->getBody());
+  ExpansionReturn = SavedReturn;
+  ForExpansionStack.pop_back();
+
+  ForScope.ForceCleanup();
+  EmitBlock(Exit.getBlock(), true);
+}
+
+void CodeGenFunction::EmitStmtInsert(const CXXStmtInsertExpr &E) {
+  // The loop whose body this inserts: the innermost expansion of the
+  // 'operator for' declaring the parameter. (An insertion in a loop's body
+  // that is itself in an 'operator for' -- 'for (auto&& e : base) body(e);'
+  // -- belongs to the expansion around that loop's.)
+  const ForExpansionFrame *Found = nullptr;
+  for (const ForExpansionFrame &F : llvm::reverse(ForExpansionStack))
+    if (F.StmtParam == E.getParam()) {
+      Found = &F;
+      break;
+    }
+  if (!Found) {
+    CGM.ErrorUnsupported(&E, "statement insertion outside its expansion");
+    return;
+  }
+  ForExpansionFrame Frame = *Found;
+  const CXXForExpansionStmt &Loop = *Frame.Loop;
+  const CXXForExpansionStmt::Insertion &Ins = Loop.getInsertion(&E);
+
+  JumpDest Next = getJumpDestInCurrentScope("for.expand.next");
+  {
+    LexicalScope BodyScope(*this, Loop.getBody()->getSourceRange());
+
+    // The argument, where it is: in the expansion. (An enclosing emission of
+    // the same loop -- one expanded inside its own expansion -- has this
+    // opaque value bound already: set its binding aside.)
+    std::optional<LValue> OuterLValue;
+    std::optional<RValue> OuterRValue;
+    if (auto It = OpaqueLValues.find(Ins.Value); It != OpaqueLValues.end()) {
+      OuterLValue = It->second;
+      OpaqueLValues.erase(It);
+    }
+    if (auto It = OpaqueRValues.find(Ins.Value); It != OpaqueRValues.end()) {
+      OuterRValue = It->second;
+      OpaqueRValues.erase(It);
+    }
+    OpaqueValueMappingData Binding =
+        OpaqueValueMappingData::bind(*this, Ins.Value, E.getArg(0));
+
+    // The body is the loop's: 'return' and 'this' mean what they do there.
+    std::optional<JumpDest> SavedReturn = ExpansionReturn;
+    llvm::Value *SavedThis = CXXThisValue, *SavedABIThis = CXXABIThisValue;
+    ExpansionReturn = Frame.OuterReturn;
+    CXXThisValue = Frame.OuterThis;
+    CXXABIThisValue = Frame.OuterABIThis;
+
+    // The body may be inserted again: its locals (the loop variable too)
+    // get fresh storage each time.
+    DoExprEmittedLocals.emplace_back();
+
+    const VarDecl &Var = *Loop.getLoopVariable();
+    AutoVarEmission Emission = EmitAutoVarAlloca(Var);
+    EmitExprAsInit(
+        Ins.Init, &Var,
+        MakeAddrLValue(Emission.getObjectAddress(*this), Var.getType()),
+        /*capturedByInit=*/false);
+    EmitAutoVarCleanups(Emission);
+    if (const auto *DD = dyn_cast<DecompositionDecl>(&Var))
+      for (const BindingDecl *B : DD->bindings())
+        if (const VarDecl *H = B->getHoldingVar())
+          EmitVarDecl(*H);
+
+    BreakContinueStack.push_back(BreakContinue(Loop, Frame.Exit, Next));
+    EmitStmt(Loop.getBody());
+    BreakContinueStack.pop_back();
+
+    for (const VarDecl *VD : DoExprEmittedLocals.back())
+      LocalDeclMap.erase(VD);
+    DoExprEmittedLocals.pop_back();
+    ExpansionReturn = SavedReturn;
+    CXXThisValue = SavedThis;
+    CXXABIThisValue = SavedABIThis;
+    Binding.unbind(*this);
+    if (OuterLValue)
+      OpaqueLValues.insert({Ins.Value, *OuterLValue});
+    if (OuterRValue)
+      OpaqueRValues.insert({Ins.Value, *OuterRValue});
+  }
+  EmitBlock(Next.getBlock(), true);
+}
+
 void CodeGenFunction::EmitCXXExpansionStmt(const CXXExpansionStmt &S,
                                            ArrayRef<const Attr *> Attrs) {
   JumpDest ExpandExit = getJumpDestInCurrentScope("expand.end");
@@ -1625,6 +1802,14 @@ static bool isSwiftAsyncCallee(const CallExpr *CE) {
 /// if the function returns void, or may be missing one if the function returns
 /// non-void.  Fun stuff :).
 void CodeGenFunction::EmitReturnStmt(const ReturnStmt &S) {
+  // In an expanded 'operator for', 'return;' leaves the expansion.
+  if (ExpansionReturn) {
+    if (const Expr *RV = S.getRetValue())
+      EmitIgnoredExpr(RV);
+    EmitBranchThroughCleanup(*ExpansionReturn);
+    return;
+  }
+
   ApplyAtomGroup Grp(getDebugInfo());
   if (requiresReturnValueCheck()) {
     llvm::Constant *SLoc = EmitCheckSourceLocation(S.getBeginLoc());

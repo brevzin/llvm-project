@@ -1412,6 +1412,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Expr::CXXBuiltinReportTokensExprClass:
   case Expr::CXXTokenInterpolationListExprClass:
   case Expr::CXXBuiltinIdExprClass:
+  case Expr::CXXStmtInsertExprClass:
   case Expr::CXXSpliceExprClass:
   case Expr::StackLocationExprClass:
   case Expr::ExtractLValueExprClass:
@@ -1473,6 +1474,7 @@ CanThrowResult Sema::canThrow(const Stmt *S) {
   case Stmt::CoroutineBodyStmtClass:
   case Stmt::CXXCatchStmtClass:
   case Stmt::CXXForRangeStmtClass:
+  case Stmt::CXXForExpansionStmtClass:
   case Stmt::CXXIndeterminateExpansionStmtClass:
   case Stmt::CXXIterableExpansionStmtClass:
   case Stmt::CXXDestructurableExpansionStmtClass:

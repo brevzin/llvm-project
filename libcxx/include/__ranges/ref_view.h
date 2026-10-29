@@ -22,6 +22,7 @@
 #include <__ranges/data.h>
 #include <__ranges/empty.h>
 #include <__ranges/enable_borrowed_range.h>
+#include <__ranges/for_direction.h>
 #include <__ranges/size.h>
 #include <__ranges/view_interface.h>
 #include <__type_traits/is_object.h>
@@ -52,6 +53,14 @@ public:
       : __range_(std::addressof(static_cast<_Range&>(std::forward<_Tp>(__t)))) {}
 
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr _Range& base() const { return *__range_; }
+#  if _LIBCPP_HAS_OPERATOR_FOR
+  // -foperator-for: the loop, in place.
+  template <direction _Dir = direction::forward>
+  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
+    for <_Dir> (auto&& __e : *__self.__range_)
+      __body(static_cast<decltype(__e)&&>(__e));
+  }
+#  endif
 
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr iterator_t<_Range> begin() const { return ranges::begin(*__range_); }
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr sentinel_t<_Range> end() const { return ranges::end(*__range_); }

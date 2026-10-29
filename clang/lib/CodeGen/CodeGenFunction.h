@@ -3780,6 +3780,29 @@ public:
   Address recoverAddrOfEscapedLocal(CodeGenFunction &ParentCGF,
                                     Address ParentVar, llvm::Value *ParentFP);
 
+  /// -foperator-for: a loop over a range with an 'operator for', which is
+  /// expanded in place, and an insertion of its body.
+  void EmitCXXForExpansionStmt(const CXXForExpansionStmt &S,
+                               ArrayRef<const Attr *> Attrs = {});
+  void EmitStmtInsert(const CXXStmtInsertExpr &E);
+
+  /// An 'operator for' being expanded: the loop, its statement parameter, the
+  /// loop's exit (where a 'break' in the body goes), and what 'return' and
+  /// 'this' mean where the loop is -- in the body, inserted inside the
+  /// expansion, they mean that again.
+  struct ForExpansionFrame {
+    const CXXForExpansionStmt *Loop;
+    const ParmVarDecl *StmtParam;
+    JumpDest Exit;
+    std::optional<JumpDest> OuterReturn;
+    llvm::Value *OuterThis;
+    llvm::Value *OuterABIThis;
+  };
+  SmallVector<ForExpansionFrame, 2> ForExpansionStack;
+  /// Inside an expanded 'operator for', where its 'return;' goes (the end of
+  /// the loop); otherwise, none.
+  std::optional<JumpDest> ExpansionReturn;
+
   void EmitCXXForRangeStmt(const CXXForRangeStmt &S,
                            ArrayRef<const Attr *> Attrs = {});
 

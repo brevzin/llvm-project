@@ -2432,7 +2432,7 @@ StmtResult Sema::ActOnCXXForRangeStmt(
     Scope *S, SourceLocation ForLoc, SourceLocation CoawaitLoc, Stmt *InitStmt,
     Stmt *First, SourceLocation ColonLoc, Expr *Range, SourceLocation RParenLoc,
     BuildForRangeKind Kind,
-    ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps) {
+    ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps, Expr *Direction) {
   // FIXME: recover in order to allow the body to be parsed.
   if (!First)
     return StmtError();
@@ -2497,7 +2497,7 @@ StmtResult Sema::ActOnCXXForRangeStmt(
       ForLoc, CoawaitLoc, InitStmt, ColonLoc, RangeDecl.get(),
       /*BeginStmt=*/nullptr, /*EndStmt=*/nullptr,
       /*Cond=*/nullptr, /*Inc=*/nullptr, DS, RParenLoc, Kind,
-      LifetimeExtendTemps);
+      LifetimeExtendTemps, Direction);
   if (R.isInvalid()) {
     ActOnInitializerError(LoopVar);
     return StmtError();
@@ -2686,12 +2686,190 @@ static StmtResult RebuildForRangeWithDereference(Sema &SemaRef, Scope *S,
       AdjustedRange.get(), RParenLoc, Sema::BFRK_Rebuild);
 }
 
+bool Sema::hasOperatorFor(QualType RangeType, SourceLocation Loc) {
+  if (!getLangOpts().OperatorFor)
+    return false;
+  QualType T = RangeType.getNonReferenceType();
+  auto *RD = T->getAsCXXRecordDecl();
+  if (!RD || !isCompleteType(Loc, T))
+    return false;
+  LookupResult R(*this, &Context.Idents.get("operator for"), Loc,
+                 LookupMemberName);
+  LookupQualifiedName(R, RD);
+  return !R.empty();
+}
+
+/// The insertions of \p Param in \p S -- an instantiated 'operator for''s
+/// body -- including those in the bodies of loops (and expansion statements)
+/// it contains.
+static void collectInsertions(Stmt *S, const ParmVarDecl *Param,
+                              SmallVectorImpl<CXXStmtInsertExpr *> &Out) {
+  if (!S)
+    return;
+  if (auto *E = dyn_cast<CXXStmtInsertExpr>(S)) {
+    if (E->getParam() == Param)
+      Out.push_back(E);
+    return;
+  }
+  if (auto *ES = dyn_cast<CXXExpansionStmt>(S)) {
+    for (unsigned I = 0, N = ES->getNumInstantiations(); I != N; ++I)
+      collectInsertions(ES->getInstantiation(I), Param, Out);
+    return;
+  }
+  // An expansion statement is a declaration, in a DeclStmt.
+  if (auto *DS = dyn_cast<DeclStmt>(S)) {
+    for (Decl *D : DS->decls())
+      if (auto *ESD = dyn_cast<ExpansionStmtDecl>(D))
+        collectInsertions(ESD->getStmt(), Param, Out);
+    return;
+  }
+  for (Stmt *Child : S->children())
+    collectInsertions(Child, Param, Out);
+}
+
+/// -foperator-for: 'for (decl : range) body' over a range whose type has an
+/// 'operator for': call it with the range (forwarded) as the object argument
+/// and a placeholder for the statement parameter, instantiate it, and
+/// initialize the loop variable at each of its insertions.
+static StmtResult BuildCXXForExpansionStmt(
+    Sema &S, SourceLocation ForLoc, Stmt *InitStmt, SourceLocation ColonLoc,
+    DeclStmt *RangeDS, DeclStmt *LoopVarDS, Expr *Direction,
+    SourceLocation RParenLoc,
+    ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps) {
+  ASTContext &Context = S.Context;
+  VarDecl *RangeVar = cast<VarDecl>(RangeDS->getSingleDecl());
+  VarDecl *LoopVar = cast<VarDecl>(LoopVarDS->getSingleDecl());
+  SourceLocation Loc = RangeVar->getLocation();
+  QualType RangeVarType = RangeVar->getType();
+  QualType RangeTy = RangeVarType.getNonReferenceType();
+
+  // The range, as it was given: '__range', an xvalue if bound to an rvalue.
+  ExprResult Object =
+      S.BuildDeclRefExpr(RangeVar, RangeTy, VK_LValue, ColonLoc);
+  if (Object.isInvalid())
+    return StmtError();
+  if (RangeVarType->isRValueReferenceType())
+    Object = ImplicitCastExpr::Create(Context, RangeTy, CK_NoOp, Object.get(),
+                                      nullptr, VK_XValue, FPOptionsOverride());
+
+  // '__range.operator for<D>(<statement>)'
+  TemplateArgumentListInfo TemplateArgs(ColonLoc, ColonLoc);
+  if (Direction)
+    TemplateArgs.addArgument(TemplateArgumentLoc(
+        TemplateArgument(Direction, /*IsCanonical=*/false), Direction));
+  DeclarationNameInfo Name(&Context.Idents.get("operator for"), ColonLoc);
+  CXXScopeSpec SS;
+  ExprResult Callee = S.BuildMemberReferenceExpr(
+      Object.get(), RangeTy, ColonLoc, /*IsArrow=*/false, SS, SourceLocation(),
+      /*FirstQualifierInScope=*/nullptr, Name,
+      Direction ? &TemplateArgs : nullptr, S.getCurScope());
+  if (Callee.isInvalid())
+    return StmtError();
+  QualType StmtTy = Context.getCanonicalTagType(Context.StmtParamDecl);
+  Expr *Placeholder =
+      new (Context) OpaqueValueExpr(ColonLoc, StmtTy, VK_PRValue);
+  ExprResult Call = S.BuildCallExpr(S.getCurScope(), Callee.get(), ColonLoc,
+                                    {Placeholder}, RParenLoc);
+  if (Call.isInvalid())
+    return StmtError();
+  auto *CE = dyn_cast<CallExpr>(Call.get()->IgnoreImplicit());
+  FunctionDecl *FD = CE ? CE->getDirectCallee() : nullptr;
+  if (!FD)
+    return StmtError();
+  if (!FD->getReturnType()->isVoidType()) {
+    S.Diag(FD->getLocation(), diag::err_operator_for_not_void);
+    return StmtError();
+  }
+
+  // The statement parameter.
+  const ParmVarDecl *StmtParam = nullptr;
+  for (const ParmVarDecl *P : FD->parameters())
+    if (Context.isStmtParamType(P->getType()))
+      StmtParam = P;
+  if (!StmtParam) {
+    S.Diag(ColonLoc, diag::err_operator_for_no_stmt_param) << RangeTy;
+    return StmtError();
+  }
+
+  // Its definition, now: the insertions decide the loop variable's type.
+  if (!FD->isDefined())
+    S.InstantiateFunctionDefinition(ColonLoc, FD, /*Recursive=*/true,
+                                    /*DefinitionRequired=*/true);
+  const FunctionDecl *Def = nullptr;
+  if (!FD->isDefined(Def) || !Def->getBody()) {
+    S.Diag(ColonLoc, diag::err_operator_for_no_body) << RangeTy;
+    return StmtError();
+  }
+  FD = const_cast<FunctionDecl *>(Def);
+  for (const ParmVarDecl *P : FD->parameters())
+    if (Context.isStmtParamType(P->getType()))
+      StmtParam = P;
+
+  SmallVector<CXXStmtInsertExpr *, 4> Inserts;
+  collectInsertions(FD->getBody(), StmtParam, Inserts);
+
+  // The loop variable, initialized at each insertion from its argument (an
+  // OpaqueValueExpr standing for it, bound when the loop is emitted): the
+  // first initialization is the variable's own, and deduces its type.
+  SmallVector<CXXForExpansionStmt::Insertion, 4> Insertions;
+  for (CXXStmtInsertExpr *IE : Inserts) {
+    if (IE->getNumArgs() != 1) {
+      S.Diag(IE->getBeginLoc(), diag::err_operator_for_insertion_arity)
+          << IE->getNumArgs();
+      S.ActOnInitializerError(LoopVar);
+      return StmtError();
+    }
+    Expr *Arg = IE->getArg(0);
+    auto *Value = new (Context)
+        OpaqueValueExpr(Arg->getExprLoc(), Arg->getType(), Arg->getValueKind(),
+                        Arg->getObjectKind());
+    Expr *Init;
+    if (Insertions.empty()) {
+      S.AddInitializerToDecl(LoopVar, Value, /*DirectInit=*/false);
+      if (LoopVar->isInvalidDecl() || !LoopVar->getInit())
+        return StmtError();
+      Init = LoopVar->getInit();
+    } else {
+      InitializedEntity Entity = InitializedEntity::InitializeVariable(LoopVar);
+      InitializationKind Kind = InitializationKind::CreateCopy(
+          LoopVar->getLocation(), Arg->getExprLoc());
+      Expr *Args[] = {Value};
+      InitializationSequence Seq(S, Entity, Kind, Args);
+      ExprResult R = Seq.Perform(S, Entity, Kind, Args);
+      if (!R.isInvalid())
+        R = S.ActOnFinishFullExpr(R.get(), LoopVar->getLocation(),
+                                  /*DiscardedValue=*/false);
+      if (R.isInvalid())
+        return StmtError();
+      Init = R.get();
+    }
+    Insertions.push_back({IE, Value, Init});
+  }
+  if (Insertions.empty() && LoopVar->getType()->isUndeducedType()) {
+    S.Diag(LoopVar->getLocation(), diag::err_operator_for_no_insertions)
+        << LoopVar << RangeTy;
+    S.ActOnInitializerError(LoopVar);
+    return StmtError();
+  }
+
+  // P2718R0 - Lifetime extension in range-based for loops.
+  if (S.getLangOpts().CPlusPlus23 && !LifetimeExtendTemps.empty()) {
+    InitializedEntity Entity = InitializedEntity::InitializeVariable(RangeVar);
+    for (auto *MTE : LifetimeExtendTemps)
+      MTE->setExtendingDecl(RangeVar, Entity.allocateManglingNumber());
+  }
+
+  return new (Context)
+      CXXForExpansionStmt(Context, InitStmt, RangeDS, LoopVarDS, Call.get(),
+                          Direction, Insertions, ForLoc, ColonLoc, RParenLoc);
+}
+
 StmtResult Sema::BuildCXXForRangeStmt(
     SourceLocation ForLoc, SourceLocation CoawaitLoc, Stmt *InitStmt,
     SourceLocation ColonLoc, Stmt *RangeDecl, Stmt *Begin, Stmt *End,
     Expr *Cond, Expr *Inc, Stmt *LoopVarDecl, SourceLocation RParenLoc,
     BuildForRangeKind Kind,
-    ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps) {
+    ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps, Expr *Direction) {
   // FIXME: This should not be used during template instantiation. We should
   // pick up the set of unqualified lookup results for the != and + operators
   // in the initial parse.
@@ -2714,7 +2892,38 @@ StmtResult Sema::BuildCXXForRangeStmt(
   StmtResult EndDeclStmt = End;
   ExprResult NotEqExpr = Cond, IncrExpr = Inc;
 
-  if (RangeVarType->isDependentType()) {
+  // -foperator-for: a range whose type has an 'operator for' is expanded
+  // through it -- when it is instantiated, in a template, so that a loop is
+  // only ever expanded where everything is known. (Likewise a direction that
+  // depends on a template parameter.)
+  bool HasOperatorFor = !RangeVarType->isDependentType() && !Begin &&
+                        hasOperatorFor(RangeVarType, RangeVar->getLocation());
+  bool DeferToInstantiation =
+      (HasOperatorFor && CurContext->isDependentContext()) ||
+      (Direction && Direction->isValueDependent());
+
+  if (HasOperatorFor && !DeferToInstantiation) {
+    if (Kind == BFRK_Check)
+      return StmtResult();
+    return BuildCXXForExpansionStmt(*this, ForLoc, InitStmt, ColonLoc, RangeDS,
+                                    LoopVarDS, Direction, RParenLoc,
+                                    LifetimeExtendTemps);
+  }
+
+  // Backward iteration (for <D>, D nonzero) with a range's iterators.
+  bool Backward = false;
+  if (Direction && !DeferToInstantiation) {
+    Expr::EvalResult ER;
+    if (!Direction->getType()->isIntegralOrEnumerationType() ||
+        !Direction->EvaluateAsConstantExpr(ER, Context) || !ER.Val.isInt()) {
+      Diag(Direction->getExprLoc(), diag::err_for_range_direction)
+          << Direction->getSourceRange();
+      return StmtError();
+    }
+    Backward = ER.Val.getInt().getBoolValue();
+  }
+
+  if (RangeVarType->isDependentType() || DeferToInstantiation) {
     // The range is implicitly used as a placeholder when it is dependent.
     RangeVar->markUsed(Context);
 
@@ -2923,8 +3132,86 @@ StmtResult Sema::BuildCXXForRangeStmt(
 
     BeginDeclStmt =
         ActOnDeclStmt(ConvertDeclToDeclGroup(BeginVar), ColonLoc, ColonLoc);
-    EndDeclStmt =
-        ActOnDeclStmt(ConvertDeclToDeclGroup(EndVar), ColonLoc, ColonLoc);
+
+    // Backward (for <D>, D nonzero), the loop steps back from the end:
+    //   for (; __begin != __end; ) { decl = *--__end; ... }
+    // If the end is a sentinel, from the iterator that reaches it, found as
+    // the iterators of reverse_view do:
+    //   auto __last = ({ auto __it = __begin; while (__it != __end) ++__it;
+    //                    __it; });
+    VarDecl *BackVar = EndVar;
+    if (Backward && !Context.hasSameType(BeginType, EndType)) {
+      auto Ref = [&](VarDecl *V) {
+        return BuildDeclRefExpr(V, V->getType().getNonReferenceType(),
+                                VK_LValue, ColonLoc);
+      };
+      ActOnStartStmtExpr();
+      ActOnStartOfCompoundStmt(/*IsStmtExpr=*/true);
+      auto Fail = [&] {
+        ActOnFinishOfCompoundStmt();
+        ActOnStmtExprError();
+        return StmtError();
+      };
+      VarDecl *It = BuildForRangeVarDecl(*this, ColonLoc, AutoType,
+                                         std::string("__it") + DepthStr);
+      ExprResult BeginR = Ref(BeginVar);
+      if (BeginR.isInvalid() ||
+          FinishForRangeVarDecl(*this, It, BeginR.get(), ColonLoc,
+                                diag::err_for_range_iter_deduction_failure))
+        return Fail();
+      StmtResult ItDecl =
+          ActOnDeclStmt(ConvertDeclToDeclGroup(It), ColonLoc, ColonLoc);
+      ExprResult ItR = Ref(It), EndR = Ref(EndVar);
+      ExprResult Cmp = ItR.isInvalid() || EndR.isInvalid()
+                           ? ExprError()
+                           : ActOnBinOp(S, ColonLoc, tok::exclaimequal,
+                                        ItR.get(), EndR.get());
+      ConditionResult WhileCond =
+          Cmp.isInvalid()
+              ? ConditionError()
+              : ActOnCondition(S, ColonLoc, Cmp.get(), ConditionKind::Boolean);
+      ExprResult Step = Ref(It);
+      if (!Step.isInvalid())
+        Step = ActOnUnaryOp(S, ColonLoc, tok::plusplus, Step.get());
+      StmtResult StepStmt = ActOnExprStmt(Step);
+      StmtResult While = WhileCond.isInvalid() || StepStmt.isInvalid()
+                             ? StmtError()
+                             : ActOnWhileStmt(ColonLoc, ColonLoc, WhileCond,
+                                              ColonLoc, StepStmt.get());
+      StmtResult Value =
+          ActOnExprStmt(ActOnStmtExprResult(Ref(It)), /*DiscardedValue=*/false);
+      if (ItDecl.isInvalid() || While.isInvalid() || Value.isInvalid()) {
+        Diag(RangeLoc, diag::err_for_range_backward_not_common)
+            << RangeVarNonRefType << BeginType << EndType;
+        return Fail();
+      }
+      Stmt *Body[] = {ItDecl.get(), While.get(), Value.get()};
+      StmtResult Compound =
+          ActOnCompoundStmt(ColonLoc, ColonLoc, Body, /*isStmtExpr=*/true);
+      ActOnFinishOfCompoundStmt();
+      ExprResult Last =
+          Compound.isInvalid()
+              ? ExprError()
+              : ActOnStmtExpr(S, ColonLoc, Compound.get(), ColonLoc);
+      if (Last.isInvalid()) {
+        ActOnStmtExprError();
+        return StmtError();
+      }
+      VarDecl *LastVar = BuildForRangeVarDecl(*this, ColonLoc, AutoType,
+                                              std::string("__last") + DepthStr);
+      if (FinishForRangeVarDecl(*this, LastVar, Last.get(), ColonLoc,
+                                diag::err_for_range_iter_deduction_failure))
+        return StmtError();
+      // (Not BuildDeclaratorGroup: the two 'auto's deduce different types.)
+      Decl *Ends[] = {EndVar, LastVar};
+      EndDeclStmt = ActOnDeclStmt(
+          DeclGroupPtrTy::make(DeclGroupRef::Create(Context, Ends, 2)),
+          ColonLoc, ColonLoc);
+      BackVar = LastVar;
+    } else {
+      EndDeclStmt =
+          ActOnDeclStmt(ConvertDeclToDeclGroup(EndVar), ColonLoc, ColonLoc);
+    }
 
     const QualType BeginRefNonRefType = BeginType.getNonReferenceType();
     ExprResult BeginRef = BuildDeclRefExpr(BeginVar, BeginRefNonRefType,
@@ -2932,8 +3219,8 @@ StmtResult Sema::BuildCXXForRangeStmt(
     if (BeginRef.isInvalid())
       return StmtError();
 
-    ExprResult EndRef = BuildDeclRefExpr(EndVar, EndType.getNonReferenceType(),
-                                         VK_LValue, ColonLoc);
+    ExprResult EndRef = BuildDeclRefExpr(
+        BackVar, BackVar->getType().getNonReferenceType(), VK_LValue, ColonLoc);
     if (EndRef.isInvalid())
       return StmtError();
 
@@ -2960,7 +3247,13 @@ StmtResult Sema::BuildCXXForRangeStmt(
     if (BeginRef.isInvalid())
       return StmtError();
 
-    IncrExpr = ActOnUnaryOp(S, ColonLoc, tok::plusplus, BeginRef.get());
+    if (Backward) {
+      IncrExpr =
+          ImpCastExprToType(IntegerLiteral::Create(Context, llvm::APInt(32, 0),
+                                                   Context.IntTy, ColonLoc),
+                            Context.VoidTy, CK_ToVoid);
+    } else
+      IncrExpr = ActOnUnaryOp(S, ColonLoc, tok::plusplus, BeginRef.get());
     if (!IncrExpr.isInvalid() && CoawaitLoc.isValid())
       // FIXME: getCurScope() should not be used during template instantiation.
       // We should pick up the set of unqualified lookup results for operator
@@ -2981,6 +3274,19 @@ StmtResult Sema::BuildCXXForRangeStmt(
     if (BeginRef.isInvalid())
       return StmtError();
 
+    if (Backward) {
+      ExprResult EndRef2 =
+          BuildDeclRefExpr(BackVar, BackVar->getType().getNonReferenceType(),
+                           VK_LValue, ColonLoc);
+      if (EndRef2.isInvalid())
+        return StmtError();
+      BeginRef = ActOnUnaryOp(S, ColonLoc, tok::minusminus, EndRef2.get());
+      if (BeginRef.isInvalid()) {
+        Diag(RangeLoc, diag::note_for_range_invalid_iterator)
+            << RangeLoc << 2 << BeginRangeRef.get()->getType();
+        return StmtError();
+      }
+    }
     ExprResult DerefExpr = ActOnUnaryOp(S, ColonLoc, tok::star, BeginRef.get());
     if (DerefExpr.isInvalid()) {
       Diag(RangeLoc, diag::note_for_range_invalid_iterator)
@@ -3016,11 +3322,13 @@ StmtResult Sema::BuildCXXForRangeStmt(
       MTE->setExtendingDecl(RangeVar, Entity.allocateManglingNumber());
   }
 
-  return new (Context) CXXForRangeStmt(
+  auto *Result = new (Context) CXXForRangeStmt(
       InitStmt, RangeDS, cast_or_null<DeclStmt>(BeginDeclStmt.get()),
       cast_or_null<DeclStmt>(EndDeclStmt.get()), NotEqExpr.get(),
-      IncrExpr.get(), LoopVarDS, /*Body=*/nullptr, ForLoc, CoawaitLoc,
-      ColonLoc, RParenLoc);
+      IncrExpr.get(), LoopVarDS, /*Body=*/nullptr, ForLoc, CoawaitLoc, ColonLoc,
+      RParenLoc);
+  Result->setDirection(Direction);
+  return Result;
 }
 
 // Warn when the loop variable is a const reference that creates a copy.
@@ -3207,6 +3515,13 @@ StmtResult Sema::FinishCXXForRangeStmt(Stmt *S, Stmt *B) {
 
   if (isa<ObjCForCollectionStmt>(S))
     return ObjC().FinishObjCForCollectionStmt(S, B);
+
+  if (auto *Expansion = dyn_cast<CXXForExpansionStmt>(S)) {
+    Expansion->setBody(B);
+    DiagnoseEmptyStmtBody(Expansion->getRParenLoc(), B,
+                          diag::warn_empty_range_based_for_body);
+    return S;
+  }
 
   CXXForRangeStmt *ForStmt = cast<CXXForRangeStmt>(S);
   ForStmt->setBody(B);

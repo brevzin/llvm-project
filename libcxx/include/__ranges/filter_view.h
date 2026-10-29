@@ -28,6 +28,7 @@
 #include <__ranges/access.h>
 #include <__ranges/all.h>
 #include <__ranges/concepts.h>
+#include <__ranges/for_direction.h>
 #include <__ranges/movable_box.h>
 #include <__ranges/non_propagating_cache.h>
 #include <__ranges/range_adaptor.h>
@@ -37,6 +38,7 @@
 #include <__type_traits/is_nothrow_constructible.h>
 #include <__type_traits/is_object.h>
 #include <__utility/forward.h>
+#include <__utility/forward_like.h>
 #include <__utility/in_place.h>
 #include <__utility/move.h>
 
@@ -82,6 +84,18 @@ public:
     return __base_;
   }
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
+
+#  if _LIBCPP_HAS_OPERATOR_FOR
+  // -foperator-for: the loop, in place: the base's, with the body only for
+  // the elements that satisfy the predicate (each tested once).
+  template <direction _Dir = direction::forward>
+  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
+    auto&& __pred = *__self.__pred_;
+    for <_Dir> (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
+      if (std::invoke(__pred, __e))
+        __body(static_cast<decltype(__e)&&>(__e));
+  }
+#  endif
 
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr _Pred const& pred() const { return *__pred_; }
 

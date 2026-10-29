@@ -434,8 +434,43 @@ void StmtPrinter::VisitObjCForCollectionStmt(ObjCForCollectionStmt *Node) {
   PrintControlledStmt(Node->getBody());
 }
 
+void StmtPrinter::VisitCXXForExpansionStmt(CXXForExpansionStmt *Node) {
+  Indent() << "for ";
+  if (Expr *D = Node->getDirection()) {
+    OS << "<";
+    PrintExpr(D);
+    OS << "> ";
+  }
+  OS << "(";
+  if (Node->getInit())
+    PrintInitStmt(Node->getInit(), 5);
+  PrintingPolicy SubPolicy(Policy);
+  SubPolicy.SuppressInitializers = true;
+  Node->getLoopVariable()->print(OS, SubPolicy, IndentLevel);
+  OS << " : ";
+  PrintExpr(Node->getRangeInit());
+  OS << ")";
+  PrintControlledStmt(Node->getBody());
+}
+
+void StmtPrinter::VisitCXXStmtInsertExpr(CXXStmtInsertExpr *Node) {
+  OS << Node->getParam()->getName() << "(";
+  for (unsigned I = 0, N = Node->getNumArgs(); I != N; ++I) {
+    if (I)
+      OS << ", ";
+    PrintExpr(Node->getArg(I));
+  }
+  OS << ")";
+}
+
 void StmtPrinter::VisitCXXForRangeStmt(CXXForRangeStmt *Node) {
-  Indent() << "for (";
+  Indent() << "for ";
+  if (Expr *D = Node->getDirection()) {
+    OS << "<";
+    PrintExpr(D);
+    OS << "> ";
+  }
+  OS << "(";
   if (Node->getInit())
     PrintInitStmt(Node->getInit(), 5);
   PrintingPolicy SubPolicy(Policy);

@@ -343,7 +343,10 @@ void ClassifyRefs::classify(const Expr *E, Class C) {
   }
 
   if (const auto *OVE = dyn_cast<OpaqueValueExpr>(E)) {
-    classify(OVE->getSourceExpr(), C);
+    // (An opaque value need not have a source expression: an 'operator for'
+    // loop variable's initializer, from an insertion elsewhere.)
+    if (const Expr *Source = OVE->getSourceExpr())
+      classify(Source, C);
     return;
   }
 

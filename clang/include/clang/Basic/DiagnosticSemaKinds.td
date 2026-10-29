@@ -3286,6 +3286,29 @@ def err_macro_undefined : Error<
   "expression macro %0 is invoked before it is defined">;
 def err_macro_token_argument_not_constant : Error<
   "token sequence argument of expression macro is not a constant expression">;
+def err_stmt_param_insert_context : Error<
+  "statement parameter %0 can be inserted only directly in the "
+  "'operator for' that declares it">;
+def err_operator_for_no_stmt_param : Error<
+  "'operator for' of %0 has no '__stmt' parameter">;
+def err_operator_for_not_void : Error<
+  "'operator for' must return 'void'">;
+def err_operator_for_no_body : Error<
+  "definition of 'operator for' of %0 is not available">;
+def err_operator_for_insertion_arity : Error<
+  "'operator for' inserts the loop body with %0 argument%s0; a range-based "
+  "for loop binds one">;
+def err_operator_for_no_insertions : Error<
+  "cannot deduce the type of %0: 'operator for' of %1 never inserts the "
+  "loop body">;
+def err_for_range_direction : Error<
+  "the direction of a range-based for loop must be an integral or "
+  "enumeration constant">;
+def err_for_range_direction_not_range_for : Error<
+  "a direction can be given only for a range-based for loop">;
+def err_for_range_backward_not_common : Error<
+  "cannot iterate %0 backward: cannot find the iterator its end (of type "
+  "%2) is reached by, from its begin (of type %1)">;
 def err_macro_evaluation_failed : Error<
   "expression macro %0 did not produce a token sequence">;
 def err_macro_reported_error : Error<

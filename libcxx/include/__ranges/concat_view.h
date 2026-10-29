@@ -30,6 +30,8 @@
 #include <__ranges/access.h>
 #include <__ranges/all.h>
 #include <__ranges/concepts.h>
+#include <__ranges/for_direction.h>
+#include <__ranges/iota_view.h>
 #include <__ranges/movable_box.h>
 #include <__ranges/range_adaptor.h>
 #include <__ranges/size.h>
@@ -41,6 +43,7 @@
 #include <__type_traits/make_unsigned.h>
 #include <__type_traits/maybe_const.h>
 #include <__utility/forward.h>
+#include <__utility/forward_like.h>
 #include <__utility/in_place.h>
 #include <__utility/move.h>
 #include <tuple>
@@ -122,6 +125,20 @@ public:
   _LIBCPP_HIDE_FROM_ABI constexpr concat_view() = default;
 
   _LIBCPP_HIDE_FROM_ABI constexpr explicit concat_view(_Views... __views) : __views_(std::move(__views)...) {}
+
+#  if _LIBCPP_HAS_OPERATOR_FOR
+  // -foperator-for: the loop, in place: each range's, in turn (backward, the
+  // last first), the body inserted once per range.
+  template <direction _Dir = direction::forward>
+  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
+    constexpr size_t __n = sizeof...(_Views);
+    template for (constexpr size_t __k : views::iota(size_t(0), __n)) {
+      constexpr size_t __i = _Dir == direction::forward ? __k : __n - 1 - __k;
+      for <_Dir> (auto&& __e : std::get<__i>(std::forward_like<decltype(__self)>(__self.__views_)))
+        __body(static_cast<decltype(__e)&&>(__e));
+    }
+  }
+#  endif
 
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr __iterator<false> begin()
     requires(!(__simple_view<_Views> && ...))

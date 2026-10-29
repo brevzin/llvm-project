@@ -1938,6 +1938,7 @@ module std [system] {
       header "__ranges/filter_view.h"
       export std.functional.bind_back
     }
+    module for_direction                  { header "__ranges/for_direction.h" }
     module from_range                     { header "__ranges/from_range.h" }
     module iota_view                      { header "__ranges/iota_view.h" }
     module istream_view                   { header "__ranges/istream_view.h" }

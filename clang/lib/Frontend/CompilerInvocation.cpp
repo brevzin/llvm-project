@@ -622,6 +622,11 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
     Diags.Report(diag::err_fe_entity_proxy_reflection_without_reflection);
   }
 
+  // -foperator-for implies expansion statements: an 'operator for' over a
+  // tuple of ranges (concat) inserts its body once per element.
+  if (LangOpts.OperatorFor)
+    LangOpts.ExpansionStatements = true;
+
   // The -f[no-]raw-string-literals option is only valid in C and in C++
   // standards before C++11.
   if (LangOpts.CPlusPlus11) {

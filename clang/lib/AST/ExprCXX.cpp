@@ -2810,3 +2810,38 @@ CXXFoldExpr::CXXFoldExpr(QualType T, UnresolvedLookupExpr *Callee,
   SubExprs[SubExpr::RHS] = RHS;
   setDependence(computeDependence(this));
 }
+
+CXXStmtInsertExpr::CXXStmtInsertExpr(const ASTContext &C, ParmVarDecl *Param,
+                                     ArrayRef<Expr *> Args,
+                                     SourceLocation BeginLoc,
+                                     SourceLocation RParenLoc)
+    : Expr(CXXStmtInsertExprClass, C.VoidTy, VK_PRValue, OK_Ordinary),
+      Param(Param), NumArgs(Args.size()), BeginLoc(BeginLoc),
+      RParenLoc(RParenLoc) {
+  this->Args = new (C) Stmt *[Args.size()];
+  ExprDependence D = ExprDependence::None;
+  for (unsigned I = 0; I != Args.size(); ++I) {
+    this->Args[I] = Args[I];
+    D |= Args[I]->getDependence();
+  }
+  setDependence(D);
+}
+
+CXXStmtInsertExpr::CXXStmtInsertExpr(const ASTContext &C, EmptyShell Empty,
+                                     unsigned NumArgs)
+    : Expr(CXXStmtInsertExprClass, Empty), NumArgs(NumArgs) {
+  Args = new (C) Stmt *[NumArgs];
+}
+
+CXXStmtInsertExpr *CXXStmtInsertExpr::Create(const ASTContext &C,
+                                             ParmVarDecl *Param,
+                                             ArrayRef<Expr *> Args,
+                                             SourceLocation BeginLoc,
+                                             SourceLocation RParenLoc) {
+  return new (C) CXXStmtInsertExpr(C, Param, Args, BeginLoc, RParenLoc);
+}
+
+CXXStmtInsertExpr *CXXStmtInsertExpr::CreateEmpty(const ASTContext &C,
+                                                  unsigned NumArgs) {
+  return new (C) CXXStmtInsertExpr(C, EmptyShell(), NumArgs);
+}

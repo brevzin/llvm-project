@@ -628,6 +628,23 @@ void ASTStmtWriter::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *E) {
   Code = serialization::EXPR_MACRO_INVOCATION;
 }
 
+void ASTStmtWriter::VisitCXXStmtInsertExpr(CXXStmtInsertExpr *E) {
+  VisitExpr(E);
+  Record.push_back(E->getNumArgs());
+  Record.AddDeclRef(E->getParam());
+  Record.AddSourceLocation(E->getBeginLoc());
+  Record.AddSourceLocation(E->getRParenLoc());
+  for (Expr *Arg : E->getArgs())
+    Record.AddStmt(Arg);
+  Code = serialization::EXPR_STMT_INSERT;
+}
+
+// Not serialized: an expanded loop names insertions in another function's
+// body. (Modules and PCH aren't supported with -foperator-for.)
+void ASTStmtWriter::VisitCXXForExpansionStmt(CXXForExpansionStmt *S) {
+  llvm::report_fatal_error("cannot serialize an 'operator for' loop");
+}
+
 void ASTStmtWriter::VisitCXXBuiltinStringizeExpr(CXXBuiltinStringizeExpr *E) {
   VisitExpr(E);
   Record.AddSourceLocation(E->getKwLoc());
@@ -2066,6 +2083,7 @@ void ASTStmtWriter::VisitCXXForRangeStmt(CXXForRangeStmt *S) {
   Record.AddStmt(S->getInc());
   Record.AddStmt(S->getLoopVarStmt());
   Record.AddStmt(S->getBody());
+  Record.AddStmt(S->getDirection());
   Code = serialization::STMT_CXX_FOR_RANGE;
 }
 

@@ -275,6 +275,14 @@ typedef __char32_t char32_t;
 #    define _LIBCPP_REFLECT_CONSTANT_DEFAULT
 #  endif
 
+// -foperator-for: the views' loops, as 'operator for' members (their
+// definitions use deducing this, so C++23 and later).
+#  if __has_feature(operator_for) && _LIBCPP_STD_VER >= 23
+#    define _LIBCPP_HAS_OPERATOR_FOR 1
+#  else
+#    define _LIBCPP_HAS_OPERATOR_FOR 0
+#  endif
+
 // P4341 v2: blessing specifier for members holding pointers into
 // non-transiently persisted constexpr allocations. Expands to nothing when
 // the keyword is unavailable (pre-C++29, or other compilers).

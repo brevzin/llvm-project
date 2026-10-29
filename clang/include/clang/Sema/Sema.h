@@ -11727,15 +11727,26 @@ public:
       Scope *S, SourceLocation ForLoc, SourceLocation CoawaitLoc,
       Stmt *InitStmt, Stmt *LoopVar, SourceLocation ColonLoc, Expr *Collection,
       SourceLocation RParenLoc, BuildForRangeKind Kind,
-      ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps = {});
+      ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps = {},
+      Expr *Direction = nullptr);
 
   /// BuildCXXForRangeStmt - Build or instantiate a C++11 for-range statement.
+  /// \p Direction is that of 'for <D> (...)' (-foperator-for), if written.
   StmtResult BuildCXXForRangeStmt(
       SourceLocation ForLoc, SourceLocation CoawaitLoc, Stmt *InitStmt,
       SourceLocation ColonLoc, Stmt *RangeDecl, Stmt *Begin, Stmt *End,
       Expr *Cond, Expr *Inc, Stmt *LoopVarDecl, SourceLocation RParenLoc,
       BuildForRangeKind Kind,
-      ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps = {});
+      ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps = {},
+      Expr *Direction = nullptr);
+
+  /// 'operator for' (-foperator-for): the 'operator for' of \p RangeType, if
+  /// it is a class that has one.
+  bool hasOperatorFor(QualType RangeType, SourceLocation Loc);
+
+  /// Build the insertion 'Param(Args...)' of statement parameter \p Param.
+  ExprResult BuildStmtInsertExpr(ParmVarDecl *Param, SourceLocation Loc,
+                                 MultiExprArg Args, SourceLocation RParenLoc);
 
   /// FinishCXXForRangeStmt - Attach the body to a C++0x for-range statement.
   /// This is a separate step from ActOnCXXForRangeStmt because analysis of the

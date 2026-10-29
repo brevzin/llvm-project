@@ -4554,6 +4554,13 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
   if (const auto *VD = dyn_cast<VarDecl>(Global); VD && VD->isConsteval())
     return;
 
+  // An 'operator for' (a function with a statement parameter) is never a
+  // function: each loop expands it in place (EmitCXXForExpansionStmt).
+  if (const auto *FD = dyn_cast<FunctionDecl>(Global))
+    for (const ParmVarDecl *P : FD->parameters())
+      if (getContext().isStmtParamType(P->getType()))
+        return;
+
   // Weak references don't produce any output by themselves.
   if (Global->hasAttr<WeakRefAttr>())
     return;
@@ -4965,6 +4972,12 @@ void CodeGenModule::EmitGlobalDefinition(GlobalDecl GD, llvm::GlobalValue *GV) {
                                  "Generating code for declaration");
 
   if (const auto *FD = dyn_cast<FunctionDecl>(D)) {
+    // An 'operator for' is only ever expanded in place (see EmitGlobal). (It
+    // can be reached here too: a static local in it asks for its function.)
+    for (const ParmVarDecl *P : FD->parameters())
+      if (getContext().isStmtParamType(P->getType()))
+        return;
+
     // At -O0, don't generate IR for functions with available_externally
     // linkage.
     if (!shouldEmitFunction(GD))

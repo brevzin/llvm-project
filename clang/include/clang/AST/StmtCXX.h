@@ -133,7 +133,18 @@ public:
 /// analysis of the constituent components. The original syntactic components
 /// can be extracted using getLoopVariable and getRangeInit.
 class CXXForRangeStmt : public Stmt {
-  enum { INIT, RANGE, BEGINSTMT, ENDSTMT, COND, INC, LOOPVAR, BODY, END };
+  enum {
+    INIT,
+    RANGE,
+    BEGINSTMT,
+    ENDSTMT,
+    COND,
+    INC,
+    LOOPVAR,
+    BODY,
+    DIRECTION,
+    END
+  };
   // SubExprs[RANGE] is an expression or declstmt.
   // SubExprs[COND] and SubExprs[INC] are expressions.
   Stmt *SubExprs[END];
@@ -199,6 +210,11 @@ public:
   void setLoopVarStmt(Stmt *S) { SubExprs[LOOPVAR] = S; }
   void setBody(Stmt *S) { SubExprs[BODY] = S; }
 
+  /// The direction of an 'operator for' loop, 'for <D> (...)' (null if none
+  /// was written). Nonzero means backward.
+  Expr *getDirection() const { return cast_or_null<Expr>(SubExprs[DIRECTION]); }
+  void setDirection(Expr *E) { SubExprs[DIRECTION] = E; }
+
   SourceLocation getForLoc() const { return ForLoc; }
   SourceLocation getCoawaitLoc() const { return CoawaitLoc; }
   SourceLocation getColonLoc() const { return ColonLoc; }
@@ -213,13 +229,15 @@ public:
     return T->getStmtClass() == CXXForRangeStmtClass;
   }
 
-  // Iterators
+  // Iterators (a direction, the last, only if there is one)
   child_range children() {
-    return child_range(&SubExprs[0], &SubExprs[END]);
+    return child_range(&SubExprs[0],
+                       &SubExprs[SubExprs[DIRECTION] ? END : DIRECTION]);
   }
 
   const_child_range children() const {
-    return const_child_range(&SubExprs[0], &SubExprs[END]);
+    return const_child_range(&SubExprs[0],
+                             &SubExprs[SubExprs[DIRECTION] ? END : DIRECTION]);
   }
 };
 
@@ -833,6 +851,90 @@ public:
   }
 
   friend class ASTStmtReader;
+};
+
+class CXXStmtInsertExpr;
+
+/// A range-based for statement over a range whose type has an
+/// 'operator for' (-foperator-for). The loop is that 'operator for' expanded
+/// in place -- called with the range as its object argument and the loop
+/// body as its '__stmt' parameter -- with the body inserted at each of its
+/// insertions ('body(e)', a CXXStmtInsertExpr) and the loop variable
+/// initialized there from the insertion's argument.
+///
+/// 'operator for' itself is instantiated once, like any template; the
+/// expansion is CodeGen's: it emits the instantiated body in place.
+class CXXForExpansionStmt final : public Stmt {
+public:
+  /// One place the body is inserted: the insertion in 'operator for' (or in
+  /// a loop it contains), and the initialization of the loop variable from
+  /// its argument -- an OpaqueValueExpr standing for that argument.
+  struct Insertion {
+    const CXXStmtInsertExpr *Insert;
+    OpaqueValueExpr *Value;
+    Expr *Init;
+  };
+
+private:
+  enum { INIT, RANGE, LOOPVAR, CALL, BODY, DIRECTION, END };
+  Stmt *SubStmts[END] = {};
+  Insertion *Insertions = nullptr;
+  unsigned NumInsertions = 0;
+  SourceLocation ForLoc;
+  SourceLocation ColonLoc;
+  SourceLocation RParenLoc;
+
+  friend class ASTStmtReader;
+
+public:
+  CXXForExpansionStmt(const ASTContext &C, Stmt *Init, DeclStmt *Range,
+                      DeclStmt *LoopVar, Expr *Call, Expr *Direction,
+                      ArrayRef<Insertion> Insertions, SourceLocation ForLoc,
+                      SourceLocation ColonLoc, SourceLocation RParenLoc);
+  explicit CXXForExpansionStmt(EmptyShell Empty)
+      : Stmt(CXXForExpansionStmtClass, Empty) {}
+
+  Stmt *getInit() const { return SubStmts[INIT]; }
+  /// 'auto&& __range = range-init;'
+  DeclStmt *getRangeStmt() const { return cast<DeclStmt>(SubStmts[RANGE]); }
+  VarDecl *getRangeVar() const;
+  Expr *getRangeInit() const;
+  /// The loop variable, declared by the loop (its initializer is that of the
+  /// first insertion; each insertion initializes it with its own).
+  DeclStmt *getLoopVarStmt() const { return cast<DeclStmt>(SubStmts[LOOPVAR]); }
+  VarDecl *getLoopVariable() const;
+  /// The call of 'operator for' the loop expands: its callee is the
+  /// instantiated 'operator for', its arguments those of the parameters (the
+  /// statement parameter's, a placeholder).
+  Expr *getCall() const { return cast<Expr>(SubStmts[CALL]); }
+  FunctionDecl *getOperatorFor() const;
+  Stmt *getBody() const { return SubStmts[BODY]; }
+  void setBody(Stmt *S) { SubStmts[BODY] = S; }
+  Expr *getDirection() const { return cast_or_null<Expr>(SubStmts[DIRECTION]); }
+
+  ArrayRef<Insertion> insertions() const { return {Insertions, NumInsertions}; }
+  /// The insertion for \p E, which must be one of this loop's.
+  const Insertion &getInsertion(const CXXStmtInsertExpr *E) const;
+
+  SourceLocation getForLoc() const { return ForLoc; }
+  SourceLocation getColonLoc() const { return ColonLoc; }
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  SourceLocation getBeginLoc() const LLVM_READONLY { return ForLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY {
+    return SubStmts[BODY] ? SubStmts[BODY]->getEndLoc() : RParenLoc;
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXForExpansionStmtClass;
+  }
+
+  // The insertions belong to 'operator for', not to this function: they are
+  // not children. (Their initializers refer to the insertions' arguments only
+  // through OpaqueValueExprs with no source expression.)
+  child_range children() { return child_range(SubStmts, SubStmts + END); }
+  const_child_range children() const {
+    return const_child_range(SubStmts, SubStmts + END);
+  }
 };
 
 }  // end namespace clang

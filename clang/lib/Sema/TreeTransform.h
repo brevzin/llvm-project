@@ -2716,7 +2716,8 @@ public:
       SourceLocation ForLoc, SourceLocation CoawaitLoc, Stmt *Init,
       SourceLocation ColonLoc, Stmt *Range, Stmt *Begin, Stmt *End, Expr *Cond,
       Expr *Inc, Stmt *LoopVar, SourceLocation RParenLoc,
-      ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps) {
+      ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps,
+      Expr *Direction = nullptr) {
     // If we've just learned that the range is actually an Objective-C
     // collection, treat this as an Objective-C fast enumeration loop.
     if (DeclStmt *RangeStmt = dyn_cast<DeclStmt>(Range)) {
@@ -2744,7 +2745,7 @@ public:
 
     return getSema().BuildCXXForRangeStmt(
         ForLoc, CoawaitLoc, Init, ColonLoc, Range, Begin, End, Cond, Inc,
-        LoopVar, RParenLoc, Sema::BFRK_Rebuild, LifetimeExtendTemps);
+        LoopVar, RParenLoc, Sema::BFRK_Rebuild, LifetimeExtendTemps, Direction);
   }
 
   /// Build a new C++0x range-based for statement.
@@ -9592,6 +9593,32 @@ TreeTransform<Derived>::TransformCXXBuiltinStringizeExpr(
 }
 
 template <typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformCXXStmtInsertExpr(CXXStmtInsertExpr *E) {
+  auto *Param = cast_or_null<ParmVarDecl>(
+      getDerived().TransformDecl(E->getBeginLoc(), E->getParam()));
+  if (!Param)
+    return ExprError();
+  SmallVector<Expr *, 2> Args;
+  bool ArgsChanged = false;
+  if (getDerived().TransformExprs(E->getArgs().data(), E->getNumArgs(), true,
+                                  Args, &ArgsChanged))
+    return ExprError();
+  if (!getDerived().AlwaysRebuild() && !ArgsChanged && Param == E->getParam())
+    return E;
+  return getSema().BuildStmtInsertExpr(Param, E->getBeginLoc(), Args,
+                                       E->getRParenLoc());
+}
+
+// An expanded loop is built only outside templates, from a range-based for
+// statement: there is nothing to transform.
+template <typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformCXXForExpansionStmt(CXXForExpansionStmt *S) {
+  return S;
+}
+
+template <typename Derived>
 SpliceResult
 TreeTransform<Derived>::TransformSpliceSpecifier(SpliceSpecifier *Splice) {
   ExprResult OpResult;
@@ -10330,19 +10357,26 @@ TreeTransform<Derived>::TransformCXXForRangeStmt(CXXForRangeStmt *S) {
   if (LoopVar.isInvalid())
     return StmtError();
 
+  ExprResult Direction;
+  if (Expr *D = S->getDirection()) {
+    EnterExpressionEvaluationContext Unevaluated(
+        SemaRef, Sema::ExpressionEvaluationContext::ConstantEvaluated);
+    Direction = getDerived().TransformExpr(D);
+    if (Direction.isInvalid())
+      return StmtError();
+  }
+
   StmtResult NewStmt = S;
-  if (getDerived().AlwaysRebuild() ||
-      Init.get() != S->getInit() ||
-      Range.get() != S->getRangeStmt() ||
-      Begin.get() != S->getBeginStmt() ||
-      End.get() != S->getEndStmt() ||
-      Cond.get() != S->getCond() ||
-      Inc.get() != S->getInc() ||
+  if (getDerived().AlwaysRebuild() || Direction.get() != S->getDirection() ||
+      Init.get() != S->getInit() || Range.get() != S->getRangeStmt() ||
+      Begin.get() != S->getBeginStmt() || End.get() != S->getEndStmt() ||
+      Cond.get() != S->getCond() || Inc.get() != S->getInc() ||
       LoopVar.get() != S->getLoopVarStmt()) {
     NewStmt = getDerived().RebuildCXXForRangeStmt(
         S->getForLoc(), S->getCoawaitLoc(), Init.get(), S->getColonLoc(),
         Range.get(), Begin.get(), End.get(), Cond.get(), Inc.get(),
-        LoopVar.get(), S->getRParenLoc(), ForRangeLifetimeExtendTemps);
+        LoopVar.get(), S->getRParenLoc(), ForRangeLifetimeExtendTemps,
+        Direction.get());
     if (NewStmt.isInvalid() && LoopVar.get() != S->getLoopVarStmt()) {
       // Might not have attached any initializer to the loop variable.
       getSema().ActOnInitializerError(
@@ -10368,7 +10402,8 @@ TreeTransform<Derived>::TransformCXXForRangeStmt(CXXForRangeStmt *S) {
     NewStmt = getDerived().RebuildCXXForRangeStmt(
         S->getForLoc(), S->getCoawaitLoc(), Init.get(), S->getColonLoc(),
         Range.get(), Begin.get(), End.get(), Cond.get(), Inc.get(),
-        LoopVar.get(), S->getRParenLoc(), ForRangeLifetimeExtendTemps);
+        LoopVar.get(), S->getRParenLoc(), ForRangeLifetimeExtendTemps,
+        Direction.get());
     if (NewStmt.isInvalid())
       return StmtError();
   }

@@ -1855,6 +1855,10 @@ void TextNodeDumper::VisitExpressionTraitExpr(const ExpressionTraitExpr *Node) {
   OS << " " << getTraitSpelling(Node->getTrait());
 }
 
+void TextNodeDumper::VisitCXXStmtInsertExpr(const CXXStmtInsertExpr *Node) {
+  dumpDeclRef(Node->getParam());
+}
+
 void TextNodeDumper::VisitCXXDefaultArgExpr(const CXXDefaultArgExpr *Node) {
   if (Node->hasRewrittenInit())
     OS << " has rewritten init";

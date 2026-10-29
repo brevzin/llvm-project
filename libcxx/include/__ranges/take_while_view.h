@@ -20,14 +20,18 @@
 #include <__ranges/access.h>
 #include <__ranges/all.h>
 #include <__ranges/concepts.h>
+#include <__ranges/for_direction.h>
 #include <__ranges/movable_box.h>
 #include <__ranges/range_adaptor.h>
+#include <__ranges/subrange.h>
 #include <__ranges/view_interface.h>
 #include <__type_traits/decay.h>
 #include <__type_traits/is_nothrow_constructible.h>
 #include <__type_traits/is_object.h>
 #include <__type_traits/maybe_const.h>
+#include <__utility/as_const.h>
 #include <__utility/forward.h>
+#include <__utility/forward_like.h>
 #include <__utility/in_place.h>
 #include <__utility/move.h>
 
@@ -68,6 +72,29 @@ public:
   }
 
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
+
+#  if _LIBCPP_HAS_OPERATOR_FOR
+  // -foperator-for: the loop, in place. Forward, the base's until the
+  // predicate fails; backward, first where it stops, then that prefix.
+  template <direction _Dir = direction::forward>
+  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
+    auto&& __pred = *__self.__pred_;
+    if constexpr (_Dir == direction::forward) {
+      for (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_)) {
+        if (!std::invoke(__pred, std::as_const(__e)))
+          return;
+        __body(static_cast<decltype(__e)&&>(__e));
+      }
+    } else {
+      auto&& __base = std::forward_like<decltype(__self)>(__self.__base_);
+      auto __stop   = ranges::begin(__base);
+      for (auto __end = ranges::end(__base); __stop != __end && std::invoke(__pred, std::as_const(*__stop)); ++__stop) {
+      }
+      for <_Dir> (auto&& __e : ranges::subrange(ranges::begin(__base), __stop))
+        __body(static_cast<decltype(__e)&&>(__e));
+    }
+  }
+#  endif
 
   _LIBCPP_HIDE_FROM_ABI constexpr const _Pred& pred() const { return *__pred_; }
 

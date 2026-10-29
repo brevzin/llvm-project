@@ -1376,6 +1376,11 @@ public:
   CanQualType MetaInfoTy, TokenSequenceTy, MetaTokenTy;
   CanQualType NoReturnTy; // std::noreturn_t (P3549)
 
+  /// The class '__stmt', the type of a statement parameter (-foperator-for),
+  /// declared implicitly by Sema.
+  CXXRecordDecl *StmtParamDecl = nullptr;
+  bool isStmtParamType(QualType T) const;
+
   /// The uniqued overload set of exactly these candidates, which must already
   /// be canonical, deduplicated, and in declaration order (see
   /// makeOverloadSetReflection, which is the way to build one).

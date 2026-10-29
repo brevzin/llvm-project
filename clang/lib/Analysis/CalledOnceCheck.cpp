@@ -344,7 +344,9 @@ public:
   }
 
   const DeclRefExpr *VisitOpaqueValueExpr(const OpaqueValueExpr *OVE) {
-    return Visit(OVE->getSourceExpr());
+    if (const Expr *Source = OVE->getSourceExpr())
+      return Visit(Source);
+    return nullptr;
   }
 
   const DeclRefExpr *VisitCallExpr(const CallExpr *CE) {

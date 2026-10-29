@@ -7001,6 +7001,60 @@ public:
   friend class ASTStmtReader;
 };
 
+/// An insertion of a statement parameter, 'body(args...)', in an
+/// 'operator for' (-foperator-for): where the loop's body goes, with the loop
+/// variable initialized from the argument. Valid only as an expression
+/// statement directly in the 'operator for' whose parameter it names.
+class CXXStmtInsertExpr final : public Expr {
+  friend class ASTStmtReader;
+
+  ParmVarDecl *Param = nullptr;
+  Stmt **Args = nullptr;
+  unsigned NumArgs = 0;
+  SourceLocation BeginLoc;
+  SourceLocation RParenLoc;
+
+  CXXStmtInsertExpr(const ASTContext &C, ParmVarDecl *Param,
+                    ArrayRef<Expr *> Args, SourceLocation BeginLoc,
+                    SourceLocation RParenLoc);
+  CXXStmtInsertExpr(const ASTContext &C, EmptyShell Empty, unsigned NumArgs);
+
+public:
+  static CXXStmtInsertExpr *Create(const ASTContext &C, ParmVarDecl *Param,
+                                   ArrayRef<Expr *> Args,
+                                   SourceLocation BeginLoc,
+                                   SourceLocation RParenLoc);
+  static CXXStmtInsertExpr *CreateEmpty(const ASTContext &C, unsigned NumArgs);
+
+  /// The statement parameter inserted.
+  ParmVarDecl *getParam() const { return Param; }
+  void setParam(ParmVarDecl *P) { Param = P; }
+
+  unsigned getNumArgs() const { return NumArgs; }
+  Expr *getArg(unsigned I) const { return cast<Expr>(Args[I]); }
+  void setArg(unsigned I, Expr *E) { Args[I] = E; }
+  ArrayRef<Expr *> getArgs() const {
+    return ArrayRef(reinterpret_cast<Expr *const *>(Args), NumArgs);
+  }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setLocs(SourceLocation B, SourceLocation R) {
+    BeginLoc = B;
+    RParenLoc = R;
+  }
+  SourceLocation getBeginLoc() const LLVM_READONLY { return BeginLoc; }
+  SourceLocation getEndLoc() const LLVM_READONLY { return RParenLoc; }
+
+  child_range children() { return child_range(Args, Args + NumArgs); }
+  const_child_range children() const {
+    return const_child_range(Args, Args + NumArgs);
+  }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == CXXStmtInsertExprClass;
+  }
+};
+
 } // namespace clang
 
 #endif // LLVM_CLANG_AST_EXPRCXX_H

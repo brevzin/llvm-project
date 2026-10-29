@@ -282,6 +282,7 @@ LANGOPT(DivergingExpressions,  1, 0, NotCompatible, "C++29 diverging expressions
 LANGOPT(TemplateStrings     ,  1, 0, NotCompatible, "Experimental C++26 template string literals (P3951)")
 LANGOPT(AnnotationAttributes,  1, 0, NotCompatible, "Experimental C++26 support for annotations")
 LANGOPT(EntityProxyReflection, 1, 0, NotCompatible, "Augments C++26 Reflection with entity proxy reflection")
+LANGOPT(OperatorFor         , 1, 0, NotCompatible, "Experimental 'operator for': range-for loops expanded through a statement parameter")
 LANGOPT(ConstevalOperations , 1, 0, NotCompatible, "Use the consteval-only operations model (reflections persist to runtime; only their operations are consteval) instead of the consteval-only value model")
 
 LANGOPT(MSVCEnableStdcMacro , 1, 0, NotCompatible, "Define __STDC__ with '-fms-compatibility'")

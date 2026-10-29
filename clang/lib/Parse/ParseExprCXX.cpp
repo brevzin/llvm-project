@@ -2573,6 +2573,15 @@ bool Parser::ParseUnqualifiedIdOperator(CXXScopeSpec &SS, bool EnteringContext,
     return false;
   }
 
+  // -foperator-for: 'operator for', named by an identifier no source can
+  // spell.
+  if (Tok.is(tok::kw_for) && getLangOpts().OperatorFor) {
+    ConsumeToken();
+    Result.setIdentifier(&PP.getIdentifierTable().get("operator for"),
+                         KeywordLoc);
+    return false;
+  }
+
   // Parse a literal-operator-id.
   //
   //   literal-operator-id: C++11 [over.literal]
