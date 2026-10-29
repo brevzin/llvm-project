@@ -5124,8 +5124,12 @@ bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
       // Only variables may be returned as LValues.
       return Diagnoser(Range.getBegin(), diag::metafn_cannot_extract)
           << 1 << DescriptionOf(RV);
-    } else if (isa<FieldDecl, CXXMethodDecl>(Decl)) {
-      // Extracting a non-static member as a pointer.
+    } else if (isa<FieldDecl>(Decl) ||
+               (isa<CXXMethodDecl>(Decl) &&
+                cast<CXXMethodDecl>(Decl)->isImplicitObjectMemberFunction())) {
+      // Extracting a non-static member as a pointer to member. (A static or
+      // explicit object member function is extracted as an ordinary function
+      // pointer, below.)
       if (auto *FD = dyn_cast<FieldDecl>(Decl); FD && FD->isBitField())
         return Diagnoser(Range.getBegin(), diag::metafn_cannot_extract) << 2
             << DescriptionOf(RV) << Range;

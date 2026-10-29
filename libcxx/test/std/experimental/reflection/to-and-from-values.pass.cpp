@@ -491,6 +491,27 @@ void odr_use()
 }  // namespace bb_clang_p2996_issue_67_regression_test
 
 
+                         // ============================
+                         // static_member_function_ptrs
+                         // ============================
+
+namespace static_member_function_ptrs {
+// A static (or explicit object) member function is extracted as an ordinary
+// function pointer; a non-static one, as a pointer to member function.
+struct S {
+  static constexpr int f(int x) { return x + 1; }
+  constexpr int g(int x) const { return x + 2; }
+  constexpr int h(this S const&, int x) { return x + 3; }
+};
+static_assert(extract<int (*)(int)>(^^S::f)(1) == 2);
+static_assert((S{}.*extract<int (S::*)(int) const>(^^S::g))(1) == 3);
+static_assert(extract<int (*)(S const&, int)>(^^S::h)(S{}, 1) == 4);
+template <class T> struct TS {
+  static consteval auto f(int x) -> int { return x * 2; }
+};
+static_assert(extract<int (*)(int)>(^^TS<int>::f)(4) == 8);
+}  // namespace static_member_function_ptrs
+
 int main() {
   // RUN: grep "call-lambda-value: 1" %t.stdout
   extract<void(*)(int)>(
