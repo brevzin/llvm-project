@@ -873,6 +873,10 @@ static bool make_macro(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                        QualType ResultTy, SourceRange Range,
                        ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool unique_id(APValue &Result, ASTContext &C, MetaActions &Meta,
+                      EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                      QualType ResultTy, SourceRange Range,
+                      ArrayRef<Expr *> Args, Decl *ContainingDecl);
 static bool is_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
                             EvalFn Evaluator, DiagFn Diagnoser,
                             bool AllowInjection, QualType ResultTy,
@@ -1119,6 +1123,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_metaInfo, 6, 6, lookup},
     {Metafunction::MFRK_metaInfo, 1, 1, make_const},
     {Metafunction::MFRK_metaInfo, 1, 1, make_macro},
+    {Metafunction::MFRK_token, 1, 1, unique_id},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -2588,6 +2593,31 @@ bool identifier_of_token(APValue &Result, ASTContext &C, MetaActions &Meta,
   APValue::LValuePathEntry Path[1] = {APValue::LValuePathEntry::ArrayIndex(0)};
   return SetAndSucceed(Result,
                        APValue(StrLit, CharUnits::Zero(), Path, false));
+}
+
+/// unique_id(prefix): the identifier 'prefix#N', which nothing written in
+/// source or made by id() can spell, numbered per enclosing definition.
+bool unique_id(APValue &Result, ASTContext &C, MetaActions &Meta,
+               EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+               QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+               Decl *ContainingDecl) {
+  std::optional<Token> Prefix;
+  if (!getSingleToken(Evaluator, Args[0], Prefix))
+    return true;
+  if (!Prefix || !Prefix->is(tok::identifier))
+    return DiagnoseReflectionKind(Diagnoser, Range,
+                                  "a single identifier token");
+
+  SmallString<32> Name(Prefix->getIdentifierInfo()->getName());
+  Name += '#';
+  Name += llvm::utostr(Meta.NextUniqueNameOrdinal());
+  IdentifierInfo &II = C.Idents.get(Name);
+
+  Token Tok = *Prefix;
+  Tok.setIdentifierInfo(&II);
+  Tok.setLength(II.getLength());
+  Token Toks[] = {Tok};
+  return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
 }
 
 // Ordinals must match std::meta::token_kind in <meta>.

@@ -211,6 +211,30 @@ public:
     return cast<Decl>(S.CurContext);
   }
 
+  // Counted per the outermost enclosing function -- which a unique name
+  // declared anywhere in it (a local, or a label, which is function-wide)
+  // must be unique within -- else per the innermost enclosing class, else per
+  // translation unit. A lambda, and so a consteval block, is transparent: its
+  // names belong to what encloses it. Each template specialization is its own
+  // definition, so the numbers don't depend on the order of instantiation.
+  unsigned NextUniqueNameOrdinal() override {
+    const Decl *Function = nullptr, *Class = nullptr;
+    for (DeclContext *DC = S.CurContext; DC; DC = DC->getParent()) {
+      if (auto *RD = dyn_cast<CXXRecordDecl>(DC)) {
+        if (!RD->isLambda() && !Class)
+          Class = RD;
+      } else if (auto *FD = dyn_cast<FunctionDecl>(DC)) {
+        if (auto *MD = dyn_cast<CXXMethodDecl>(FD);
+            !MD || !MD->getParent()->isLambda())
+          Function = FD;
+      }
+    }
+    const Decl *Key = Function ? Function
+                      : Class  ? Class
+                               : S.Context.getTranslationUnitDecl();
+    return ++S.UniqueNameOrdinals[Key];
+  }
+
   bool IsAccessible(NamedDecl *Target, DeclContext *Ctx,
                     CXXRecordDecl *NamingCls) override {
     bool Result = false;

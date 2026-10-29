@@ -6646,6 +6646,10 @@ public:
   /// type, by (sugared) type.
   llvm::DenseMap<void *, CXXMethodDecl *> FunctionTypePrototypes;
 
+  /// The last std::meta::unique_id number used in each definition (see
+  /// MetaActions::NextUniqueNameOrdinal).
+  llvm::DenseMap<const Decl *, unsigned> UniqueNameOrdinals;
+
   /// An interpolation already made (an expression an evaluated token
   /// sequence carries), appearing in a token sequence being parsed: what to
   /// interpolate so that it comes out the same. A declaration's interpolation

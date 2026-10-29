@@ -56,6 +56,11 @@ public:
   // Returns the current declaration context.
   virtual Decl *CurrentCtx() const = 0;
 
+  // The next number for std::meta::unique_id, counted per enclosing
+  // definition, so that the same code gets the same names wherever it is
+  // compiled.
+  virtual unsigned NextUniqueNameOrdinal() = 0;
+
   // Returns whether the declaration 'D' is accessible from 'Ctx'.
   virtual bool IsAccessible(NamedDecl *Target, DeclContext *Ctx,
                             CXXRecordDecl *NamingCls) = 0;

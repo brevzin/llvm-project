@@ -611,6 +611,7 @@ enum : unsigned {
   __metafn_lookup,
   __metafn_make_const,
   __metafn_make_macro,
+  __metafn_unique_id,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3456,6 +3457,18 @@ consteval auto id(Ts const&...) -> token;
 
 template <class... Ts>
 consteval auto str_lit(Ts const&...) -> token;
+
+// A fresh identifier, for a name a token sequence declares that nothing else
+// may refer to by accident: id(ts...) followed by '#' and a number, which no
+// identifier written in source or made by id() can spell. The numbers count
+// per enclosing definition (function, else class, else translation unit), so
+// the same code gets the same names wherever it is compiled. Each evaluation
+// makes a new name: a constexpr variable holding one is one name for every
+// use.
+template <class... Ts>
+consteval auto unique_id(Ts const&... ts) -> token {
+  return __metafunction(detail::__metafn_unique_id, id(ts...));
+}
 
 // Tokenize strings into a token_sequence.
 // Arguments are concatenated and then lexed as C++ source code.
