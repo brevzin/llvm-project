@@ -126,6 +126,13 @@ public:
   // Otherwise, 'false'.
   virtual bool HasSatisfiedConstraints(FunctionDecl *FD) = 0;
 
+  // If the return type of 'FD' contains an undeduced placeholder and 'FD' is
+  // instantiated from a template (e.g., a member of a class template
+  // specialization), instantiates its definition to deduce it. Returns 'true'
+  // if the return type of 'FD' is (now) deduced. Otherwise, 'false'.
+  virtual bool EnsureDeducedReturnType(FunctionDecl *FD,
+                                       SourceLocation Loc) = 0;
+
                              // ==================
                              // Invocation Support
                              // ==================

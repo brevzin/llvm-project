@@ -348,6 +348,20 @@ public:
     return true;
   }
 
+  bool EnsureDeducedReturnType(FunctionDecl *FD, SourceLocation Loc) override {
+    if (!FD->getReturnType()->isUndeducedType())
+      return true;
+    if (FD->isInvalidDecl() || !FD->getTemplateInstantiationPattern())
+      return false;
+    // Don't instantiate a member's definition while its class is still being
+    // defined (e.g., a class template specialization being instantiated):
+    // the definition may need the complete class.
+    if (auto *RD = dyn_cast<CXXRecordDecl>(FD->getLexicalDeclContext());
+        RD && RD->isBeingDefined())
+      return false;
+    return !S.DeduceReturnType(FD, Loc, /*Diagnose=*/false);
+  }
+
   bool HasSatisfiedConstraints(FunctionDecl *FD) override {
     bool Result = true;
     if (FD->getTrailingRequiresClause()) {

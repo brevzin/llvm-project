@@ -1609,7 +1609,8 @@ static bool ensureDeclared(ASTContext &C, QualType QT, SourceLocation SpecLoc) {
   return true;
 }
 
-static bool isReflectableDecl(MetaActions &Meta, ASTContext &C, Decl *D) {
+static bool isReflectableDecl(MetaActions &Meta, ASTContext &C, Decl *D,
+                              SourceLocation Loc) {
   assert(D && "null declaration");
 
   if (D != D->getCanonicalDecl()) {
@@ -1649,9 +1650,14 @@ static bool isReflectableDecl(MetaActions &Meta, ASTContext &C, Decl *D) {
       return false;
 
   if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+    // A function whose type contains an undeduced placeholder is not
+    // members-of-representable. A member of a class template specialization
+    // has its return type deduced only when its definition is instantiated;
+    // do that now, so the result doesn't depend on whether the specialization
+    // happened to be instantiated before the query.
     for (auto *R = FD->getMostRecentDecl(); R; R = R->getPreviousDecl()) {
-      if (!R->getReturnType()->isUndeducedType() &&
-          Meta.HasSatisfiedConstraints(R))
+      if (Meta.HasSatisfiedConstraints(R) &&
+          Meta.EnsureDeducedReturnType(R, Loc))
         return true;
     }
     return false;
@@ -1665,17 +1671,18 @@ static bool isReflectableDecl(MetaActions &Meta, ASTContext &C, Decl *D) {
 
 /// Filter non-reflectable members.
 static Decl *findIterableMember(MetaActions &Meta, ASTContext &C, Decl *D,
-                                bool Inclusive) {
+                                bool Inclusive, SourceLocation Loc) {
   if (!D)
     return D;
 
   if (Inclusive) {
-    if (isReflectableDecl(Meta, C, D))
+    if (isReflectableDecl(Meta, C, D, Loc))
       return D;
 
     // Handle the case where the first Decl is a LinkageSpecDecl.
     if (auto *LSDecl = dyn_cast_or_null<LinkageSpecDecl>(D)) {
-      Decl *RecD = findIterableMember(Meta, C, *LSDecl->decls_begin(), true);
+      Decl *RecD =
+          findIterableMember(Meta, C, *LSDecl->decls_begin(), true, Loc);
       if (RecD) return RecD;
     }
   }
@@ -1715,14 +1722,15 @@ static Decl *findIterableMember(MetaActions &Meta, ASTContext &C, Decl *D,
     // We need to recursively descend into LinkageSpecDecls to iterate over the
     // members declared therein (e.g., `extern "C"` blocks).
     if (auto *LSDecl = dyn_cast_or_null<LinkageSpecDecl>(D)) {
-      Decl *RecD = findIterableMember(Meta, C, *LSDecl->decls_begin(), true);
+      Decl *RecD =
+          findIterableMember(Meta, C, *LSDecl->decls_begin(), true, Loc);
       if (RecD) return RecD;
     }
 
     // Pop back out of a recursively entered LinkageSpecDecl.
     if (!D && isa<LinkageSpecDecl>(DC))
-      return findIterableMember(Meta, C, cast<Decl>(DC), false);
-  } while (D && !isReflectableDecl(Meta, C, D));
+      return findIterableMember(Meta, C, cast<Decl>(DC), false, Loc);
+  } while (D && !isReflectableDecl(Meta, C, D, Loc));
 
   return D;
 }
@@ -2303,7 +2311,7 @@ bool get_begin_member_decl_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     assert(declContext && "no DeclContext?");
 
     Decl* beginMember = findIterableMember(Meta, C, *declContext->decls_begin(),
-                                           true);
+                                           true, Range.getBegin());
     if (!beginMember)
       return SetAndSucceed(Result, Sentinel);
     return SetAndSucceed(Result,
@@ -2316,7 +2324,8 @@ bool get_begin_member_decl_of(APValue &Result, ASTContext &C, MetaActions &Meta,
 
     DeclContext *DC = cast<DeclContext>(NS->getMostRecentDecl());
 
-    Decl *beginMember = findIterableMember(Meta, C, *DC->decls_begin(), true);
+    Decl *beginMember = findIterableMember(Meta, C, *DC->decls_begin(), true,
+                                           Range.getBegin());
     if (!beginMember)
       return SetAndSucceed(Result, Sentinel);
     return SetAndSucceed(Result,
@@ -2357,7 +2366,8 @@ bool get_next_member_decl_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     return true;
   assert(Sentinel.isReflectedType());
 
-  if (Decl *Next = findIterableMember(Meta, C, RV.getReflectedDecl(), false))
+  if (Decl *Next = findIterableMember(Meta, C, RV.getReflectedDecl(), false,
+                                       Range.getBegin()))
     return SetAndSucceed(Result, APValue(ReflectionKind::Declaration, Next));
   return SetAndSucceed(Result, Sentinel);
 }
@@ -2881,6 +2891,11 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
       NamedDecl *ND = FrD->getFriendDecl();
       if (!ND || !isa<FunctionDecl, FunctionTemplateDecl>(ND) ||
           ND->getCanonicalDecl() != ND)
+        continue;
+      // As for members_of: deduce a placeholder return type (instantiating
+      // the definition if need be), and skip the function if it can't be.
+      if (auto *FD = dyn_cast<FunctionDecl>(ND);
+          FD && !Meta.EnsureDeducedReturnType(FD, Range.getBegin()))
         continue;
       Out.push_back(makeReflection(ND));
     }
