@@ -2083,7 +2083,6 @@ void ASTStmtWriter::VisitCXXForRangeStmt(CXXForRangeStmt *S) {
   Record.AddStmt(S->getInc());
   Record.AddStmt(S->getLoopVarStmt());
   Record.AddStmt(S->getBody());
-  Record.AddStmt(S->getDirection());
   Code = serialization::STMT_CXX_FOR_RANGE;
 }
 

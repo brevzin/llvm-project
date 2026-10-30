@@ -1990,20 +1990,6 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   if (Tok.is(tok::kw_co_await))
     CoawaitLoc = ConsumeToken();
 
-  // -foperator-for: 'for <D> (decl : range)', iterating in direction D.
-  ExprResult Direction;
-  if (Tok.is(tok::less) && getLangOpts().OperatorFor) {
-    ConsumeToken();
-    {
-      GreaterThanIsOperatorScope G(GreaterThanIsOperator, false);
-      Direction = ParseConstantExpression();
-    }
-    if (Direction.isInvalid() || ExpectAndConsume(tok::greater)) {
-      SkipUntil(tok::semi);
-      return StmtError();
-    }
-  }
-
   if (Tok.isNot(tok::l_paren)) {
     Diag(Tok, diag::err_expected_lparen_after) << "for";
     SkipUntil(tok::semi);
@@ -2311,10 +2297,6 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
   StmtResult ForRangeStmt;
   StmtResult ForEachStmt;
 
-  if (Direction.isUsable() && !ForRangeInfo.ParsedForRangeDecl())
-    Actions.Diag(Direction.get()->getBeginLoc(),
-                 diag::err_for_range_direction_not_range_for);
-
   if (ForRangeInfo.ParsedForRangeDecl()) {
     if (ForRangeInfo.ExpansionStmt)
       ForRangeStmt = Actions.ActOnCXXExpansionStmt(
@@ -2327,7 +2309,7 @@ StmtResult Parser::ParseForStatement(SourceLocation *TrailingElseLoc,
           getCurScope(), ForLoc, CoawaitLoc, FirstPart.get(),
           ForRangeInfo.LoopVar.get(), ForRangeInfo.ColonLoc,
           ForRangeInfo.RangeExpr.get(), T.getCloseLocation(), Sema::BFRK_Build,
-          ForRangeInfo.LifetimeExtendTemps, Direction.get());
+          ForRangeInfo.LifetimeExtendTemps);
   } else if (ForEach) {
     // Similarly, we need to do the semantic analysis for a for-range
     // statement immediately in order to close over temporaries correctly.

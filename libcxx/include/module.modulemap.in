@@ -1900,6 +1900,7 @@ module std [system] {
       export std.ranges.ref_view
     }
     module as_rvalue_view                 { header "__ranges/as_rvalue_view.h" }
+    module backward                       { header "__ranges/backward.h" }
     module chunk_by_view {
       header "__ranges/chunk_by_view.h"
       export std.functional.bind_back
@@ -1938,7 +1939,6 @@ module std [system] {
       header "__ranges/filter_view.h"
       export std.functional.bind_back
     }
-    module for_direction                  { header "__ranges/for_direction.h" }
     module from_range                     { header "__ranges/from_range.h" }
     module iota_view                      { header "__ranges/iota_view.h" }
     module istream_view                   { header "__ranges/istream_view.h" }

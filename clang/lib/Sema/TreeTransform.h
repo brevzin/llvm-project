@@ -2716,8 +2716,7 @@ public:
       SourceLocation ForLoc, SourceLocation CoawaitLoc, Stmt *Init,
       SourceLocation ColonLoc, Stmt *Range, Stmt *Begin, Stmt *End, Expr *Cond,
       Expr *Inc, Stmt *LoopVar, SourceLocation RParenLoc,
-      ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps,
-      Expr *Direction = nullptr) {
+      ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps) {
     // If we've just learned that the range is actually an Objective-C
     // collection, treat this as an Objective-C fast enumeration loop.
     if (DeclStmt *RangeStmt = dyn_cast<DeclStmt>(Range)) {
@@ -2745,7 +2744,7 @@ public:
 
     return getSema().BuildCXXForRangeStmt(
         ForLoc, CoawaitLoc, Init, ColonLoc, Range, Begin, End, Cond, Inc,
-        LoopVar, RParenLoc, Sema::BFRK_Rebuild, LifetimeExtendTemps, Direction);
+        LoopVar, RParenLoc, Sema::BFRK_Rebuild, LifetimeExtendTemps);
   }
 
   /// Build a new C++0x range-based for statement.
@@ -10357,26 +10356,15 @@ TreeTransform<Derived>::TransformCXXForRangeStmt(CXXForRangeStmt *S) {
   if (LoopVar.isInvalid())
     return StmtError();
 
-  ExprResult Direction;
-  if (Expr *D = S->getDirection()) {
-    EnterExpressionEvaluationContext Unevaluated(
-        SemaRef, Sema::ExpressionEvaluationContext::ConstantEvaluated);
-    Direction = getDerived().TransformExpr(D);
-    if (Direction.isInvalid())
-      return StmtError();
-  }
-
   StmtResult NewStmt = S;
-  if (getDerived().AlwaysRebuild() || Direction.get() != S->getDirection() ||
-      Init.get() != S->getInit() || Range.get() != S->getRangeStmt() ||
-      Begin.get() != S->getBeginStmt() || End.get() != S->getEndStmt() ||
-      Cond.get() != S->getCond() || Inc.get() != S->getInc() ||
-      LoopVar.get() != S->getLoopVarStmt()) {
+  if (getDerived().AlwaysRebuild() || Init.get() != S->getInit() ||
+      Range.get() != S->getRangeStmt() || Begin.get() != S->getBeginStmt() ||
+      End.get() != S->getEndStmt() || Cond.get() != S->getCond() ||
+      Inc.get() != S->getInc() || LoopVar.get() != S->getLoopVarStmt()) {
     NewStmt = getDerived().RebuildCXXForRangeStmt(
         S->getForLoc(), S->getCoawaitLoc(), Init.get(), S->getColonLoc(),
         Range.get(), Begin.get(), End.get(), Cond.get(), Inc.get(),
-        LoopVar.get(), S->getRParenLoc(), ForRangeLifetimeExtendTemps,
-        Direction.get());
+        LoopVar.get(), S->getRParenLoc(), ForRangeLifetimeExtendTemps);
     if (NewStmt.isInvalid() && LoopVar.get() != S->getLoopVarStmt()) {
       // Might not have attached any initializer to the loop variable.
       getSema().ActOnInitializerError(
@@ -10402,8 +10390,7 @@ TreeTransform<Derived>::TransformCXXForRangeStmt(CXXForRangeStmt *S) {
     NewStmt = getDerived().RebuildCXXForRangeStmt(
         S->getForLoc(), S->getCoawaitLoc(), Init.get(), S->getColonLoc(),
         Range.get(), Begin.get(), End.get(), Cond.get(), Inc.get(),
-        LoopVar.get(), S->getRParenLoc(), ForRangeLifetimeExtendTemps,
-        Direction.get());
+        LoopVar.get(), S->getRParenLoc(), ForRangeLifetimeExtendTemps);
     if (NewStmt.isInvalid())
       return StmtError();
   }

@@ -2069,7 +2069,6 @@ void ASTStmtReader::VisitCXXForRangeStmt(CXXForRangeStmt *S) {
   S->setInc(Record.readSubExpr());
   S->setLoopVarStmt(Record.readSubStmt());
   S->setBody(Record.readSubStmt());
-  S->setDirection(Record.readSubExpr());
 }
 
 void ASTStmtReader::VisitMSDependentExistsStmt(MSDependentExistsStmt *S) {

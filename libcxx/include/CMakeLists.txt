@@ -726,6 +726,7 @@ set(files
   __ranges/adjacent_view.h
   __ranges/all.h
   __ranges/as_rvalue_view.h
+  __ranges/backward.h
   __ranges/chunk_by_view.h
   __ranges/common_view.h
   __ranges/concat_view.h
@@ -744,7 +745,6 @@ set(files
   __ranges/enable_view.h
   __ranges/enumerate_view.h
   __ranges/filter_view.h
-  __ranges/for_direction.h
   __ranges/from_range.h
   __ranges/iota_view.h
   __ranges/istream_view.h

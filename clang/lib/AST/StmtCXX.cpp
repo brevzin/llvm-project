@@ -62,13 +62,11 @@ CXXForRangeStmt::CXXForRangeStmt(Stmt *Init, DeclStmt *Range,
   SubExprs[INC] = Inc;
   SubExprs[LOOPVAR] = LoopVar;
   SubExprs[BODY] = Body;
-  SubExprs[DIRECTION] = nullptr;
 }
 
 CXXForExpansionStmt::CXXForExpansionStmt(const ASTContext &C, Stmt *Init,
                                          DeclStmt *Range, DeclStmt *LoopVar,
-                                         Expr *Call, Expr *Direction,
-                                         ArrayRef<Insertion> Ins,
+                                         Expr *Call, ArrayRef<Insertion> Ins,
                                          SourceLocation FL, SourceLocation CL,
                                          SourceLocation RPL)
     : Stmt(CXXForExpansionStmtClass), ForLoc(FL), ColonLoc(CL), RParenLoc(RPL) {
@@ -77,7 +75,6 @@ CXXForExpansionStmt::CXXForExpansionStmt(const ASTContext &C, Stmt *Init,
   SubStmts[LOOPVAR] = LoopVar;
   SubStmts[CALL] = Call;
   SubStmts[BODY] = nullptr;
-  SubStmts[DIRECTION] = Direction;
   NumInsertions = Ins.size();
   Insertions = new (C) Insertion[Ins.size()];
   llvm::copy(Ins, Insertions);

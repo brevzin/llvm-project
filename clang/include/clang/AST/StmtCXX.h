@@ -133,18 +133,7 @@ public:
 /// analysis of the constituent components. The original syntactic components
 /// can be extracted using getLoopVariable and getRangeInit.
 class CXXForRangeStmt : public Stmt {
-  enum {
-    INIT,
-    RANGE,
-    BEGINSTMT,
-    ENDSTMT,
-    COND,
-    INC,
-    LOOPVAR,
-    BODY,
-    DIRECTION,
-    END
-  };
+  enum { INIT, RANGE, BEGINSTMT, ENDSTMT, COND, INC, LOOPVAR, BODY, END };
   // SubExprs[RANGE] is an expression or declstmt.
   // SubExprs[COND] and SubExprs[INC] are expressions.
   Stmt *SubExprs[END];
@@ -210,11 +199,6 @@ public:
   void setLoopVarStmt(Stmt *S) { SubExprs[LOOPVAR] = S; }
   void setBody(Stmt *S) { SubExprs[BODY] = S; }
 
-  /// The direction of an 'operator for' loop, 'for <D> (...)' (null if none
-  /// was written). Nonzero means backward.
-  Expr *getDirection() const { return cast_or_null<Expr>(SubExprs[DIRECTION]); }
-  void setDirection(Expr *E) { SubExprs[DIRECTION] = E; }
-
   SourceLocation getForLoc() const { return ForLoc; }
   SourceLocation getCoawaitLoc() const { return CoawaitLoc; }
   SourceLocation getColonLoc() const { return ColonLoc; }
@@ -229,15 +213,11 @@ public:
     return T->getStmtClass() == CXXForRangeStmtClass;
   }
 
-  // Iterators (a direction, the last, only if there is one)
-  child_range children() {
-    return child_range(&SubExprs[0],
-                       &SubExprs[SubExprs[DIRECTION] ? END : DIRECTION]);
-  }
+  // Iterators
+  child_range children() { return child_range(&SubExprs[0], &SubExprs[END]); }
 
   const_child_range children() const {
-    return const_child_range(&SubExprs[0],
-                             &SubExprs[SubExprs[DIRECTION] ? END : DIRECTION]);
+    return const_child_range(&SubExprs[0], &SubExprs[END]);
   }
 };
 
@@ -876,7 +856,7 @@ public:
   };
 
 private:
-  enum { INIT, RANGE, LOOPVAR, CALL, BODY, DIRECTION, END };
+  enum { INIT, RANGE, LOOPVAR, CALL, BODY, END };
   Stmt *SubStmts[END] = {};
   Insertion *Insertions = nullptr;
   unsigned NumInsertions = 0;
@@ -888,7 +868,7 @@ private:
 
 public:
   CXXForExpansionStmt(const ASTContext &C, Stmt *Init, DeclStmt *Range,
-                      DeclStmt *LoopVar, Expr *Call, Expr *Direction,
+                      DeclStmt *LoopVar, Expr *Call,
                       ArrayRef<Insertion> Insertions, SourceLocation ForLoc,
                       SourceLocation ColonLoc, SourceLocation RParenLoc);
   explicit CXXForExpansionStmt(EmptyShell Empty)
@@ -910,7 +890,6 @@ public:
   FunctionDecl *getOperatorFor() const;
   Stmt *getBody() const { return SubStmts[BODY]; }
   void setBody(Stmt *S) { SubStmts[BODY] = S; }
-  Expr *getDirection() const { return cast_or_null<Expr>(SubStmts[DIRECTION]); }
 
   ArrayRef<Insertion> insertions() const { return {Insertions, NumInsertions}; }
   /// The insertion for \p E, which must be one of this loop's.

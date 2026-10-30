@@ -3301,14 +3301,6 @@ def err_operator_for_insertion_arity : Error<
 def err_operator_for_no_insertions : Error<
   "cannot deduce the type of %0: 'operator for' of %1 never inserts the "
   "loop body">;
-def err_for_range_direction : Error<
-  "the direction of a range-based for loop must be an integral or "
-  "enumeration constant">;
-def err_for_range_direction_not_range_for : Error<
-  "a direction can be given only for a range-based for loop">;
-def err_for_range_backward_not_common : Error<
-  "cannot iterate %0 backward: cannot find the iterator its end (of type "
-  "%2) is reached by, from its begin (of type %1)">;
 def err_macro_evaluation_failed : Error<
   "expression macro %0 did not produce a token sequence">;
 def err_macro_reported_error : Error<

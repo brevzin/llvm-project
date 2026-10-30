@@ -17,6 +17,7 @@
 #include <__concepts/equality_comparable.h>
 #include <__concepts/invocable.h>
 #include <__concepts/referenceable.h>
+#include <__concepts/same_as.h>
 #include <__config>
 #include <__functional/bind_back.h>
 #include <__functional/invoke.h>
@@ -26,9 +27,9 @@
 #include <__memory/addressof.h>
 #include <__ranges/access.h>
 #include <__ranges/all.h>
+#include <__ranges/backward.h>
 #include <__ranges/concepts.h>
 #include <__ranges/empty.h>
-#include <__ranges/for_direction.h>
 #include <__ranges/movable_box.h>
 #include <__ranges/range_adaptor.h>
 #include <__ranges/size.h>
@@ -98,12 +99,18 @@ public:
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
 
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place: the base's, with the body given the
-  // function's result.
-  template <direction _Dir = direction::forward>
+  // -foperator-for: the loop, in place: the base's, with the body given the function's result. A loop
+  // over ranges::backward(*this) is its friend's.
   _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
     auto&& __func = *__self.__func_;
-    for <_Dir> (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
+    for (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
+      __body(std::invoke(__func, static_cast<decltype(__e)&&>(__e)));
+  }
+  template <class _Self>
+    requires same_as<remove_cvref_t<_Self>, transform_view>
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
+    auto&& __func = *__b.range.__func_;
+    for (auto&& __e : ranges::backward(std::forward<_Self>(__b.range).__base_))
       __body(std::invoke(__func, static_cast<decltype(__e)&&>(__e)));
   }
 #  endif

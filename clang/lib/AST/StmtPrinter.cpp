@@ -435,13 +435,7 @@ void StmtPrinter::VisitObjCForCollectionStmt(ObjCForCollectionStmt *Node) {
 }
 
 void StmtPrinter::VisitCXXForExpansionStmt(CXXForExpansionStmt *Node) {
-  Indent() << "for ";
-  if (Expr *D = Node->getDirection()) {
-    OS << "<";
-    PrintExpr(D);
-    OS << "> ";
-  }
-  OS << "(";
+  Indent() << "for (";
   if (Node->getInit())
     PrintInitStmt(Node->getInit(), 5);
   PrintingPolicy SubPolicy(Policy);
@@ -464,13 +458,7 @@ void StmtPrinter::VisitCXXStmtInsertExpr(CXXStmtInsertExpr *Node) {
 }
 
 void StmtPrinter::VisitCXXForRangeStmt(CXXForRangeStmt *Node) {
-  Indent() << "for ";
-  if (Expr *D = Node->getDirection()) {
-    OS << "<";
-    PrintExpr(D);
-    OS << "> ";
-  }
-  OS << "(";
+  Indent() << "for (";
   if (Node->getInit())
     PrintInitStmt(Node->getInit(), 5);
   PrintingPolicy SubPolicy(Policy);

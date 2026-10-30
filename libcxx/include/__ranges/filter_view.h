@@ -16,6 +16,7 @@
 #include <__concepts/copyable.h>
 #include <__concepts/derived_from.h>
 #include <__concepts/equality_comparable.h>
+#include <__concepts/same_as.h>
 #include <__config>
 #include <__functional/bind_back.h>
 #include <__functional/invoke.h>
@@ -27,8 +28,8 @@
 #include <__memory/addressof.h>
 #include <__ranges/access.h>
 #include <__ranges/all.h>
+#include <__ranges/backward.h>
 #include <__ranges/concepts.h>
-#include <__ranges/for_direction.h>
 #include <__ranges/movable_box.h>
 #include <__ranges/non_propagating_cache.h>
 #include <__ranges/range_adaptor.h>
@@ -37,6 +38,7 @@
 #include <__type_traits/decay.h>
 #include <__type_traits/is_nothrow_constructible.h>
 #include <__type_traits/is_object.h>
+#include <__type_traits/remove_cvref.h>
 #include <__utility/forward.h>
 #include <__utility/forward_like.h>
 #include <__utility/in_place.h>
@@ -86,12 +88,20 @@ public:
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
 
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place: the base's, with the body only for
-  // the elements that satisfy the predicate (each tested once).
-  template <direction _Dir = direction::forward>
+  // -foperator-for: the loop, in place: the base's, with the body only for the elements that
+  // satisfy the predicate (each tested once). A loop
+  // over ranges::backward(*this) is its friend's.
   _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
     auto&& __pred = *__self.__pred_;
-    for <_Dir> (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
+    for (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
+      if (std::invoke(__pred, __e))
+        __body(static_cast<decltype(__e)&&>(__e));
+  }
+  template <class _Self>
+    requires same_as<remove_cvref_t<_Self>, filter_view>
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
+    auto&& __pred = *__b.range.__pred_;
+    for (auto&& __e : ranges::backward(std::forward<_Self>(__b.range).__base_))
       if (std::invoke(__pred, __e))
         __body(static_cast<decltype(__e)&&>(__e));
   }

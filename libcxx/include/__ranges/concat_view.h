@@ -17,6 +17,7 @@
 #include <__concepts/copyable.h>
 #include <__concepts/derived_from.h>
 #include <__concepts/equality_comparable.h>
+#include <__concepts/same_as.h>
 #include <__concepts/swappable.h>
 #include <__config>
 #include <__iterator/concepts.h>
@@ -29,8 +30,8 @@
 #include <__iterator/next.h>
 #include <__ranges/access.h>
 #include <__ranges/all.h>
+#include <__ranges/backward.h>
 #include <__ranges/concepts.h>
-#include <__ranges/for_direction.h>
 #include <__ranges/iota_view.h>
 #include <__ranges/movable_box.h>
 #include <__ranges/range_adaptor.h>
@@ -42,6 +43,7 @@
 #include <__type_traits/is_nothrow_constructible.h>
 #include <__type_traits/make_unsigned.h>
 #include <__type_traits/maybe_const.h>
+#include <__type_traits/remove_cvref.h>
 #include <__utility/forward.h>
 #include <__utility/forward_like.h>
 #include <__utility/in_place.h>
@@ -127,16 +129,21 @@ public:
   _LIBCPP_HIDE_FROM_ABI constexpr explicit concat_view(_Views... __views) : __views_(std::move(__views)...) {}
 
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place: each range's, in turn (backward, the
-  // last first), the body inserted once per range.
-  template <direction _Dir = direction::forward>
+  // -foperator-for: the loop, in place: each range's, in turn (the body inserted once per range). A loop
+  // over ranges::backward(*this) is its friend's.
   _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
     constexpr size_t __n = sizeof...(_Views);
-    template for (constexpr size_t __k : views::iota(size_t(0), __n)) {
-      constexpr size_t __i = _Dir == direction::forward ? __k : __n - 1 - __k;
-      for <_Dir> (auto&& __e : std::get<__i>(std::forward_like<decltype(__self)>(__self.__views_)))
+    template for (constexpr size_t __i : views::iota(size_t(0), __n))
+      for (auto&& __e : std::get<__i>(std::forward_like<decltype(__self)>(__self.__views_)))
         __body(static_cast<decltype(__e)&&>(__e));
-    }
+  }
+  template <class _Self>
+    requires same_as<remove_cvref_t<_Self>, concat_view>
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
+    constexpr size_t __n = sizeof...(_Views);
+    template for (constexpr size_t __k : views::iota(size_t(0), __n))
+      for (auto&& __e : ranges::backward(std::get<__n - 1 - __k>(std::forward<_Self>(__b.range).__views_)))
+        __body(static_cast<decltype(__e)&&>(__e));
   }
 #  endif
 

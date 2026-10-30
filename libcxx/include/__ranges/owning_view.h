@@ -12,16 +12,18 @@
 
 #include <__concepts/constructible.h>
 #include <__concepts/movable.h>
+#include <__concepts/same_as.h>
 #include <__config>
 #include <__ranges/access.h>
+#include <__ranges/backward.h>
 #include <__ranges/concepts.h>
 #include <__ranges/data.h>
 #include <__ranges/empty.h>
 #include <__ranges/enable_borrowed_range.h>
-#include <__ranges/for_direction.h>
 #include <__ranges/size.h>
 #include <__ranges/view_interface.h>
 #include <__type_traits/remove_cvref.h>
+#include <__utility/forward.h>
 #include <__utility/forward_like.h>
 #include <__utility/move.h>
 
@@ -56,10 +58,16 @@ public:
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr _Rp&& base() && noexcept { return std::move(__r_); }
 
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place.
-  template <direction _Dir = direction::forward>
+  // -foperator-for: the loop, in place: the range's. A loop
+  // over ranges::backward(*this) is its friend's.
   _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
-    for <_Dir> (auto&& __e : std::forward_like<decltype(__self)>(__self.__r_))
+    for (auto&& __e : std::forward_like<decltype(__self)>(__self.__r_))
+      __body(static_cast<decltype(__e)&&>(__e));
+  }
+  template <class _Self>
+    requires same_as<remove_cvref_t<_Self>, owning_view>
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
+    for (auto&& __e : ranges::backward(std::forward<_Self>(__b.range).__r_))
       __body(static_cast<decltype(__e)&&>(__e));
   }
 #  endif

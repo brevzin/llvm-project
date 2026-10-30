@@ -11,15 +11,16 @@
 #define _LIBCPP___RANGES_REVERSE_VIEW_H
 
 #include <__concepts/constructible.h>
+#include <__concepts/same_as.h>
 #include <__config>
 #include <__iterator/concepts.h>
 #include <__iterator/next.h>
 #include <__iterator/reverse_iterator.h>
 #include <__ranges/access.h>
 #include <__ranges/all.h>
+#include <__ranges/backward.h>
 #include <__ranges/concepts.h>
 #include <__ranges/enable_borrowed_range.h>
-#include <__ranges/for_direction.h>
 #include <__ranges/non_propagating_cache.h>
 #include <__ranges/range_adaptor.h>
 #include <__ranges/size.h>
@@ -70,10 +71,16 @@ public:
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
 
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place: the base's, the other way.
-  template <direction _Dir = direction::forward>
+  // -foperator-for: the loop, in place: the base's, the other way. A loop
+  // over ranges::backward(*this) is its friend's.
   _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
-    for <!_Dir> (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
+    for (auto&& __e : ranges::backward(std::forward_like<decltype(__self)>(__self.__base_)))
+      __body(static_cast<decltype(__e)&&>(__e));
+  }
+  template <class _Self>
+    requires same_as<remove_cvref_t<_Self>, reverse_view>
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
+    for (auto&& __e : std::forward<_Self>(__b.range).__base_)
       __body(static_cast<decltype(__e)&&>(__e));
   }
 #  endif
