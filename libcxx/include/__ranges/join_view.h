@@ -15,7 +15,6 @@
 #include <__concepts/copyable.h>
 #include <__concepts/derived_from.h>
 #include <__concepts/equality_comparable.h>
-#include <__concepts/same_as.h>
 #include <__config>
 #include <__iterator/concepts.h>
 #include <__iterator/iter_move.h>
@@ -34,7 +33,6 @@
 #include <__ranges/view_interface.h>
 #include <__type_traits/common_type.h>
 #include <__type_traits/maybe_const.h>
-#include <__type_traits/remove_cvref.h>
 #include <__utility/as_lvalue.h>
 #include <__utility/empty.h>
 #include <__utility/forward.h>
@@ -46,7 +44,6 @@
 
 _LIBCPP_PUSH_MACROS
 #include <__undef_macros>
-#include <__utility/forward_like.h>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
@@ -113,18 +110,16 @@ public:
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
 
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place: each inner range's, in turn (a break in the body leaves both
-  // loops: it is the body's). A loop
-  // over ranges::backward(*this) is its friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
-    for (auto&& __inner : std::forward_like<decltype(__self)>(__self.__base_))
+  // -foperator-for: the loop, in place: each inner range's, in turn (a break in the body leaves
+  // both loops: it is the body's).
+  // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
+  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
+    for (auto&& __inner : __base_)
       for (auto&& __e : __inner)
         __body(static_cast<decltype(__e)&&>(__e));
   }
-  template <class _Self>
-    requires same_as<remove_cvref_t<_Self>, join_view>
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
-    for (auto&& __inner : ranges::backward(std::forward<_Self>(__b.range).__base_))
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<join_view> __b, __stmt __body) {
+    for (auto&& __inner : ranges::backward(__b.range.__base_))
       for (auto&& __e : ranges::backward(__inner))
         __body(static_cast<decltype(__e)&&>(__e));
   }

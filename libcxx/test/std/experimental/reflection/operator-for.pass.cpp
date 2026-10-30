@@ -20,11 +20,15 @@
 // insertion, and 'return' and 'co_yield' are the enclosing function's --
 // however many loops of its own 'operator for' puts around the insertion.
 //
+// Like begin and end, 'operator for' is given the range as an lvalue (and a
+// const object uses its iterators unless there's a const 'operator for').
+//
 // Backward is a type, not syntax: a loop over std::ranges::backward(r) is a
 // loop over backward_t<R>, whose 'operator for' a view provides as a hidden
-// friend; for any other range, std::ranges' generic one uses its iterators,
-// backward (from where ranges::next finds the end, as reverse_view does).
-// reverse_view swaps the two -- as Rust's Rev swaps try_fold and try_rfold.
+// friend, 'friend void operator for(backward_t<V>, __stmt)'; for any other
+// range, std::ranges' generic one uses its iterators, backward (from where
+// ranges::next finds the end, as reverse_view does). reverse_view swaps the
+// two -- as Rust's Rev swaps try_fold and try_rfold.
 //
 // The standard views' loops are 'operator for's: filter, transform,
 // take_while, reverse, join, and concat become loops over the underlying
@@ -38,8 +42,6 @@
 #include <list>
 #include <ranges>
 #include <string>
-#include <type_traits>
-#include <concepts>
 #include <tuple>
 #include <vector>
 
@@ -102,6 +104,13 @@ void standard_views() {
   for (int& i : w | filter([](int x) { return x % 2 == 0; }) | reverse)
     i += 1;
   assert((w == std::vector<int>{1, 3, 3, 5, 5, 7, 7, 9, 9, 11}));
+
+  // A const view (whose 'operator for' is non-const): its iterators.
+  const auto squares = v | transform(square);
+  got.clear();
+  for (int i : squares)
+    got += std::to_string(i) + " ";
+  assert(got == "1 4 9 16 25 36 49 64 81 ");
 
   // An element's value category is kept.
   got.clear();
@@ -212,22 +221,20 @@ void join_and_concat() {
 
 // --------------------------------------------------------- user views ----
 
-// What a user writes is the same thing: a forward loop, and, for a view
-// that can do better than its iterators backward, a backward one.
+// What a user writes is the same thing: a forward loop, and, for a view that
+// can do better backward than its iterators, a backward one.
 template <class V, class P>
 struct my_filter {
   V base;
   P pred;
-  void operator for(this auto&& self, __stmt body) {
-    for (auto&& e : self.base)  // 'e' is ours: the body can't see it
-      if (self.pred(e))
+  void operator for(__stmt body) {
+    for (auto&& e : base)  // 'e' is ours: the body can't see it
+      if (pred(e))
         body(e);
   }
-  template <class Self>
-    requires std::same_as<std::remove_cvref_t<Self>, my_filter>
-  friend void operator for(std::ranges::backward_t<Self> b, __stmt body) {
-    for (auto&& e : std::ranges::backward(b.range.base))
-      if (b.range.pred(e))
+  friend void operator for(std::ranges::backward_t<my_filter> self, __stmt body) {
+    for (auto&& e : std::ranges::backward(self.range.base))
+      if (self.range.pred(e))
         body(e);
   }
 };
@@ -237,15 +244,13 @@ my_filter(V, P) -> my_filter<V, P>;
 template <class V>
 struct my_join {
   V base;
-  void operator for(this auto&& self, __stmt body) {
-    for (auto&& inner : self.base)
+  void operator for(__stmt body) {
+    for (auto&& inner : base)
       for (auto&& e : inner)
         body(e);  // a break in the body leaves both loops
   }
-  template <class Self>
-    requires std::same_as<std::remove_cvref_t<Self>, my_join>
-  friend void operator for(std::ranges::backward_t<Self> b, __stmt body) {
-    for (auto&& inner : std::ranges::backward(b.range.base))
+  friend void operator for(std::ranges::backward_t<my_join> self, __stmt body) {
+    for (auto&& inner : std::ranges::backward(self.range.base))
       for (auto&& e : std::ranges::backward(inner))
         body(e);
   }
@@ -257,18 +262,16 @@ template <class A, class B>
 struct my_concat {
   A a;
   B b;
-  void operator for(this auto&& self, __stmt body) {
-    for (auto&& e : self.a)
+  void operator for(__stmt body) {
+    for (auto&& e : a)
       body(e);
-    for (auto&& e : self.b)
+    for (auto&& e : b)
       body(e);
   }
-  template <class Self>
-    requires std::same_as<std::remove_cvref_t<Self>, my_concat>
-  friend void operator for(std::ranges::backward_t<Self> r, __stmt body) {
-    for (auto&& e : std::ranges::backward(r.range.b))
+  friend void operator for(std::ranges::backward_t<my_concat> self, __stmt body) {
+    for (auto&& e : std::ranges::backward(self.range.b))
       body(e);
-    for (auto&& e : std::ranges::backward(r.range.a))
+    for (auto&& e : std::ranges::backward(self.range.a))
       body(e);
   }
 };
@@ -278,14 +281,12 @@ my_concat(A, B) -> my_concat<A, B>;
 template <class V>
 struct my_reverse {
   V base;
-  void operator for(this auto&& self, __stmt body) {
-    for (auto&& e : std::ranges::backward(self.base))
+  void operator for(__stmt body) {
+    for (auto&& e : std::ranges::backward(base))
       body(e);
   }
-  template <class Self>
-    requires std::same_as<std::remove_cvref_t<Self>, my_reverse>
-  friend void operator for(std::ranges::backward_t<Self> b, __stmt body) {
-    for (auto&& e : b.range.base)
+  friend void operator for(std::ranges::backward_t<my_reverse> self, __stmt body) {
+    for (auto&& e : self.range.base)
       body(e);
   }
 };

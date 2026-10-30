@@ -17,7 +17,6 @@
 #include <__concepts/equality_comparable.h>
 #include <__concepts/invocable.h>
 #include <__concepts/referenceable.h>
-#include <__concepts/same_as.h>
 #include <__config>
 #include <__functional/bind_back.h>
 #include <__functional/invoke.h>
@@ -43,7 +42,6 @@
 #include <__type_traits/maybe_const.h>
 #include <__type_traits/remove_cvref.h>
 #include <__utility/forward.h>
-#include <__utility/forward_like.h>
 #include <__utility/in_place.h>
 #include <__utility/move.h>
 
@@ -99,19 +97,15 @@ public:
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
 
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place: the base's, with the body given the function's result. A loop
-  // over ranges::backward(*this) is its friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
-    auto&& __func = *__self.__func_;
-    for (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_))
-      __body(std::invoke(__func, static_cast<decltype(__e)&&>(__e)));
+  // -foperator-for: the loop, in place: the base's, with the body given the function's result.
+  // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
+  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
+    for (auto&& __e : __base_)
+      __body(std::invoke(*__func_, static_cast<decltype(__e)&&>(__e)));
   }
-  template <class _Self>
-    requires same_as<remove_cvref_t<_Self>, transform_view>
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
-    auto&& __func = *__b.range.__func_;
-    for (auto&& __e : ranges::backward(std::forward<_Self>(__b.range).__base_))
-      __body(std::invoke(__func, static_cast<decltype(__e)&&>(__e)));
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<transform_view> __b, __stmt __body) {
+    for (auto&& __e : ranges::backward(__b.range.__base_))
+      __body(std::invoke(*__b.range.__func_, static_cast<decltype(__e)&&>(__e)));
   }
 #  endif
 

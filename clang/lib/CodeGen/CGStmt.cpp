@@ -1564,7 +1564,9 @@ void CodeGenFunction::EmitCXXForExpansionStmt(const CXXForExpansionStmt &S,
   // inside its own expansion (a loop over the same type in the body). Set
   // aside an enclosing expansion's, and forget these on the way out.
   SmallVector<std::pair<const Decl *, Address>, 8> SetAside;
-  if (!FD->parameters().empty() && LocalDeclMap.count(FD->parameters().front()))
+  if (llvm::any_of(ForExpansionStack, [&](const ForExpansionFrame &F) {
+        return F.StmtParam == StmtParam;
+      }))
     for (auto &KV : LocalDeclMap)
       if (KV.first->getParentFunctionOrMethod() == FD)
         SetAside.push_back({KV.first, KV.second});

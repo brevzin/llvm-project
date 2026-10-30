@@ -2694,16 +2694,11 @@ namespace {
 enum class OperatorForKind { None, Member, NonMember };
 } // namespace
 
-/// '__range', as it was given: an xvalue if bound to an rvalue.
-static Expr *forwardedRange(Sema &S, VarDecl *RangeVar, SourceLocation Loc) {
+/// '__range', an lvalue (as begin and end are given it).
+static Expr *rangeLValue(Sema &S, VarDecl *RangeVar, SourceLocation Loc) {
   QualType RangeTy = RangeVar->getType().getNonReferenceType();
   ExprResult Object = S.BuildDeclRefExpr(RangeVar, RangeTy, VK_LValue, Loc);
-  if (Object.isInvalid())
-    return nullptr;
-  if (RangeVar->getType()->isRValueReferenceType())
-    return ImplicitCastExpr::Create(S.Context, RangeTy, CK_NoOp, Object.get(),
-                                    nullptr, VK_XValue, FPOptionsOverride());
-  return Object.get();
+  return Object.isInvalid() ? nullptr : Object.get();
 }
 
 /// The argument of the statement parameter: a placeholder.
@@ -2716,6 +2711,38 @@ static DeclarationName operatorForName(Sema &S) {
   return &S.Context.Idents.get("operator for");
 }
 
+/// '__range.operator for(<statement>)', or 'operator for(__range,
+/// <statement>)'.
+static ExprResult buildOperatorForCall(Sema &S, OperatorForKind Kind,
+                                       VarDecl *RangeVar, SourceLocation Loc,
+                                       SourceLocation RParenLoc) {
+  Expr *Object = rangeLValue(S, RangeVar, Loc);
+  if (!Object)
+    return ExprError();
+  DeclarationNameInfo Name(operatorForName(S), Loc);
+  if (Kind == OperatorForKind::Member) {
+    CXXScopeSpec SS;
+    ExprResult Callee = S.BuildMemberReferenceExpr(
+        Object, Object->getType(), Loc, /*IsArrow=*/false, SS, SourceLocation(),
+        /*FirstQualifierInScope=*/nullptr, Name,
+        /*TemplateArgs=*/nullptr, S.getCurScope());
+    if (Callee.isInvalid())
+      return ExprError();
+    Expr *Args[] = {stmtPlaceholder(S, Loc)};
+    return S.BuildCallExpr(S.getCurScope(), Callee.get(), Loc, Args, RParenLoc);
+  }
+  auto *Callee = UnresolvedLookupExpr::Create(
+      S.Context, /*NamingClass=*/nullptr, NestedNameSpecifierLoc(), Name,
+      /*RequiresADL=*/true, UnresolvedSetIterator(), UnresolvedSetIterator(),
+      /*KnownDependent=*/false, /*KnownInstantiationDependent=*/false);
+  Expr *Args[] = {Object, stmtPlaceholder(S, Loc)};
+  return S.BuildCallExpr(S.getCurScope(), Callee, Loc, Args, RParenLoc);
+}
+
+/// An 'operator for' is used only if one can be called -- a member, else a
+/// non-member -- as on a const object a class may have only non-const ones
+/// (as with begin), and std::ranges' generic one, for ranges::backward_t, is
+/// visible to every range in std::ranges.
 static OperatorForKind classifyOperatorFor(Sema &S, VarDecl *RangeVar,
                                            SourceLocation Loc) {
   if (!S.getLangOpts().OperatorFor || !S.Context.StmtParamDecl)
@@ -2724,25 +2751,18 @@ static OperatorForKind classifyOperatorFor(Sema &S, VarDecl *RangeVar,
   auto *RD = T->getAsCXXRecordDecl();
   if (!RD || !S.isCompleteType(Loc, T))
     return OperatorForKind::None;
+  auto Callable = [&](OperatorForKind Kind) {
+    Sema::SFINAETrap Trap(S);
+    ExprResult Call = buildOperatorForCall(S, Kind, RangeVar, Loc, Loc);
+    return !Trap.hasErrorOccurred() && Call.isUsable();
+  };
   LookupResult R(S, operatorForName(S), Loc, Sema::LookupMemberName);
   S.LookupQualifiedName(R, RD);
-  if (!R.empty())
+  if (!R.empty() && Callable(OperatorForKind::Member))
     return OperatorForKind::Member;
-
-  // A non-member: only if one is viable. (std::ranges' generic one, for
-  // ranges::backward_t, is visible to every range in std::ranges.)
-  Expr *Object = forwardedRange(S, RangeVar, Loc);
-  if (!Object)
-    return OperatorForKind::None;
-  Expr *Args[] = {Object, stmtPlaceholder(S, Loc)};
-  OverloadCandidateSet Candidates(Loc, OverloadCandidateSet::CSK_Normal);
-  S.AddArgumentDependentLookupCandidates(operatorForName(S), Loc, Args,
-                                         /*ExplicitTemplateArgs=*/nullptr,
-                                         Candidates);
-  OverloadCandidateSet::iterator Best;
-  return Candidates.BestViableFunction(S, Loc, Best) == OR_No_Viable_Function
-             ? OperatorForKind::None
-             : OperatorForKind::NonMember;
+  if (R.empty() && Callable(OperatorForKind::NonMember))
+    return OperatorForKind::NonMember;
+  return OperatorForKind::None;
 }
 
 /// The insertions of \p Param in \p S -- an instantiated 'operator for''s
@@ -2787,32 +2807,8 @@ static StmtResult BuildCXXForExpansionStmt(
   VarDecl *LoopVar = cast<VarDecl>(LoopVarDS->getSingleDecl());
   QualType RangeTy = RangeVar->getType().getNonReferenceType();
 
-  // '__range.operator for(<statement>)', or 'operator for(__range,
-  // <statement>)'.
-  Expr *Object = forwardedRange(S, RangeVar, ColonLoc);
-  if (!Object)
-    return StmtError();
-  DeclarationNameInfo Name(operatorForName(S), ColonLoc);
-  ExprResult Call;
-  if (Kind == OperatorForKind::Member) {
-    CXXScopeSpec SS;
-    ExprResult Callee = S.BuildMemberReferenceExpr(
-        Object, RangeTy, ColonLoc, /*IsArrow=*/false, SS, SourceLocation(),
-        /*FirstQualifierInScope=*/nullptr, Name, /*TemplateArgs=*/nullptr,
-        S.getCurScope());
-    if (Callee.isInvalid())
-      return StmtError();
-    Expr *Args[] = {stmtPlaceholder(S, ColonLoc)};
-    Call = S.BuildCallExpr(S.getCurScope(), Callee.get(), ColonLoc, Args,
-                           RParenLoc);
-  } else {
-    auto *Callee = UnresolvedLookupExpr::Create(
-        Context, /*NamingClass=*/nullptr, NestedNameSpecifierLoc(), Name,
-        /*RequiresADL=*/true, UnresolvedSetIterator(), UnresolvedSetIterator(),
-        /*KnownDependent=*/false, /*KnownInstantiationDependent=*/false);
-    Expr *Args[] = {Object, stmtPlaceholder(S, ColonLoc)};
-    Call = S.BuildCallExpr(S.getCurScope(), Callee, ColonLoc, Args, RParenLoc);
-  }
+  ExprResult Call =
+      buildOperatorForCall(S, Kind, RangeVar, ColonLoc, RParenLoc);
   if (Call.isInvalid())
     return StmtError();
   auto *CE = dyn_cast<CallExpr>(Call.get()->IgnoreImplicit());

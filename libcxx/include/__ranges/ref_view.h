@@ -12,7 +12,6 @@
 
 #include <__concepts/convertible_to.h>
 #include <__concepts/different_from.h>
-#include <__concepts/same_as.h>
 #include <__config>
 #include <__iterator/concepts.h>
 #include <__iterator/incrementable_traits.h>
@@ -27,7 +26,6 @@
 #include <__ranges/size.h>
 #include <__ranges/view_interface.h>
 #include <__type_traits/is_object.h>
-#include <__type_traits/remove_cvref.h>
 #include <__utility/declval.h>
 #include <__utility/forward.h>
 
@@ -56,15 +54,13 @@ public:
 
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr _Range& base() const { return *__range_; }
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place: the range's. A loop
-  // over ranges::backward(*this) is its friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
-    for (auto&& __e : *__self.__range_)
+  // -foperator-for: the loop, in place: the range's.
+  // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
+  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) const {
+    for (auto&& __e : *__range_)
       __body(static_cast<decltype(__e)&&>(__e));
   }
-  template <class _Self>
-    requires same_as<remove_cvref_t<_Self>, ref_view>
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<ref_view> __b, __stmt __body) {
     for (auto&& __e : ranges::backward(*__b.range.__range_))
       __body(static_cast<decltype(__e)&&>(__e));
   }

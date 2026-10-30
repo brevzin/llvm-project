@@ -12,7 +12,6 @@
 
 #include <__concepts/constructible.h>
 #include <__concepts/convertible_to.h>
-#include <__concepts/same_as.h>
 #include <__config>
 #include <__functional/bind_back.h>
 #include <__functional/invoke.h>
@@ -30,10 +29,8 @@
 #include <__type_traits/is_nothrow_constructible.h>
 #include <__type_traits/is_object.h>
 #include <__type_traits/maybe_const.h>
-#include <__type_traits/remove_cvref.h>
 #include <__utility/as_const.h>
 #include <__utility/forward.h>
-#include <__utility/forward_like.h>
 #include <__utility/in_place.h>
 #include <__utility/move.h>
 
@@ -76,24 +73,21 @@ public:
   _LIBCPP_HIDE_FROM_ABI constexpr _View base() && { return std::move(__base_); }
 
 #  if _LIBCPP_HAS_OPERATOR_FOR
-  // -foperator-for: the loop, in place: forward, the base's until the predicate fails. A loop
-  // over ranges::backward(*this) is its friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(this auto&& __self, __stmt __body) {
-    auto&& __pred = *__self.__pred_;
-    for (auto&& __e : std::forward_like<decltype(__self)>(__self.__base_)) {
-      if (!std::invoke(__pred, std::as_const(__e)))
+  // -foperator-for: the loop, in place: the base's, until the predicate fails.
+  // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
+  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
+    for (auto&& __e : __base_) {
+      if (!std::invoke(*__pred_, std::as_const(__e)))
         return;
       __body(static_cast<decltype(__e)&&>(__e));
     }
   }
-  template <class _Self>
-    requires same_as<remove_cvref_t<_Self>, take_while_view>
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Self> __b, __stmt __body) {
+  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<take_while_view> __b, __stmt __body) {
     // First where it stops, then that prefix, backward.
-    auto&& __pred = *__b.range.__pred_;
-    auto&& __base = std::forward<_Self>(__b.range).__base_;
-    auto __stop   = ranges::begin(__base);
-    for (auto __end = ranges::end(__base); __stop != __end && std::invoke(__pred, std::as_const(*__stop)); ++__stop) {
+    auto& __base = __b.range.__base_;
+    auto __stop  = ranges::begin(__base);
+    for (auto __end = ranges::end(__base); __stop != __end && std::invoke(*__b.range.__pred_, std::as_const(*__stop));
+         ++__stop) {
     }
     auto __prefix = ranges::subrange(ranges::begin(__base), std::move(__stop));
     for (auto&& __e : ranges::backward(__prefix))
