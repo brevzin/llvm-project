@@ -115,6 +115,16 @@ static_assert(^^Test::type != ^^myns::Test::type);
 static_assert(^^decltype(int_alias{}) == ^^int);
 static_assert(^^decltype(int_alias{}) != ^^int_alias);
 
+// An alias of a cv-qualified type is still an alias; cv-qualifiers written on
+// top of an alias are not.
+using cint_alias = const int;
+using vint_alias = volatile int;
+static_assert(^^cint_alias != ^^int const);
+static_assert(^^cint_alias == ^^cint_alias);
+static_assert(^^vint_alias != ^^int volatile);
+static_assert(^^cint_alias const == ^^int const);
+static_assert(^^cint_alias volatile == ^^int const volatile);
+
 // Check equality semantics of enumerations and enumerators.
 static_assert(^^Enum::A != ^^Enum::B);
 static_assert(^^Enum::A != ^^EnumCls::A);

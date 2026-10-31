@@ -141,6 +141,23 @@ static_assert(!is_object(^^alias));
 static_assert(!is_enumerator(^^alias));
 static_assert(!is_data_member_spec(^^alias));
 
+// Aliases of cv-qualified and reference types are type aliases too, whether
+// named directly or found by 'members_of'; cv-qualifiers written on top of an
+// alias are not.
+using const_alias = const type;
+using volatile_alias = volatile type;
+using ref_alias = type &;
+static_assert(is_type_alias(^^const_alias));
+static_assert(is_type_alias(^^volatile_alias));
+static_assert(is_type_alias(^^ref_alias));
+static_assert(!is_type_alias(^^const alias));
+static_assert(!is_type_alias(^^const const_alias));
+static_assert(dealias(^^const_alias) == ^^const type);
+
+struct WithConstAlias { using value_type = int const; };
+static_assert(is_type_alias(
+    members_of(^^WithConstAlias, std::meta::access_context::unchecked())[0]));
+
 static_assert(!is_type(^^var));
 static_assert(!is_complete_type(^^var));
 static_assert(!is_type_alias(^^var));

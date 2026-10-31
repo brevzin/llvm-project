@@ -1763,37 +1763,45 @@ LinkageInfo LinkageComputer::getLVForValue(const APValue &V,
 }
 
 static QualType unwrapReflectedType(QualType QT) {
-  bool IsConst = QT.isConstQualified();
-  bool IsVolatile = QT.isVolatileQualified();
-  bool UnwrapAliases = (IsConst || IsVolatile);
+  // cv-qualifiers written on top of an alias (e.g., 'const Alias') give a type
+  // that is not itself an alias, so the alias beneath them is unwrapped. Only
+  // local qualifiers count: those of the alias's own underlying type (e.g.,
+  // 'using Alias = const int') leave the alias intact.
+  bool IsConst = false;
+  bool IsVolatile = false;
+  bool UnwrapAliases = false;
 
+  // Each step replaces QT wholesale, dropping its local qualifiers, so take
+  // one step per iteration and record those qualifiers first (a step may also
+  // expose new ones, e.g., the 'const' of a LocInfoType's 'const T').
   void *AsPtr;
   do {
+    IsConst |= QT.isLocalConstQualified();
+    IsVolatile |= QT.isLocalVolatileQualified();
+    UnwrapAliases |= IsConst || IsVolatile;
     AsPtr = QT.getAsOpaquePtr();
 
     if (const auto *LIT = dyn_cast<LocInfoType>(QT))
       QT = LIT->getType();
-    if (const auto *STTPT = dyn_cast<SubstTemplateTypeParmType>(QT);
-        STTPT && !STTPT->isDependentType())
+    else if (const auto *STTPT = dyn_cast<SubstTemplateTypeParmType>(QT);
+             STTPT && !STTPT->isDependentType())
       QT = STTPT->getReplacementType();
-    if (const auto *RST = dyn_cast<ReflectionSpliceType>(QT);
-        RST && !RST->isDependentType())
+    else if (const auto *RST = dyn_cast<ReflectionSpliceType>(QT);
+             RST && !RST->isDependentType())
       QT = RST->getUnderlyingType();
-    if (const auto *TST = dyn_cast<TemplateSpecializationType>(QT);
-        TST && !TST->isTypeAlias()) {
+    else if (const auto *TST = dyn_cast<TemplateSpecializationType>(QT);
+             TST && !TST->isTypeAlias())
       QT = TST->desugar();
-    }
-    if (const auto *DTST = dyn_cast<DeducedTemplateSpecializationType>(QT))
+    else if (const auto *DTST =
+                 dyn_cast<DeducedTemplateSpecializationType>(QT))
       QT = DTST->getDeducedType();
-    if (const auto *DTT = dyn_cast<DecltypeType>(QT)) {
+    else if (const auto *DTT = dyn_cast<DecltypeType>(QT)) {
       QT = DTT->desugar();
       UnwrapAliases = true;
-    }
-    if (const auto *UT = dyn_cast<UsingType>(QT);
-        UT && UnwrapAliases)
+    } else if (const auto *UT = dyn_cast<UsingType>(QT); UT && UnwrapAliases)
       QT = UT->desugar();
-    if (const auto *TDT = dyn_cast<TypedefType>(QT);
-        TDT && UnwrapAliases)
+    else if (const auto *TDT = dyn_cast<TypedefType>(QT);
+             TDT && UnwrapAliases)
       QT = TDT->desugar();
   } while (QT.getAsOpaquePtr() != AsPtr);
 

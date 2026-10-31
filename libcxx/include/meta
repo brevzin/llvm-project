@@ -2909,50 +2909,58 @@ struct pretty_printer {
         requires (is_function(R))
       static consteval string_t render();
 
-    template <info R>  // Value types.
-        requires (is_type(R) && !(is_const(R) || is_volatile(R)) &&
-                  !is_pointer_type(R) && !is_array_type(R) &&
-                  !is_function_type(R) && !is_reference_type(R) &&
-                  !is_member_pointer_type(R))
+    template <info R>  // Value types and type aliases.
+        requires (is_type(R) &&
+                  (is_type_alias(R) ||
+                   (!(is_const(R) || is_volatile(R)) &&
+                    !is_pointer_type(R) && !is_array_type(R) &&
+                    !is_function_type(R) && !is_reference_type(R) &&
+                    !is_member_pointer_type(R))))
       static consteval string_t render();
 
     template <info R>  // CV-qualified non-function, non-arry types.
-        requires (is_type(R) && (is_const(R) || is_volatile(R)) &&
+        requires (is_type(R) && !is_type_alias(R) &&
+                  (is_const(R) || is_volatile(R)) &&
                   !is_array_type(R) && !is_function_type(R))
       static consteval string_t render();
 
     template <info R>  // Reference types.
-        requires (is_type(R) && !(is_const(R) || is_volatile(R)) &&
+        requires (is_type(R) && !is_type_alias(R) &&
+                  !(is_const(R) || is_volatile(R)) &&
                   is_reference_type(R))
       static consteval string_t render();
 
     template <info R>  // Unqualified array types.
-        requires (is_type(R) && is_array_type(R))
+        requires (is_type(R) && !is_type_alias(R) && is_array_type(R))
       static consteval string_t render();
 
     template <info R>  // Function types.
-        requires (is_type(R) && is_function_type(R))
+        requires (is_type(R) && !is_type_alias(R) && is_function_type(R))
       static consteval string_t render();
 
     template <info R>  // Non-function, non-member pointer types.
-        requires (is_type(R) && is_pointer_type(R) &&
+        requires (is_type(R) && !is_type_alias(R) &&
+                  is_pointer_type(R) &&
                   !(is_const(R) || is_volatile(R)) &&
                   !is_function_type(remove_pointer(R)))
       static consteval string_t render();
 
     template <info R>  // Function pointer types.
-        requires (is_type(R) && is_pointer_type(R) &&
+        requires (is_type(R) && !is_type_alias(R) &&
+                  is_pointer_type(R) &&
                   is_function_type(remove_pointer(R)))
       static consteval string_t render();
 
     template <info R>  // Pointer to data member types.
-        requires (is_type(R) && is_member_pointer_type(R) &&
+        requires (is_type(R) && !is_type_alias(R) &&
+                  is_member_pointer_type(R) &&
                   !(is_const(R) || is_volatile(R)) &&
                   !is_member_function_pointer_type(R))
       static consteval string_t render();
 
     template <info R>  // Pointer to member function types.
-        requires (is_type(R) && is_member_function_pointer_type(R))
+        requires (is_type(R) && !is_type_alias(R) &&
+                  is_member_function_pointer_type(R))
       static consteval string_t render();
 
     template <info R>  // Base specifiers.
@@ -3183,11 +3191,13 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 }
 
 template <typename CharT>
-template <info R>  // Value types.
-    requires (is_type(R) && !(is_const(R) || is_volatile(R)) &&
-              !is_pointer_type(R) && !is_array_type(R) &&
-              !is_function_type(R) && !is_reference_type(R) &&
-              !is_member_pointer_type(R))
+template <info R>  // Value types and type aliases.
+    requires (is_type(R) &&
+              (is_type_alias(R) ||
+               (!(is_const(R) || is_volatile(R)) &&
+                !is_pointer_type(R) && !is_array_type(R) &&
+                !is_function_type(R) && !is_reference_type(R) &&
+                !is_member_pointer_type(R))))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
   string_t result;
 
@@ -3233,7 +3243,8 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
 template <typename CharT>
 template <info R>  // CV-qualified non-function, non-array types.
-    requires (is_type(R) && (is_const(R) || is_volatile(R)) &&
+    requires (is_type(R) && !is_type_alias(R) &&
+              (is_const(R) || is_volatile(R)) &&
               !is_array_type(R) && !is_function_type(R))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
   string_t result;
@@ -3246,7 +3257,8 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
 template <typename CharT>
 template <info R>  // Reference types.
-    requires (is_type(R) && !(is_const(R) || is_volatile(R)) &&
+    requires (is_type(R) && !is_type_alias(R) &&
+              !(is_const(R) || is_volatile(R)) &&
               is_reference_type(R))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
   string_t result = render<remove_reference(R)>() + string_constant(" &");
@@ -3257,7 +3269,7 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
 template <typename CharT>
 template <info R>  // Array types.
-    requires (is_type(R) && is_array_type(R))
+    requires (is_type(R) && !is_type_alias(R) && is_array_type(R))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
   string_t result = render<remove_all_extents(R)>();
 
@@ -3273,7 +3285,8 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
 template <typename CharT>
 template <info R>  // Non-function, non-member pointer types.
-    requires (is_type(R) && is_pointer_type(R) &&
+    requires (is_type(R) && !is_type_alias(R) &&
+              is_pointer_type(R) &&
               !(is_const(R) || is_volatile(R)) &&
               !is_function_type(remove_pointer(R)))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
@@ -3282,7 +3295,8 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
 template <typename CharT>
 template <info R>  // Function pointers.
-    requires (is_type(R) && is_pointer_type(R) &&
+    requires (is_type(R) && !is_type_alias(R) &&
+              is_pointer_type(R) &&
               is_function_type(remove_pointer(R)))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
@@ -3307,7 +3321,7 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
 template <typename CharT>
 template <info R>  // Function types.
-    requires (is_type(R) && is_function_type(R))
+    requires (is_type(R) && !is_type_alias(R) && is_function_type(R))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 #if __has_feature(parameter_reflection)
   string_t result = render<return_type_of(R)>() + string_constant("(");
@@ -3339,7 +3353,8 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
 template <typename CharT>
 template <info R>  // Pointer to data member types.
-    requires (is_type(R) && is_member_pointer_type(R) &&
+    requires (is_type(R) && !is_type_alias(R) &&
+              is_member_pointer_type(R) &&
               !(is_const(R) || is_volatile(R)) &&
               !is_member_function_pointer_type(R))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
@@ -3352,7 +3367,8 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 
 template <typename CharT>
 template <info R>  // Pointer to member function types.
-    requires (is_type(R) && is_member_function_pointer_type(R))
+    requires (is_type(R) && !is_type_alias(R) &&
+              is_member_function_pointer_type(R))
 consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
   constexpr auto FnTy = type_of_member_from_memptr<R>();
 

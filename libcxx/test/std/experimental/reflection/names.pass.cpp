@@ -123,6 +123,27 @@ static_assert(display_string_of(template_arguments_of(^^WithAutoPack<3>)[0]) ==
               "3");
 static_assert(display_string_of(^^decltype([] {})) == "(anonymous type)");
 
+// Type aliases are displayed by name, whatever type they alias.
+using ConstAlias = const int;
+using RefAlias = int &;
+using PtrAlias = int *;
+using ArrAlias = int[2];
+using FnAlias = void(int);
+using MemPtrAlias = int TCls<int>::*;
+template <typename T> using PtrTAlias = T *;
+static_assert(display_string_of(^^Alias) == "Alias");
+static_assert(display_string_of(^^ConstAlias) == "ConstAlias");
+static_assert(display_string_of(^^RefAlias) == "RefAlias");
+static_assert(display_string_of(^^PtrAlias) == "PtrAlias");
+static_assert(display_string_of(^^ArrAlias) == "ArrAlias");
+static_assert(display_string_of(^^FnAlias) == "FnAlias");
+static_assert(display_string_of(^^MemPtrAlias) == "MemPtrAlias");
+static_assert(display_string_of(^^TAlias<int>) == "TAlias<int>");
+static_assert(display_string_of(^^PtrTAlias<int>) == "PtrTAlias<int>");
+static_assert(display_string_of(^^const Alias) == "const int");
+static_assert(display_string_of(^^const ConstAlias) == "const int");
+static_assert(display_string_of(^^RefAlias &&) == "int &");
+
 
 struct Base {};
 struct Cls : Base {
