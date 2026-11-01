@@ -3786,13 +3786,13 @@ public:
                                ArrayRef<const Attr *> Attrs = {});
   void EmitStmtInsert(const CXXStmtInsertExpr &E);
 
-  /// An 'operator for' being expanded: the loop, its statement parameter, the
+  /// An 'operator for' being expanded: the loop, the 'operator for', the
   /// loop's exit (where a 'break' in the body goes), and what 'return' and
   /// 'this' mean where the loop is -- in the body, inserted inside the
   /// expansion, they mean that again.
   struct ForExpansionFrame {
     const CXXForExpansionStmt *Loop;
-    const ParmVarDecl *StmtParam;
+    const FunctionDecl *OperatorFor;
     JumpDest Exit;
     std::optional<JumpDest> OuterReturn;
     llvm::Value *OuterThis;

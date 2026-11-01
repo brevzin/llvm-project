@@ -631,7 +631,7 @@ void ASTStmtWriter::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *E) {
 void ASTStmtWriter::VisitCXXStmtInsertExpr(CXXStmtInsertExpr *E) {
   VisitExpr(E);
   Record.push_back(E->getNumArgs());
-  Record.AddDeclRef(E->getParam());
+  Record.AddDeclRef(E->getOperatorFor());
   Record.AddSourceLocation(E->getBeginLoc());
   Record.AddSourceLocation(E->getRParenLoc());
   for (Expr *Arg : E->getArgs())

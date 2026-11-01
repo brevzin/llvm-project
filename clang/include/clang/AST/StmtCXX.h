@@ -837,10 +837,10 @@ class CXXStmtInsertExpr;
 
 /// A range-based for statement over a range whose type has an
 /// 'operator for' (-foperator-for). The loop is that 'operator for' expanded
-/// in place -- called with the range as its object argument and the loop
-/// body as its '__stmt' parameter -- with the body inserted at each of its
-/// insertions ('body(e)', a CXXStmtInsertExpr) and the loop variable
-/// initialized there from the insertion's argument.
+/// in place -- called with the range (as the object argument of a member, or
+/// the argument of a non-member found by ADL) -- with the body inserted at
+/// each of its insertions ('co_yield e', a CXXStmtInsertExpr) and the loop
+/// variable initialized there from 'e'.
 ///
 /// 'operator for' itself is instantiated once, like any template; the
 /// expansion is CodeGen's: it emits the instantiated body in place.
@@ -884,8 +884,7 @@ public:
   DeclStmt *getLoopVarStmt() const { return cast<DeclStmt>(SubStmts[LOOPVAR]); }
   VarDecl *getLoopVariable() const;
   /// The call of 'operator for' the loop expands: its callee is the
-  /// instantiated 'operator for', its arguments those of the parameters (the
-  /// statement parameter's, a placeholder).
+  /// instantiated 'operator for', its argument (if a non-member) the range.
   Expr *getCall() const { return cast<Expr>(SubStmts[CALL]); }
   FunctionDecl *getOperatorFor() const;
   Stmt *getBody() const { return SubStmts[BODY]; }

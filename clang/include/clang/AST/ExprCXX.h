@@ -7001,34 +7001,37 @@ public:
   friend class ASTStmtReader;
 };
 
-/// An insertion of a statement parameter, 'body(args...)', in an
-/// 'operator for' (-foperator-for): where the loop's body goes, with the loop
-/// variable initialized from the argument. Valid only as an expression
-/// statement directly in the 'operator for' whose parameter it names.
+/// -foperator-for: whether \p FD is an 'operator for'.
+inline bool isOperatorFor(const FunctionDecl *FD) {
+  return FD && FD->getDeclName().isIdentifier() &&
+         FD->getName() == "operator for";
+}
+
+/// -foperator-for: 'co_yield e' in an 'operator for' -- where the loop's body
+/// goes, with the loop variable initialized from 'e'.
 class CXXStmtInsertExpr final : public Expr {
   friend class ASTStmtReader;
 
-  ParmVarDecl *Param = nullptr;
+  FunctionDecl *OperatorFor = nullptr;
   Stmt **Args = nullptr;
   unsigned NumArgs = 0;
   SourceLocation BeginLoc;
   SourceLocation RParenLoc;
 
-  CXXStmtInsertExpr(const ASTContext &C, ParmVarDecl *Param,
+  CXXStmtInsertExpr(const ASTContext &C, FunctionDecl *OperatorFor,
                     ArrayRef<Expr *> Args, SourceLocation BeginLoc,
                     SourceLocation RParenLoc);
   CXXStmtInsertExpr(const ASTContext &C, EmptyShell Empty, unsigned NumArgs);
 
 public:
-  static CXXStmtInsertExpr *Create(const ASTContext &C, ParmVarDecl *Param,
-                                   ArrayRef<Expr *> Args,
-                                   SourceLocation BeginLoc,
-                                   SourceLocation RParenLoc);
+  static CXXStmtInsertExpr *
+  Create(const ASTContext &C, FunctionDecl *OperatorFor, ArrayRef<Expr *> Args,
+         SourceLocation BeginLoc, SourceLocation RParenLoc);
   static CXXStmtInsertExpr *CreateEmpty(const ASTContext &C, unsigned NumArgs);
 
-  /// The statement parameter inserted.
-  ParmVarDecl *getParam() const { return Param; }
-  void setParam(ParmVarDecl *P) { Param = P; }
+  /// The 'operator for' whose loop body this inserts.
+  FunctionDecl *getOperatorFor() const { return OperatorFor; }
+  void setOperatorFor(FunctionDecl *FD) { OperatorFor = FD; }
 
   unsigned getNumArgs() const { return NumArgs; }
   Expr *getArg(unsigned I) const { return cast<Expr>(Args[I]); }

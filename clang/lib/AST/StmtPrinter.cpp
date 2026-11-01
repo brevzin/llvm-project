@@ -448,13 +448,8 @@ void StmtPrinter::VisitCXXForExpansionStmt(CXXForExpansionStmt *Node) {
 }
 
 void StmtPrinter::VisitCXXStmtInsertExpr(CXXStmtInsertExpr *Node) {
-  OS << Node->getParam()->getName() << "(";
-  for (unsigned I = 0, N = Node->getNumArgs(); I != N; ++I) {
-    if (I)
-      OS << ", ";
-    PrintExpr(Node->getArg(I));
-  }
-  OS << ")";
+  OS << "co_yield ";
+  PrintExpr(Node->getArg(0));
 }
 
 void StmtPrinter::VisitCXXForRangeStmt(CXXForRangeStmt *Node) {

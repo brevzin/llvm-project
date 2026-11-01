@@ -641,7 +641,7 @@ void ASTStmtReader::VisitCXXMacroInvocationExpr(CXXMacroInvocationExpr *E) {
 void ASTStmtReader::VisitCXXStmtInsertExpr(CXXStmtInsertExpr *E) {
   VisitExpr(E);
   Record.skipInts(1);
-  E->setParam(readDeclAs<ParmVarDecl>());
+  E->setOperatorFor(readDeclAs<FunctionDecl>());
   SourceLocation B = readSourceLocation();
   SourceLocation R = readSourceLocation();
   E->setLocs(B, R);

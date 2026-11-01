@@ -11737,9 +11737,9 @@ public:
       BuildForRangeKind Kind,
       ArrayRef<MaterializeTemporaryExpr *> LifetimeExtendTemps = {});
 
-  /// Build the insertion 'Param(Args...)' of statement parameter \p Param.
-  ExprResult BuildStmtInsertExpr(ParmVarDecl *Param, SourceLocation Loc,
-                                 MultiExprArg Args, SourceLocation RParenLoc);
+  /// -foperator-for: 'co_yield Value' in an 'operator for': where the loop
+  /// body is inserted.
+  ExprResult BuildStmtInsertExpr(SourceLocation Loc, Expr *Value);
 
   /// FinishCXXForRangeStmt - Attach the body to a C++0x for-range statement.
   /// This is a separate step from ActOnCXXForRangeStmt because analysis of the

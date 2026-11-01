@@ -99,13 +99,13 @@ public:
 #  if _LIBCPP_HAS_OPERATOR_FOR
   // -foperator-for: the loop, in place: the base's, with the body given the function's result.
   // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
+  _LIBCPP_HIDE_FROM_ABI operator for() {
     for (auto&& __e : __base_)
-      __body(std::invoke(*__func_, static_cast<decltype(__e)&&>(__e)));
+      co_yield std::invoke(*__func_, static_cast<decltype(__e)&&>(__e));
   }
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<transform_view> __b, __stmt __body) {
+  friend _LIBCPP_HIDE_FROM_ABI operator for(backward_t<transform_view> __b) {
     for (auto&& __e : ranges::backward(__b.range.__base_))
-      __body(std::invoke(*__b.range.__func_, static_cast<decltype(__e)&&>(__e)));
+      co_yield std::invoke(*__b.range.__func_, static_cast<decltype(__e)&&>(__e));
   }
 #  endif
 

@@ -88,15 +88,15 @@ public:
   // -foperator-for: the loop, in place: the base's, with the body only for the elements that
   // satisfy the predicate (each tested once).
   // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
+  _LIBCPP_HIDE_FROM_ABI operator for() {
     for (auto&& __e : __base_)
       if (std::invoke(*__pred_, __e))
-        __body(static_cast<decltype(__e)&&>(__e));
+        co_yield __e;
   }
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<filter_view> __b, __stmt __body) {
+  friend _LIBCPP_HIDE_FROM_ABI operator for(backward_t<filter_view> __b) {
     for (auto&& __e : ranges::backward(__b.range.__base_))
       if (std::invoke(*__b.range.__pred_, __e))
-        __body(static_cast<decltype(__e)&&>(__e));
+        co_yield __e;
   }
 #  endif
 

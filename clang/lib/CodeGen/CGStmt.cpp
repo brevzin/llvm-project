@@ -1551,13 +1551,9 @@ void CodeGenFunction::EmitCXXForExpansionStmt(const CXXForExpansionStmt &S,
     CGM.ErrorUnsupported(&S, "'operator for' without a definition");
     return;
   }
-  const ParmVarDecl *StmtParam = nullptr;
-  for (const ParmVarDecl *P : FD->parameters())
-    if (getContext().isStmtParamType(P->getType()))
-      StmtParam = P;
 
-  ForExpansionFrame Frame{&S,           StmtParam,      Exit, ExpansionReturn,
-                          CXXThisValue, CXXABIThisValue};
+  ForExpansionFrame Frame{
+      &S, FD, Exit, ExpansionReturn, CXXThisValue, CXXABIThisValue};
 
   // The expansion's parameters and locals are its own: the same
   // 'operator for' may be expanded more than once in this function, or even
@@ -1565,7 +1561,7 @@ void CodeGenFunction::EmitCXXForExpansionStmt(const CXXForExpansionStmt &S,
   // aside an enclosing expansion's, and forget these on the way out.
   SmallVector<std::pair<const Decl *, Address>, 8> SetAside;
   if (llvm::any_of(ForExpansionStack, [&](const ForExpansionFrame &F) {
-        return F.StmtParam == StmtParam;
+        return F.OperatorFor == FD;
       }))
     for (auto &KV : LocalDeclMap)
       if (KV.first->getParentFunctionOrMethod() == FD)
@@ -1583,8 +1579,8 @@ void CodeGenFunction::EmitCXXForExpansionStmt(const CXXForExpansionStmt &S,
     CXXABIThisValue = Frame.OuterABIThis;
   });
 
-  // The parameters, bound to the call's arguments: the object argument (the
-  // range) and any others. (The statement parameter's is a placeholder.)
+  // The parameters, bound to the call's arguments: the range, as the object
+  // argument of a member or the argument of a non-member.
   ArrayRef<const Expr *> Args(Call->getArgs(), Call->getNumArgs());
   if (const auto *MCE = dyn_cast<CXXMemberCallExpr>(Call)) {
     LValue Object = EmitLValue(MCE->getImplicitObjectArgument());
@@ -1594,8 +1590,6 @@ void CodeGenFunction::EmitCXXForExpansionStmt(const CXXForExpansionStmt &S,
   for (unsigned I = 0, N = FD->getNumParams(); I != N && I != Args.size();
        ++I) {
     const ParmVarDecl *P = FD->getParamDecl(I);
-    if (P == StmtParam)
-      continue;
     QualType Ty = P->getType();
     Address Slot = CreateMemTemp(Ty, P->getName());
     if (Ty->isReferenceType()) {
@@ -1627,7 +1621,8 @@ void CodeGenFunction::EmitStmtInsert(const CXXStmtInsertExpr &E) {
   // -- belongs to the expansion around that loop's.)
   const ForExpansionFrame *Found = nullptr;
   for (const ForExpansionFrame &F : llvm::reverse(ForExpansionStack))
-    if (F.StmtParam == E.getParam()) {
+    if (F.OperatorFor->getCanonicalDecl() ==
+        E.getOperatorFor()->getCanonicalDecl()) {
       Found = &F;
       break;
     }

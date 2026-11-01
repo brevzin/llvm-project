@@ -13,9 +13,11 @@
 
 // -foperator-for: a range-based for loop over a type with an 'operator for'
 // -- a member, or a non-member found by argument-dependent lookup, as begin
-// and end are -- expands it in place, with the loop body as its '__stmt'
-// parameter: the body goes wherever 'operator for' inserts it ('body(e)'),
-// with the loop variable initialized from the argument. The body is parsed
+// and end are -- expands it in place: the loop body goes wherever
+// 'operator for' says 'co_yield e;', with the loop variable initialized from
+// 'e'. ('operator for' has no return type, and isn't a coroutine; 'co_yield'
+// of a name of an rvalue reference variable yields an xvalue, as 'return'
+// would, so 'auto&& e' passes an element on as it came.) The body is parsed
 // where it's written, so 'break' leaves the loop, 'continue' ends this
 // insertion, and 'return' and 'co_yield' are the enclosing function's --
 // however many loops of its own 'operator for' puts around the insertion.
@@ -25,7 +27,7 @@
 //
 // Backward is a type, not syntax: a loop over std::ranges::backward(r) is a
 // loop over backward_t<R>, whose 'operator for' a view provides as a hidden
-// friend, 'friend void operator for(backward_t<V>, __stmt)'; for any other
+// friend, 'friend operator for(backward_t<V>)'; for any other
 // range, std::ranges' generic one uses its iterators, backward (from where
 // ranges::next finds the end, as reverse_view does). reverse_view swaps the
 // two -- as Rust's Rev swaps try_fold and try_rfold.
@@ -227,15 +229,15 @@ template <class V, class P>
 struct my_filter {
   V base;
   P pred;
-  void operator for(__stmt body) {
+  operator for() {
     for (auto&& e : base)  // 'e' is ours: the body can't see it
       if (pred(e))
-        body(e);
+        co_yield e;
   }
-  friend void operator for(std::ranges::backward_t<my_filter> self, __stmt body) {
+  friend operator for(std::ranges::backward_t<my_filter> self) {
     for (auto&& e : std::ranges::backward(self.range.base))
       if (self.range.pred(e))
-        body(e);
+        co_yield e;
   }
 };
 template <class V, class P>
@@ -244,15 +246,15 @@ my_filter(V, P) -> my_filter<V, P>;
 template <class V>
 struct my_join {
   V base;
-  void operator for(__stmt body) {
+  operator for() {
     for (auto&& inner : base)
       for (auto&& e : inner)
-        body(e);  // a break in the body leaves both loops
+        co_yield e;  // a break in the body leaves both loops
   }
-  friend void operator for(std::ranges::backward_t<my_join> self, __stmt body) {
+  friend operator for(std::ranges::backward_t<my_join> self) {
     for (auto&& inner : std::ranges::backward(self.range.base))
       for (auto&& e : std::ranges::backward(inner))
-        body(e);
+        co_yield e;
   }
 };
 template <class V>
@@ -262,17 +264,17 @@ template <class A, class B>
 struct my_concat {
   A a;
   B b;
-  void operator for(__stmt body) {
+  operator for() {
     for (auto&& e : a)
-      body(e);
+      co_yield e;
     for (auto&& e : b)
-      body(e);
+      co_yield e;
   }
-  friend void operator for(std::ranges::backward_t<my_concat> self, __stmt body) {
+  friend operator for(std::ranges::backward_t<my_concat> self) {
     for (auto&& e : std::ranges::backward(self.range.b))
-      body(e);
+      co_yield e;
     for (auto&& e : std::ranges::backward(self.range.a))
-      body(e);
+      co_yield e;
   }
 };
 template <class A, class B>
@@ -281,13 +283,13 @@ my_concat(A, B) -> my_concat<A, B>;
 template <class V>
 struct my_reverse {
   V base;
-  void operator for(__stmt body) {
+  operator for() {
     for (auto&& e : std::ranges::backward(base))
-      body(e);
+      co_yield e;
   }
-  friend void operator for(std::ranges::backward_t<my_reverse> self, __stmt body) {
+  friend operator for(std::ranges::backward_t<my_reverse> self) {
     for (auto&& e : self.range.base)
-      body(e);
+      co_yield e;
   }
 };
 template <class V>
@@ -366,6 +368,51 @@ void user_views() {
   assert(got == "102 104 106 108 ");
 }
 
+// The simplest: a loop that yields its own variable. (A local object yielded
+// is not moved from: the loop goes on using it.)
+template <typename I>
+struct iota_factory {
+  I from;
+  I upto;
+  operator for() const {
+    for (I i = from; i < upto; ++i)
+      co_yield i;
+  }
+};
+
+struct repeat_string {
+  std::string s;
+  int n;
+  operator for() const {
+    std::string local = s;
+    for (int k = 0; k < n; ++k) {
+      co_yield local;  // an object: the loop variable is copied from it
+      local += "!";
+    }
+  }
+};
+
+void yields() {
+  std::string got;
+  for (int i : iota_factory<int>{3, 7})
+    got += std::to_string(i);
+  assert(got == "3456");
+
+  got.clear();
+  for (std::string s : repeat_string{"hi", 3}) {
+    got += s + " ";
+    s = "moved";  // the loop's own copy
+  }
+  assert(got == "hi hi! hi!! ");
+
+  // 'auto&& e' bound to a prvalue element, yielded: an xvalue, so an rvalue
+  // reference loop variable binds to it.
+  got.clear();
+  for (int&& i : my_filter{std::views::iota(0, 6), even})
+    got += std::to_string(i);
+  assert(got == "024");
+}
+
 // The body's own co_yield, in a coroutine: the body is the coroutine's code.
 struct generator {
   struct promise_type {
@@ -410,6 +457,7 @@ int main(int, char**) {
   jumps();
   join_and_concat();
   user_views();
+  yields();
   coroutine();
   return 0;
 }

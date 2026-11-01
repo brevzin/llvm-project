@@ -3997,8 +3997,8 @@ defm operator_for : BoolFOption<"operator-for",
   LangOpts<"OperatorFor">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],
           "Enable experimental 'operator for': a range-based for loop over a "
-          "type with an 'operator for' expands it, with the loop body as its "
-          "'__stmt' parameter">,
+          "type with an 'operator for' expands it, the loop body inserted at "
+          "each 'co_yield'">,
   NegFlag<SetFalse>>;
 defm consteval_operations : BoolFOption<"consteval-operations",
   LangOpts<"ConstevalOperations">, DefaultFalse,

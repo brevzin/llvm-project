@@ -128,16 +128,16 @@ public:
 #  if _LIBCPP_HAS_OPERATOR_FOR
   // -foperator-for: the loop, in place: each range's, in turn (the body inserted once per range).
   // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
-    template for (constexpr size_t __i : views::iota(size_t(0), sizeof...(_Views)))
-      for (auto&& __e : std::get<__i>(__views_))
-        __body(static_cast<decltype(__e)&&>(__e));
+  _LIBCPP_HIDE_FROM_ABI operator for() {
+    template for (auto& __view : __views_)
+      for (auto&& __e : __view)
+        co_yield __e;
   }
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<concat_view> __b, __stmt __body) {
+  friend _LIBCPP_HIDE_FROM_ABI operator for(backward_t<concat_view> __b) {
     constexpr size_t __n = sizeof...(_Views);
     template for (constexpr size_t __k : views::iota(size_t(0), __n))
       for (auto&& __e : ranges::backward(std::get<__n - 1 - __k>(__b.range.__views_)))
-        __body(static_cast<decltype(__e)&&>(__e));
+        co_yield __e;
   }
 #  endif
 

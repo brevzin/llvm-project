@@ -3286,18 +3286,12 @@ def err_macro_undefined : Error<
   "expression macro %0 is invoked before it is defined">;
 def err_macro_token_argument_not_constant : Error<
   "token sequence argument of expression macro is not a constant expression">;
-def err_stmt_param_insert_context : Error<
-  "statement parameter %0 can be inserted only directly in the "
-  "'operator for' that declares it">;
-def err_operator_for_no_stmt_param : Error<
-  "'operator for' of %0 has no '__stmt' parameter">;
-def err_operator_for_not_void : Error<
-  "'operator for' must return 'void'">;
+def err_operator_for_return_type : Error<
+  "'operator for' cannot have a return type">;
+def err_operator_for_yield_init_list : Error<
+  "the loop variable cannot be initialized from an initializer list here">;
 def err_operator_for_no_body : Error<
   "definition of 'operator for' of %0 is not available">;
-def err_operator_for_insertion_arity : Error<
-  "'operator for' inserts the loop body with %0 argument%s0; a range-based "
-  "for loop binds one">;
 def err_operator_for_no_insertions : Error<
   "cannot deduce the type of %0: 'operator for' of %1 never inserts the "
   "loop body">;

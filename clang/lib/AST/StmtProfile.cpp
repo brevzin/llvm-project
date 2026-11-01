@@ -372,7 +372,7 @@ void StmtProfiler::VisitCXXForExpansionStmt(const CXXForExpansionStmt *S) {
 
 void StmtProfiler::VisitCXXStmtInsertExpr(const CXXStmtInsertExpr *E) {
   VisitExpr(E);
-  VisitDecl(E->getParam());
+  VisitDecl(E->getOperatorFor());
 }
 
 void StmtProfiler::VisitMSDependentExistsStmt(const MSDependentExistsStmt *S) {

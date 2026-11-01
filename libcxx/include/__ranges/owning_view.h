@@ -57,13 +57,13 @@ public:
 #  if _LIBCPP_HAS_OPERATOR_FOR
   // -foperator-for: the loop, in place: the range's.
   // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
+  _LIBCPP_HIDE_FROM_ABI operator for() {
     for (auto&& __e : __r_)
-      __body(static_cast<decltype(__e)&&>(__e));
+      co_yield __e;
   }
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<owning_view> __b, __stmt __body) {
+  friend _LIBCPP_HIDE_FROM_ABI operator for(backward_t<owning_view> __b) {
     for (auto&& __e : ranges::backward(__b.range.__r_))
-      __body(static_cast<decltype(__e)&&>(__e));
+      co_yield __e;
   }
 #  endif
   [[nodiscard]] _LIBCPP_HIDE_FROM_ABI constexpr const _Rp&& base() const&& noexcept { return std::move(__r_); }

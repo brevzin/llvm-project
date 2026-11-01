@@ -31,7 +31,7 @@ namespace ranges {
 // a loop over backward_t<R>, whose 'operator for' is found by
 // argument-dependent lookup: a view's own -- a hidden friend,
 //
-//   friend void operator for(backward_t<V> __b, __stmt __body);
+//   friend operator for(backward_t<V> __b);
 //
 // -- if it has one, or else this one: the range's iterators, backward, from
 // where ranges::next finds the end (as reverse_view's do).
@@ -46,11 +46,11 @@ template <class _Rp>
 }
 
 template <class _Rp>
-_LIBCPP_HIDE_FROM_ABI void operator for(backward_t<_Rp> __b, __stmt __body) {
+_LIBCPP_HIDE_FROM_ABI operator for(backward_t<_Rp> __b) {
   auto __first = ranges::begin(__b.range);
   auto __last  = ranges::next(__first, ranges::end(__b.range));
   while (__last != __first)
-    __body(*--__last);
+    co_yield *--__last;
 }
 
 } // namespace ranges

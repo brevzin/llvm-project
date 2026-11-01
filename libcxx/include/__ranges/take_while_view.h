@@ -75,14 +75,14 @@ public:
 #  if _LIBCPP_HAS_OPERATOR_FOR
   // -foperator-for: the loop, in place: the base's, until the predicate fails.
   // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
+  _LIBCPP_HIDE_FROM_ABI operator for() {
     for (auto&& __e : __base_) {
       if (!std::invoke(*__pred_, std::as_const(__e)))
         return;
-      __body(static_cast<decltype(__e)&&>(__e));
+      co_yield __e;
     }
   }
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<take_while_view> __b, __stmt __body) {
+  friend _LIBCPP_HIDE_FROM_ABI operator for(backward_t<take_while_view> __b) {
     // First where it stops, then that prefix, backward.
     auto& __base = __b.range.__base_;
     auto __stop  = ranges::begin(__base);
@@ -91,7 +91,7 @@ public:
     }
     auto __prefix = ranges::subrange(ranges::begin(__base), std::move(__stop));
     for (auto&& __e : ranges::backward(__prefix))
-      __body(static_cast<decltype(__e)&&>(__e));
+      co_yield __e;
   }
 #  endif
 

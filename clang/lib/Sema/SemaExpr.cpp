@@ -6983,14 +6983,6 @@ ExprResult Sema::BuildCallExpr(Scope *Scope, Expr *Fn, SourceLocation LParenLoc,
   if (CheckArgsForPlaceholders(ArgExprs))
     return ExprError();
 
-  // -foperator-for: 'body(args...)', where 'body' is a statement parameter,
-  // inserts it.
-  if (Context.StmtParamDecl)
-    if (auto *DRE = dyn_cast<DeclRefExpr>(Fn->IgnoreParens()))
-      if (auto *PVD = dyn_cast<ParmVarDecl>(DRE->getDecl());
-          PVD && Context.isStmtParamType(PVD->getType()))
-        return BuildStmtInsertExpr(PVD, Fn->getBeginLoc(), ArgExprs, RParenLoc);
-
   // The result of __builtin_counted_by_ref cannot be used as a function
   // argument. It allows leaking and modification of bounds safety information.
   for (const Expr *Arg : ArgExprs)
@@ -24051,18 +24043,25 @@ ExprResult Sema::CreateRecoveryExpr(SourceLocation Begin, SourceLocation End,
   return RecoveryExpr::Create(Context, T, Begin, End, SubExprs);
 }
 
-ExprResult Sema::BuildStmtInsertExpr(ParmVarDecl *Param, SourceLocation Loc,
-                                     MultiExprArg Args,
-                                     SourceLocation RParenLoc) {
-  // Only directly in the 'operator for' declaring it: the insertion is where
-  // the loop body goes, so it can't be in a lambda (another function) or
-  // anywhere else.
-  auto *Owner = dyn_cast<FunctionDecl>(Param->getDeclContext());
-  if (!Owner || getCurFunctionDecl(/*AllowLambda=*/true) != Owner ||
-      !Owner->getDeclName().isIdentifier() ||
-      Owner->getName() != "operator for") {
-    Diag(Loc, diag::err_stmt_param_insert_context) << Param;
+ExprResult Sema::BuildStmtInsertExpr(SourceLocation Loc, Expr *Value) {
+  auto *OperatorFor = getCurFunctionDecl(/*AllowLambda=*/true);
+  assert(isOperatorFor(OperatorFor) && "co_yield inserts only in operator for");
+  if (isa<InitListExpr>(Value)) {
+    Diag(Value->getBeginLoc(), diag::err_operator_for_yield_init_list)
+        << Value->getSourceRange();
     return ExprError();
   }
-  return CXXStmtInsertExpr::Create(Context, Param, Args, Loc, RParenLoc);
+  // The name of a variable of rvalue reference type is an xvalue here, as in
+  // a return statement: an element bound by 'auto&&' is passed on as it came.
+  // (Not an object: the loop goes on using it.)
+  if (!Value->isTypeDependent() && Value->isLValue())
+    if (auto *DRE = dyn_cast<DeclRefExpr>(Value->IgnoreParens()))
+      if (auto *VD = dyn_cast<VarDecl>(DRE->getDecl());
+          VD && VD->getType()->isRValueReferenceType())
+        Value =
+            ImplicitCastExpr::Create(Context, Value->getType(), CK_NoOp, Value,
+                                     nullptr, VK_XValue, FPOptionsOverride());
+  Expr *Args[] = {Value};
+  return CXXStmtInsertExpr::Create(Context, OperatorFor, Args, Loc,
+                                   Value->getEndLoc());
 }

@@ -113,15 +113,15 @@ public:
   // -foperator-for: the loop, in place: each inner range's, in turn (a break in the body leaves
   // both loops: it is the body's).
   // Backward -- a loop over ranges::backward(*this) -- it's the friend's.
-  _LIBCPP_HIDE_FROM_ABI void operator for(__stmt __body) {
+  _LIBCPP_HIDE_FROM_ABI operator for() {
     for (auto&& __inner : __base_)
       for (auto&& __e : __inner)
-        __body(static_cast<decltype(__e)&&>(__e));
+        co_yield __e;
   }
-  friend _LIBCPP_HIDE_FROM_ABI void operator for(backward_t<join_view> __b, __stmt __body) {
+  friend _LIBCPP_HIDE_FROM_ABI operator for(backward_t<join_view> __b) {
     for (auto&& __inner : ranges::backward(__b.range.__base_))
       for (auto&& __e : ranges::backward(__inner))
-        __body(static_cast<decltype(__e)&&>(__e));
+        co_yield __e;
   }
 #  endif
 

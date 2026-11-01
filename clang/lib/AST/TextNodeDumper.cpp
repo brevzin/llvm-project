@@ -1856,7 +1856,7 @@ void TextNodeDumper::VisitExpressionTraitExpr(const ExpressionTraitExpr *Node) {
 }
 
 void TextNodeDumper::VisitCXXStmtInsertExpr(const CXXStmtInsertExpr *Node) {
-  dumpDeclRef(Node->getParam());
+  dumpDeclRef(Node->getOperatorFor());
 }
 
 void TextNodeDumper::VisitCXXDefaultArgExpr(const CXXDefaultArgExpr *Node) {

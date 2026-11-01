@@ -9594,19 +9594,14 @@ TreeTransform<Derived>::TransformCXXBuiltinStringizeExpr(
 template <typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformCXXStmtInsertExpr(CXXStmtInsertExpr *E) {
-  auto *Param = cast_or_null<ParmVarDecl>(
-      getDerived().TransformDecl(E->getBeginLoc(), E->getParam()));
-  if (!Param)
+  // Rebuilt in the 'operator for' being instantiated.
+  ExprResult Value = getDerived().TransformExpr(E->getArg(0));
+  if (Value.isInvalid())
     return ExprError();
-  SmallVector<Expr *, 2> Args;
-  bool ArgsChanged = false;
-  if (getDerived().TransformExprs(E->getArgs().data(), E->getNumArgs(), true,
-                                  Args, &ArgsChanged))
-    return ExprError();
-  if (!getDerived().AlwaysRebuild() && !ArgsChanged && Param == E->getParam())
+  if (!getDerived().AlwaysRebuild() && Value.get() == E->getArg(0) &&
+      getSema().getCurFunctionDecl(/*AllowLambda=*/true) == E->getOperatorFor())
     return E;
-  return getSema().BuildStmtInsertExpr(Param, E->getBeginLoc(), Args,
-                                       E->getRParenLoc());
+  return getSema().BuildStmtInsertExpr(E->getBeginLoc(), Value.get());
 }
 
 // An expanded loop is built only outside templates, from a range-based for

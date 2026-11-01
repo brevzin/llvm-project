@@ -3220,44 +3220,58 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
   // The TagDecl owned by the DeclSpec.
   TagDecl *OwnedTagDecl = nullptr;
 
-  switch (D.getName().getKind()) {
-  case UnqualifiedIdKind::IK_ImplicitSelfParam:
-  case UnqualifiedIdKind::IK_OperatorFunctionId:
-  case UnqualifiedIdKind::IK_Identifier:
-  case UnqualifiedIdKind::IK_LiteralOperatorId:
-  case UnqualifiedIdKind::IK_TemplateId:
-    T = ConvertDeclSpecToType(state);
-
-    if (!D.isInvalidType() && D.getDeclSpec().isTypeSpecOwned()) {
-      OwnedTagDecl = cast<TagDecl>(D.getDeclSpec().getRepAsDecl());
-      // Owned declaration is embedded in declarator.
-      OwnedTagDecl->setEmbeddedInDeclarator(true);
-    }
-    break;
-
-  case UnqualifiedIdKind::IK_ConstructorName:
-  case UnqualifiedIdKind::IK_ConstructorTemplateId:
-  case UnqualifiedIdKind::IK_DestructorName:
-    // Constructors and destructors don't have return types. Use
-    // "void" instead.
+  // -foperator-for: like a constructor, an 'operator for' has no return type.
+  bool IsOperatorFor =
+      SemaRef.getLangOpts().OperatorFor &&
+      D.getName().getKind() == UnqualifiedIdKind::IK_Identifier &&
+      D.getName().Identifier &&
+      D.getName().Identifier->getName() == "operator for";
+  if (IsOperatorFor) {
+    if (D.getDeclSpec().getTypeSpecType() != DeclSpec::TST_unspecified)
+      SemaRef.Diag(D.getDeclSpec().getTypeSpecTypeLoc(),
+                   diag::err_operator_for_return_type);
     T = SemaRef.Context.VoidTy;
     processTypeAttrs(state, T, TAL_DeclSpec,
                      D.getMutableDeclSpec().getAttributes());
-    break;
+  } else
+    switch (D.getName().getKind()) {
+    case UnqualifiedIdKind::IK_ImplicitSelfParam:
+    case UnqualifiedIdKind::IK_OperatorFunctionId:
+    case UnqualifiedIdKind::IK_Identifier:
+    case UnqualifiedIdKind::IK_LiteralOperatorId:
+    case UnqualifiedIdKind::IK_TemplateId:
+      T = ConvertDeclSpecToType(state);
 
-  case UnqualifiedIdKind::IK_DeductionGuideName:
-    // Deduction guides have a trailing return type and no type in their
-    // decl-specifier sequence. Use a placeholder return type for now.
-    T = SemaRef.Context.DependentTy;
-    break;
+      if (!D.isInvalidType() && D.getDeclSpec().isTypeSpecOwned()) {
+        OwnedTagDecl = cast<TagDecl>(D.getDeclSpec().getRepAsDecl());
+        // Owned declaration is embedded in declarator.
+        OwnedTagDecl->setEmbeddedInDeclarator(true);
+      }
+      break;
 
-  case UnqualifiedIdKind::IK_ConversionFunctionId:
-    // The result type of a conversion function is the type that it
-    // converts to.
-    T = SemaRef.GetTypeFromParser(D.getName().ConversionFunctionId,
-                                  &ReturnTypeInfo);
-    break;
-  }
+    case UnqualifiedIdKind::IK_ConstructorName:
+    case UnqualifiedIdKind::IK_ConstructorTemplateId:
+    case UnqualifiedIdKind::IK_DestructorName:
+      // Constructors and destructors don't have return types. Use
+      // "void" instead.
+      T = SemaRef.Context.VoidTy;
+      processTypeAttrs(state, T, TAL_DeclSpec,
+                       D.getMutableDeclSpec().getAttributes());
+      break;
+
+    case UnqualifiedIdKind::IK_DeductionGuideName:
+      // Deduction guides have a trailing return type and no type in their
+      // decl-specifier sequence. Use a placeholder return type for now.
+      T = SemaRef.Context.DependentTy;
+      break;
+
+    case UnqualifiedIdKind::IK_ConversionFunctionId:
+      // The result type of a conversion function is the type that it
+      // converts to.
+      T = SemaRef.GetTypeFromParser(D.getName().ConversionFunctionId,
+                                    &ReturnTypeInfo);
+      break;
+    }
 
   // Note: We don't need to distribute declaration attributes (i.e.
   // D.getDeclarationAttributes()) because those are always C++11 attributes,

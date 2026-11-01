@@ -968,6 +968,12 @@ ExprResult Sema::BuildResolvedCoawaitExpr(SourceLocation Loc, Expr *Operand,
 }
 
 ExprResult Sema::ActOnCoyieldExpr(Scope *S, SourceLocation Loc, Expr *E) {
+  // -foperator-for: in an 'operator for' (not in a lambda in one), 'co_yield'
+  // inserts the loop body; the function is not a coroutine.
+  if (getLangOpts().OperatorFor &&
+      isOperatorFor(getCurFunctionDecl(/*AllowLambda=*/true)))
+    return BuildStmtInsertExpr(Loc, E);
+
   if (!checkSuspensionContext(*this, Loc, "co_yield"))
     return ExprError();
 

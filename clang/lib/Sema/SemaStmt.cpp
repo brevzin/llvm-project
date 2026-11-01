@@ -2701,18 +2701,11 @@ static Expr *rangeLValue(Sema &S, VarDecl *RangeVar, SourceLocation Loc) {
   return Object.isInvalid() ? nullptr : Object.get();
 }
 
-/// The argument of the statement parameter: a placeholder.
-static Expr *stmtPlaceholder(Sema &S, SourceLocation Loc) {
-  return new (S.Context) OpaqueValueExpr(
-      Loc, S.Context.getCanonicalTagType(S.Context.StmtParamDecl), VK_PRValue);
-}
-
 static DeclarationName operatorForName(Sema &S) {
   return &S.Context.Idents.get("operator for");
 }
 
-/// '__range.operator for(<statement>)', or 'operator for(__range,
-/// <statement>)'.
+/// '__range.operator for()', or 'operator for(__range)'.
 static ExprResult buildOperatorForCall(Sema &S, OperatorForKind Kind,
                                        VarDecl *RangeVar, SourceLocation Loc,
                                        SourceLocation RParenLoc) {
@@ -2728,14 +2721,13 @@ static ExprResult buildOperatorForCall(Sema &S, OperatorForKind Kind,
         /*TemplateArgs=*/nullptr, S.getCurScope());
     if (Callee.isInvalid())
       return ExprError();
-    Expr *Args[] = {stmtPlaceholder(S, Loc)};
-    return S.BuildCallExpr(S.getCurScope(), Callee.get(), Loc, Args, RParenLoc);
+    return S.BuildCallExpr(S.getCurScope(), Callee.get(), Loc, {}, RParenLoc);
   }
   auto *Callee = UnresolvedLookupExpr::Create(
       S.Context, /*NamingClass=*/nullptr, NestedNameSpecifierLoc(), Name,
       /*RequiresADL=*/true, UnresolvedSetIterator(), UnresolvedSetIterator(),
       /*KnownDependent=*/false, /*KnownInstantiationDependent=*/false);
-  Expr *Args[] = {Object, stmtPlaceholder(S, Loc)};
+  Expr *Args[] = {Object};
   return S.BuildCallExpr(S.getCurScope(), Callee, Loc, Args, RParenLoc);
 }
 
@@ -2745,7 +2737,7 @@ static ExprResult buildOperatorForCall(Sema &S, OperatorForKind Kind,
 /// visible to every range in std::ranges.
 static OperatorForKind classifyOperatorFor(Sema &S, VarDecl *RangeVar,
                                            SourceLocation Loc) {
-  if (!S.getLangOpts().OperatorFor || !S.Context.StmtParamDecl)
+  if (!S.getLangOpts().OperatorFor)
     return OperatorForKind::None;
   QualType T = RangeVar->getType().getNonReferenceType();
   auto *RD = T->getAsCXXRecordDecl();
@@ -2768,35 +2760,36 @@ static OperatorForKind classifyOperatorFor(Sema &S, VarDecl *RangeVar,
 /// The insertions of \p Param in \p S -- an instantiated 'operator for''s
 /// body -- including those in the bodies of loops (and expansion statements)
 /// it contains.
-static void collectInsertions(Stmt *S, const ParmVarDecl *Param,
+static void collectInsertions(Stmt *S, const FunctionDecl *OperatorFor,
                               SmallVectorImpl<CXXStmtInsertExpr *> &Out) {
   if (!S)
     return;
   if (auto *E = dyn_cast<CXXStmtInsertExpr>(S)) {
-    if (E->getParam() == Param)
+    if (E->getOperatorFor()->getCanonicalDecl() ==
+        OperatorFor->getCanonicalDecl())
       Out.push_back(E);
     return;
   }
   if (auto *ES = dyn_cast<CXXExpansionStmt>(S)) {
     for (unsigned I = 0, N = ES->getNumInstantiations(); I != N; ++I)
-      collectInsertions(ES->getInstantiation(I), Param, Out);
+      collectInsertions(ES->getInstantiation(I), OperatorFor, Out);
     return;
   }
   // An expansion statement is a declaration, in a DeclStmt.
   if (auto *DS = dyn_cast<DeclStmt>(S)) {
     for (Decl *D : DS->decls())
       if (auto *ESD = dyn_cast<ExpansionStmtDecl>(D))
-        collectInsertions(ESD->getStmt(), Param, Out);
+        collectInsertions(ESD->getStmt(), OperatorFor, Out);
     return;
   }
   for (Stmt *Child : S->children())
-    collectInsertions(Child, Param, Out);
+    collectInsertions(Child, OperatorFor, Out);
 }
 
 /// -foperator-for: 'for (decl : range) body' over a range whose type has an
-/// 'operator for': call it with the range (forwarded) as the object argument
-/// and a placeholder for the statement parameter, instantiate it, and
-/// initialize the loop variable at each of its insertions.
+/// 'operator for': call it with the range (an lvalue, as begin is given it),
+/// instantiate it, and initialize the loop variable at each of its
+/// insertions ('co_yield e').
 static StmtResult BuildCXXForExpansionStmt(
     Sema &S, OperatorForKind Kind, SourceLocation ForLoc, Stmt *InitStmt,
     SourceLocation ColonLoc, DeclStmt *RangeDS, DeclStmt *LoopVarDS,
@@ -2815,20 +2808,6 @@ static StmtResult BuildCXXForExpansionStmt(
   FunctionDecl *FD = CE ? CE->getDirectCallee() : nullptr;
   if (!FD)
     return StmtError();
-  if (!FD->getReturnType()->isVoidType()) {
-    S.Diag(FD->getLocation(), diag::err_operator_for_not_void);
-    return StmtError();
-  }
-
-  // The statement parameter.
-  const ParmVarDecl *StmtParam = nullptr;
-  for (const ParmVarDecl *P : FD->parameters())
-    if (Context.isStmtParamType(P->getType()))
-      StmtParam = P;
-  if (!StmtParam) {
-    S.Diag(ColonLoc, diag::err_operator_for_no_stmt_param) << RangeTy;
-    return StmtError();
-  }
 
   // Its definition, now: the insertions decide the loop variable's type.
   if (!FD->isDefined())
@@ -2840,24 +2819,15 @@ static StmtResult BuildCXXForExpansionStmt(
     return StmtError();
   }
   FD = const_cast<FunctionDecl *>(Def);
-  for (const ParmVarDecl *P : FD->parameters())
-    if (Context.isStmtParamType(P->getType()))
-      StmtParam = P;
 
   SmallVector<CXXStmtInsertExpr *, 4> Inserts;
-  collectInsertions(FD->getBody(), StmtParam, Inserts);
+  collectInsertions(FD->getBody(), FD, Inserts);
 
   // The loop variable, initialized at each insertion from its argument (an
   // OpaqueValueExpr standing for it, bound when the loop is emitted): the
   // first initialization is the variable's own, and deduces its type.
   SmallVector<CXXForExpansionStmt::Insertion, 4> Insertions;
   for (CXXStmtInsertExpr *IE : Inserts) {
-    if (IE->getNumArgs() != 1) {
-      S.Diag(IE->getBeginLoc(), diag::err_operator_for_insertion_arity)
-          << IE->getNumArgs();
-      S.ActOnInitializerError(LoopVar);
-      return StmtError();
-    }
     Expr *Arg = IE->getArg(0);
     auto *Value = new (Context)
         OpaqueValueExpr(Arg->getExprLoc(), Arg->getType(), Arg->getValueKind(),
