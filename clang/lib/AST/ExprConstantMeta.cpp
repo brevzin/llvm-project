@@ -1711,18 +1711,33 @@ static bool DiagnoseNotYetKnown(DiagFn Diagnoser, SourceRange Range,
          << unsigned(Query) << D << unsigned(Why) << Range;
 }
 
+// The context whose members D is among (looking through linkage
+// specifications, and across the blocks of a namespace).
+static DeclContext *memberContextOf(Decl *D) {
+  return D->getDeclContext()->getRedeclContext()->getPrimaryContext();
+}
+
+// Whether iterating the members of D's context (findIterableMember) visits D.
+// A declaration in (a block of) its context is on that block's list of
+// declarations. One elsewhere, e.g. a definition with a qualified name, is on
+// its namespace's list of such declarations (see DeclContext::addHiddenDecl).
+// A friend declaration, or one at block scope, is on neither.
+static bool isVisitedAsMember(Decl *D) {
+  if (D->isLocalExternDecl() || !D->getLexicalDeclContext()->containsDecl(D))
+    return false;
+  return D->getDeclContext() == D->getLexicalDeclContext() ||
+         isa<NamespaceDecl>(D->getDeclContext());
+}
+
 static bool isReflectableDecl(MetaActions &Meta, ASTContext &C, Decl *D,
                               SourceLocation Loc) {
   assert(D && "null declaration");
 
-  if (D != D->getCanonicalDecl()) {
-    Decl *First = nullptr;
-    for (Decl *I = D->getMostRecentDecl(); I; I = I->getPreviousDecl())
-      if (I->getLexicalDeclContext() == D->getLexicalDeclContext())
-        First = I;
-    if (D != First)
+  // Of the declarations of an entity that iterating its context's members
+  // visits, only the first represents it.
+  for (Decl *I = D->getPreviousDecl(); I; I = I->getPreviousDecl())
+    if (memberContextOf(I) == memberContextOf(D) && isVisitedAsMember(I))
       return false;
-  }
 
   if (D->isLocalExternDecl())
     return false;
