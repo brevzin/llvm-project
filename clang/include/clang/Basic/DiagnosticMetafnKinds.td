@@ -57,6 +57,14 @@ def metafn_undeduced_placeholder : Note<
 def metafn_undeduced_return_type : Note<
   "cannot query the return type of %select{function %1|function type %1}0, "
   "which has not been deduced yet">;
+def metafn_not_yet_known : Note<
+  "cannot yet query %select{the type of %1|whether %1 is noexcept|"
+  "whether %1 is deleted|the default argument of %1|the address of %1}0: "
+  "%select{its return type has not been deduced|"
+  "its noexcept-specifier has not been parsed|"
+  "it is defaulted in a class that is not yet complete|"
+  "its default argument has not been parsed|"
+  "its exception specification has not been determined}2">;
 def metafn_cannot_invoke : Note<"cannot invoke %0">;
 def metafn_no_specialization_found : Note<
   "no specialization of the function template %0 matched the provided "

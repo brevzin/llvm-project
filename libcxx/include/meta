@@ -125,6 +125,7 @@ consteval auto is_type(info) -> bool;
 consteval auto is_type_alias(info) -> bool;
 consteval auto is_namespace_alias(info) -> bool;
 consteval auto is_complete_type(info) -> bool;
+consteval auto is_complete_declaration(info) -> bool;  // P2996 ext
 consteval auto is_enumerable_type(info) -> bool;
 consteval auto is_template(info) -> bool;
 consteval auto is_function_template(info) -> bool;
@@ -612,6 +613,7 @@ enum : unsigned {
   __metafn_make_const,
   __metafn_make_macro,
   __metafn_unique_id,
+  __metafn_is_complete_declaration,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1215,6 +1217,19 @@ consteval auto is_class_type(info r) -> bool {
 // Returns true if the reflected entity is a complete type.
 consteval auto is_complete_type(info r) -> bool {
   return __metafunction(detail::__metafn_is_complete_type, r);
+}
+
+// (P2996 ext) Returns false if some part of what r represents isn't known
+// yet at this point, and true otherwise. Queries about such a part are not
+// constant expressions (they don't give an answer that later changes). For a
+// function: its return type, if it's a placeholder deduced from a body not yet
+// parsed; its noexcept-specifier, if not yet parsed; if it's defaulted in a
+// class not yet complete, whether it's deleted and its exception
+// specification; and its default arguments, if not yet parsed. For a function
+// parameter: its default argument. For a class or enumeration type: its
+// definition (as is_complete_type).
+consteval auto is_complete_declaration(info r) -> bool {
+  return __metafunction(detail::__metafn_is_complete_declaration, r);
 }
 
 // Returns whether the reflected class data member is an enumerator.

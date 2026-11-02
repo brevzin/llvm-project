@@ -877,6 +877,12 @@ static bool unique_id(APValue &Result, ASTContext &C, MetaActions &Meta,
                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                       QualType ResultTy, SourceRange Range,
                       ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool is_complete_declaration(APValue &Result, ASTContext &C,
+                                    MetaActions &Meta, EvalFn Evaluator,
+                                    DiagFn Diagnoser, bool AllowInjection,
+                                    QualType ResultTy, SourceRange Range,
+                                    ArrayRef<Expr *> Args,
+                                    Decl *ContainingDecl);
 static bool is_overload_set(APValue &Result, ASTContext &C, MetaActions &Meta,
                             EvalFn Evaluator, DiagFn Diagnoser,
                             bool AllowInjection, QualType ResultTy,
@@ -1124,6 +1130,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_metaInfo, 1, 1, make_const},
     {Metafunction::MFRK_metaInfo, 1, 1, make_macro},
     {Metafunction::MFRK_token, 1, 1, unique_id},
+    {Metafunction::MFRK_bool, 1, 1, is_complete_declaration},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -1609,6 +1616,101 @@ static bool ensureDeclared(ASTContext &C, QualType QT, SourceLocation SpecLoc) {
   return true;
 }
 
+// Parts of a function's declaration can be unknown at a point where the
+// function can already be reflected: the body of a member function defined in
+// its class (from which a placeholder return type is deduced), its
+// noexcept-specifier, and its default arguments are parsed only once the
+// outermost enclosing class is complete, and what a function defaulted in its
+// class is (deleted or not, and its implicit exception specification) is
+// determined only once that class is. A query whose answer depends on such a
+// part is not a constant expression -- rather than an answer that later
+// changes. is_complete_declaration says whether any part is unknown.
+
+// What a query about a part that isn't known yet would ask (for
+// metafn_not_yet_known).
+enum NotYetKnownQuery : unsigned {
+  NYK_Type,
+  NYK_Noexcept,
+  NYK_Deleted,
+  NYK_DefaultArgument,
+  NYK_Address,
+};
+
+// Why it isn't known yet (for metafn_not_yet_known).
+enum NotYetKnownReason : unsigned {
+  NYK_UndeducedReturnType,
+  NYK_UnparsedNoexcept,
+  NYK_DefaultedInIncompleteClass,
+  NYK_UnparsedDefaultArgument,
+  NYK_UnresolvedNoexcept,
+};
+
+// Whether FD's definition is written but not yet processed: the body of a
+// member function defined in its class is parsed once the outermost
+// enclosing class is complete (and that of a member of a class template
+// specialization is instantiated once the specialization is). Its
+// placeholder return type, if any, will then be deduced.
+static bool hasPendingDefinition(const FunctionDecl *FD) {
+  if (FD->willHaveBody())
+    return true;
+  if (const FunctionDecl *Pattern = FD->getTemplateInstantiationPattern())
+    if (auto *RD = dyn_cast<CXXRecordDecl>(FD->getLexicalDeclContext());
+        RD && RD->isBeingDefined())
+      return Pattern->isDefined() || Pattern->willHaveBody();
+  return false;
+}
+
+// Whether FD is defaulted on its first declaration, in a class that is still
+// being defined: whether it's deleted, and its implicit exception
+// specification, are determined once the class is complete.
+static bool isPendingDefaultedFunction(const FunctionDecl *FD) {
+  const FunctionDecl *First = FD->getCanonicalDecl();
+  if (!First->isExplicitlyDefaulted())
+    return false;
+  auto *RD = dyn_cast<CXXRecordDecl>(First->getLexicalDeclContext());
+  return RD && RD->isBeingDefined();
+}
+
+// Whether FD's return type is a placeholder not deduced yet. (That of a member
+// of a class template specialization is deduced now, instantiating its
+// definition, if it can be.)
+static bool hasUndeducedReturnType(MetaActions &Meta, FunctionDecl *FD,
+                                   SourceLocation Loc) {
+  return !Meta.EnsureDeducedReturnType(FD, Loc);
+}
+
+// Why FD's exception specification isn't known yet, if it isn't. (One to be
+// instantiated or computed is, now.)
+static std::optional<NotYetKnownReason>
+pendingExceptionSpec(MetaActions &Meta, FunctionDecl *FD, SourceLocation Loc) {
+  auto EST = [FD] {
+    return FD->getType()->castAs<FunctionProtoType>()->getExceptionSpecType();
+  };
+  if (EST() == EST_Unparsed)
+    return NYK_UnparsedNoexcept;
+  if (EST() == EST_None && isPendingDefaultedFunction(FD))
+    return NYK_DefaultedInIncompleteClass;
+  Meta.EnsureInstantiationOfExceptionSpec(Loc, FD);
+  if (isUnresolvedExceptionSpec(EST()))
+    return NYK_UnresolvedNoexcept;
+  return std::nullopt;
+}
+
+// Why FD's type isn't known yet, if it isn't.
+static std::optional<NotYetKnownReason>
+pendingType(MetaActions &Meta, FunctionDecl *FD, SourceLocation Loc) {
+  if (hasUndeducedReturnType(Meta, FD, Loc))
+    return NYK_UndeducedReturnType;
+  return pendingExceptionSpec(Meta, FD, Loc);
+}
+
+static bool DiagnoseNotYetKnown(DiagFn Diagnoser, SourceRange Range,
+                                NotYetKnownQuery Query, const NamedDecl *D,
+                                NotYetKnownReason Why) {
+  return Diagnoser(Range.getBegin(), diag::metafn_not_yet_known)
+         << unsigned(Query) << D << unsigned(Why) << Range;
+}
+
 static bool isReflectableDecl(MetaActions &Meta, ASTContext &C, Decl *D,
                               SourceLocation Loc) {
   assert(D && "null declaration");
@@ -1655,9 +1757,13 @@ static bool isReflectableDecl(MetaActions &Meta, ASTContext &C, Decl *D,
     // has its return type deduced only when its definition is instantiated;
     // do that now, so the result doesn't depend on whether the specialization
     // happened to be instantiated before the query.
+    //
+    // (An extension:) But one whose definition is written, and just not yet
+    // processed, is: it exists, and only what depends on its return type
+    // isn't known yet (see pendingType).
     for (auto *R = FD->getMostRecentDecl(); R; R = R->getPreviousDecl()) {
       if (Meta.HasSatisfiedConstraints(R) &&
-          Meta.EnsureDeducedReturnType(R, Loc))
+          (Meta.EnsureDeducedReturnType(R, Loc) || hasPendingDefinition(R)))
         return true;
     }
     return false;
@@ -2893,9 +2999,11 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
           ND->getCanonicalDecl() != ND)
         continue;
       // As for members_of: deduce a placeholder return type (instantiating
-      // the definition if need be), and skip the function if it can't be.
+      // the definition if need be), and skip the function if it can't be
+      // (unless its definition is just not yet processed).
       if (auto *FD = dyn_cast<FunctionDecl>(ND);
-          FD && !Meta.EnsureDeducedReturnType(FD, Range.getBegin()))
+          FD && !Meta.EnsureDeducedReturnType(FD, Range.getBegin()) &&
+          !hasPendingDefinition(FD))
         continue;
       Out.push_back(makeReflection(ND));
     }
@@ -3470,7 +3578,8 @@ bool type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
           << 0 << DescriptionOf(RV) << Range;
 
     if (auto *FD = dyn_cast<FunctionDecl>(VD))
-      Meta.EnsureInstantiationOfExceptionSpec(Range.getBegin(), FD);
+      if (auto Why = pendingType(Meta, FD, Range.getBegin()))
+        return DiagnoseNotYetKnown(Diagnoser, Range, NYK_Type, FD, *Why);
 
     QualType QT = desugarType(VD->getType(),
                               /*UnwrapAliases=*/ true, /*DropCV=*/false,
@@ -5094,6 +5203,11 @@ bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
     ValueDecl *Decl = RV.getReflectedDecl();
     Meta.EnsureInstantiated(Decl, Args[1]->getSourceRange());
 
+    if (auto *FD = dyn_cast<FunctionDecl>(Decl);
+        FD && !isa<CXXConstructorDecl, CXXDestructorDecl>(FD))
+      if (auto Why = pendingType(Meta, FD, Range.getBegin()))
+        return DiagnoseNotYetKnown(Diagnoser, Range, NYK_Address, FD, *Why);
+
     if (auto *RD = Decl->getType()->getAsCXXRecordDecl();
         RD && RD->isLambda() && ResultTy->isPointerType())
       return extractLambda(Result, RD);
@@ -5441,8 +5555,12 @@ bool is_deleted(APValue &Result, ASTContext &C, MetaActions &Meta,
 
   bool IsDeleted = false;
   if (RV.isReflectedDecl())
-    if (auto *FD = dyn_cast<FunctionDecl>(RV.getReflectedDecl()))
+    if (auto *FD = dyn_cast<FunctionDecl>(RV.getReflectedDecl())) {
+      if (isPendingDefaultedFunction(FD))
+        return DiagnoseNotYetKnown(Diagnoser, Range, NYK_Deleted, FD,
+                                   NYK_DefaultedInIncompleteClass);
       IsDeleted = FD->isDeleted();
+    }
 
   return SetAndSucceed(Result, makeBool(C, IsDeleted));
 }
@@ -5504,7 +5622,8 @@ bool is_noexcept(APValue &Result, ASTContext &C, MetaActions &Meta,
     IsNoexcept = isFunctionOrMethodNoexcept(RV.getReflectedType());
   else if (RV.isReflectedDecl()) {
     if (auto *FD = dyn_cast<FunctionDecl>(RV.getReflectedDecl()))
-      Meta.EnsureInstantiationOfExceptionSpec(Range.getBegin(), FD);
+      if (auto Why = pendingExceptionSpec(Meta, FD, Range.getBegin()))
+        return DiagnoseNotYetKnown(Diagnoser, Range, NYK_Noexcept, FD, *Why);
 
     IsNoexcept = isFunctionOrMethodNoexcept(RV.getReflectedDecl()->getType());
   }
@@ -6249,6 +6368,60 @@ bool has_complete_definition(APValue &Result, ASTContext &C, MetaActions &Meta,
   }
 
   return SetAndSucceed(Result, makeBool(C, result));
+}
+
+// Whether every part of what's reflected is known at this point (see
+// pendingType and friends): a query about one that isn't is not a constant.
+bool is_complete_declaration(APValue &Result, ASTContext &C, MetaActions &Meta,
+                             EvalFn Evaluator, DiagFn Diagnoser,
+                             bool AllowInjection, QualType ResultTy,
+                             SourceRange Range, ArrayRef<Expr *> Args,
+                             Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+  assert(ResultTy == C.BoolTy);
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+
+  bool Complete = true;
+  switch (RV.getReflectionKind()) {
+  case ReflectionKind::Type:
+    // A class or enumeration type is complete once defined (instantiated).
+    // Any other type is as complete as it will ever be.
+    if (auto *TD =
+            dyn_cast_or_null<TagDecl>(findTypeDecl(RV.getReflectedType()))) {
+      (void)Meta.EnsureInstantiated(TD, Range);
+      Complete = !RV.getReflectedType()->isIncompleteType();
+    }
+    break;
+  case ReflectionKind::Declaration:
+    if (auto *FD = dyn_cast<FunctionDecl>(RV.getReflectedDecl()))
+      Complete = !pendingType(Meta, FD, Range.getBegin()) &&
+                 !isPendingDefaultedFunction(FD) &&
+                 llvm::none_of(FD->parameters(), [](ParmVarDecl *P) {
+                   return getMostRecentParmVarDecl(P)->hasUnparsedDefaultArg();
+                 });
+    break;
+  case ReflectionKind::Parameter:
+    Complete = !getMostRecentParmVarDecl(RV.getReflectedParameter())
+                    ->hasUnparsedDefaultArg();
+    break;
+  case ReflectionKind::Null:
+  case ReflectionKind::Object:
+  case ReflectionKind::Value:
+  case ReflectionKind::Template:
+  case ReflectionKind::Namespace:
+  case ReflectionKind::EntityProxy:
+  case ReflectionKind::BaseSpecifier:
+  case ReflectionKind::DataMemberSpec:
+  case ReflectionKind::DeclarationSpec:
+  case ReflectionKind::OverloadSet:
+  case ReflectionKind::Annotation:
+  case ReflectionKind::Expression:
+    break;
+  }
+  return SetAndSucceed(Result, makeBool(C, Complete));
 }
 
 bool is_enumerable_type(APValue &Result, ASTContext &C, MetaActions &Meta,
@@ -7667,6 +7840,9 @@ bool default_argument_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   if (!PVD->hasDefaultArg())
     return DiagnoseReflectionKind(Diagnoser, Range,
                                   "a parameter with a default argument");
+  if (PVD->hasUnparsedDefaultArg())
+    return DiagnoseNotYetKnown(Diagnoser, Range, NYK_DefaultArgument, PVD,
+                               NYK_UnparsedDefaultArgument);
   Expr *E = Meta.DefaultArgument(PVD, Range.getBegin());
   if (!E)
     return true;
@@ -7737,7 +7913,7 @@ bool return_type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
         FD && !isa<CXXConstructorDecl>(FD) && !isa<CXXDestructorDecl>(FD)) {
       // E.g. the enclosing 'auto' function, asked from inside its own body
       // (macro_expansion_context() in an expression macro).
-      if (FD->getReturnType()->isUndeducedType())
+      if (hasUndeducedReturnType(Meta, FD, Range.getBegin()))
         return Diagnoser(Range.getBegin(), diag::metafn_undeduced_return_type)
                << 0 << FD << Range;
       QualType QT =

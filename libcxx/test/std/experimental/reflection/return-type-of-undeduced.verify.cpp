@@ -24,15 +24,13 @@ constexpr auto of_function = std::meta::return_type_of(^^later);
 // expected-note@-3 {{in call to 'return_type_of(^^(declaration))'}}
 // expected-note@-4 {{cannot query the return type of function 'later', which has not been deduced yet}}
 
+// Nor is its type (see not-yet-known.verify.cpp).
 constexpr auto of_function_type =
     std::meta::return_type_of(type_of(^^later));
 // expected-error@-2 {{constexpr variable 'of_function_type' must be initialized by a constant expression}}
 // expected-note@*:* {{subexpression not valid in a constant expression}}
-// expected-note@-3 {{in call to 'return_type_of(^^(type))'}}
-// expected-note@-4 {{cannot query the return type of function type 'auto ()', which has not been deduced yet}}
-
-// The type itself can still be reflected.
-static_assert(type_of(^^later) != ^^int());
+// expected-note@-3 {{in call to 'type_of(^^(declaration))'}}
+// expected-note@-4 {{cannot yet query the type of 'later': its return type has not been deduced}}
 
 // Once the definition has deduced it, the return type is available.
 auto later() { return 1; }

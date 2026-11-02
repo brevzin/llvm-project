@@ -309,8 +309,10 @@ public:
     if (auto *VD = dyn_cast<VarDecl>(D); VD && VD->hasGlobalStorage())
       S.MarkVariableReferenced(Range.getBegin(), VD);
 
+    // (A specialization being instantiated is already on its way; e.g., the
+    // query is in its definition.)
     if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(D);
-        CTSD && !CTSD->isCompleteDefinition()) {
+        CTSD && !CTSD->isCompleteDefinition() && !CTSD->isBeingDefined()) {
       if (!validateConstraints(CTSD->getSpecializedTemplate(),
                                CTSD->getTemplateArgs().asArray()))
         return true;
