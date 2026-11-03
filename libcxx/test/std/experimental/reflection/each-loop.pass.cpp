@@ -11,12 +11,12 @@
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20 || c++23
 // ADDITIONAL_COMPILE_FLAGS: -freflection -std=c++2d
 
-// each!(int i, range, body;): a range loop, expanded as the loop that suits
+// each!(int i : range, body;): a range loop, expanded as the loop that suits
 // the range, with the body pasted into it (so break, continue, and return mean
 // what they would in a for loop). An example, and a test of the pieces it
 // uses: statement macros with raw and expression parameters, lookup,
-// substitute, extract of a static member function, token rewriting, and
-// unique_id.
+// substitute, extract of a static member function, token rewriting
+// (token_sequence::balanced_split_at and balanced_find), and unique_id.
 //
 // - The customization point is iter::loop_traits<R> (or, for a type you own,
 //   a static member of R): loop(self, dir) returns the statements iterating
@@ -43,6 +43,7 @@
 #include <algorithm>
 #include <cassert>
 #include <coroutine>
+#include <debugging>
 #include <exception>
 #include <optional>
 #include <iterator>
@@ -70,7 +71,7 @@ consteval auto operator!(direction d) -> direction {
 // like a generator: 'co_yield E;' produces the element E. 'self' is an
 // expression naming the range, forwarded (an rvalue when the loop owns the
 // range, so that '$self.base()' moves the base out). Other ranges -- its
-// base, say -- are iterated with iter::each_dir!(dir, elem, range, body),
+// base, say -- are iterated with iter::each_dir!(dir, elem : range, body),
 // which customizes them in turn. A range with neither is iterated with its
 // iterators.
 template <class R>
@@ -124,6 +125,12 @@ consteval auto loop_for(info R, token_sequence src, direction dir,
   };
 }
 
+// Whether 't' is the punctuator 'p'. (A token literal can't spell an
+// unbalanced '{' to compare against.)
+consteval bool is_punctuator(token t, punctuator p) {
+  return token_kind_of(t) == token_kind::punctuator && punctuator_of(t) == p;
+}
+
 // The consumer's body, with each top-level break -- not one inside the body's
 // own loop or switch, or inside a macro invocation's arguments (an inner
 // each!) -- replaced by 'on_break': a pasted body may sit inside several of
@@ -133,7 +140,6 @@ consteval auto rewrite_breaks(token_sequence body, token_sequence on_break,
                               bool& used_break) -> token_sequence {
   struct frame {
     int brace_depth = -1;      // ends at this '}' (a braced body)...
-    int paren_depth = -1;      // ...or at this ')' (macro arguments)...
     bool until_semi = false;   // ...or at the next ';' at its depth
     int braces = 0, parens = 0;
     bool is_do = false;
@@ -150,58 +156,66 @@ consteval auto rewrite_breaks(token_sequence body, token_sequence on_break,
   };
   std::size_t n = body.size();
   for (std::size_t i = 0; i != n; ++i) {
-    auto s = stringize(body[i]);
-    if (s == "while" && after_do_body) {        // a do-while's condition
+    token t = body[i];
+    if (t == ^^{ while } && after_do_body) {     // a do-while's condition
       after_do_body = false;
-      out += body[i];
+      out += t;
       continue;
     }
     after_do_body = false;
-    if (s == "for" || s == "while" || s == "switch" || s == "do") {
-      out += body[i];
+    bool is_do = t == ^^{ do };
+    if (is_do || t == ^^{ for } || t == ^^{ while } || t == ^^{ switch }) {
       std::size_t j = i + 1;
-      if (s != "do") {                           // the parenthesized header
-        for (int d = 0; j != n; ++j) {
-          auto h = stringize(body[j]);
-          out += body[j];
-          if (h == "(") ++d;
-          else if (h == ")" && --d == 0) { ++j; break; }
-        }
-      }
-      if (j != n && stringize(body[j]) == "{")
-        stack.push_back({.brace_depth = braces + 1, .is_do = s == "do"});
+      if (!is_do)                                // past the (header)
+        j = body.balanced_find(punctuator::right_paren, j + 1) + 1;
+      out += body.subseq(i, j - i);
+      if (j != n && is_punctuator(body[j], punctuator::left_brace))
+        stack.push_back({.brace_depth = braces + 1, .is_do = is_do});
       else
         stack.push_back({.until_semi = true, .braces = braces,
-                         .parens = parens, .is_do = s == "do"});
+                         .parens = parens, .is_do = is_do});
       i = j - 1;
       continue;
     }
-    if (token_kind_of(body[i]) == token_kind::identifier && i + 2 < n &&
-        stringize(body[i + 1]) == "!" && stringize(body[i + 2]) == "(") {
-      out += body[i]; out += body[i + 1]; out += body[i + 2];
-      ++parens;
-      stack.push_back({.paren_depth = parens});
-      i += 2;
+    if (token_kind_of(t) == token_kind::identifier && i + 2 < n &&
+        body[i + 1] == ^^{ ! } &&
+        is_punctuator(body[i + 2], punctuator::left_paren)) {
+      // A macro invocation: its arguments (an inner each!'s body) are its
+      // own.
+      std::size_t close = body.balanced_find(punctuator::right_paren, i + 3);
+      out += body.subseq(i, close - i + 1);
+      i = close;
       continue;
     }
-    if (s == "break" && stack.empty()) {
+    if (t == ^^{ break } && stack.empty()) {
       out += on_break;
       used_break = true;
       continue;
     }
-    out += body[i];
-    if (s == "{") ++braces;
-    else if (s == "(") ++parens;
-    else if (s == "}") {
+    out += t;
+    if (token_kind_of(t) != token_kind::punctuator)
+      continue;
+    switch (punctuator_of(t)) {
+    case punctuator::left_brace:
+      ++braces;
+      break;
+    case punctuator::left_paren:
+      ++parens;
+      break;
+    case punctuator::right_brace:
       end_frames([&](frame const& f) { return f.brace_depth == braces; });
       --braces;
-    } else if (s == ")") {
-      end_frames([&](frame const& f) { return f.paren_depth == parens; });
+      break;
+    case punctuator::right_paren:
       --parens;
-    } else if (s == ";") {
+      break;
+    case punctuator::semicolon:
       end_frames([&](frame const& f) {
         return f.until_semi && f.braces == braces && f.parens == parens;
       });
+      break;
+    default:
+      break;
     }
   }
   return out;
@@ -224,17 +238,11 @@ consteval auto paste_yields(token_sequence loop, token_sequence elem,
   token_sequence out;
   std::size_t size = loop.size();
   for (std::size_t i = 0; i != size; ++i) {
-    if (stringize(loop[i]) != "co_yield") {
+    if (loop[i] != ^^{ co_yield }) {
       out += loop[i];
       continue;
     }
-    std::size_t j = i + 1;
-    for (int d = 0; j != size; ++j) {
-      auto t = stringize(loop[j]);
-      if (t == "(" || t == "[" || t == "{") ++d;
-      else if (t == ")" || t == "]" || t == "}") --d;
-      else if (t == ";" && d == 0) break;
-    }
+    std::size_t j = loop.balanced_find(punctuator::semicolon, i + 1);
     token_sequence value = loop.subseq(i + 1, j - i - 1);
     out += ^^{ { $elem = $value; do { $b } while (false); } };
     i = j;  // past the ';'
@@ -244,11 +252,20 @@ consteval auto paste_yields(token_sequence loop, token_sequence elem,
   return out;
 }
 
-// iter::each_dir!(dir, int i, range, body;) -- iterate 'range' in direction
-// 'dir', the way it says to (loop_traits).
+// iter::each_dir!(dir, int i : range, body;) -- iterate 'range' in direction
+// 'dir', the way it says to (loop_traits). This only splits the header: the
+// range's tokens go on to each_range!, whose expression parameter parses them
+// (once) and so deduces R.
+__macro each_dir(direction dir, token_sequence head, token_sequence body) {
+  auto [elem, range] = head.balanced_split_at(punctuator::colon);
+  if (range.empty())
+    std::constexpr_error_str("each", "expected 'declaration : range'");
+  return ^^{ iter::each_range!($dir, $elem, $range, $body) };
+}
+
 template <class R>
-__macro each_dir(direction dir, token_sequence elem, R&& range,
-                 token_sequence body) {
+__macro each_range(direction dir, token_sequence elem, R&& range,
+                   token_sequence body) {
   auto r = unique_id("r");
   return ^^{
     {
@@ -260,12 +277,10 @@ __macro each_dir(direction dir, token_sequence elem, R&& range,
 }
 } // namespace iter
 
-// each!(int i, range, body;) -- the loop that suits the range, with the body
+// each!(int i : range, body;) -- the loop that suits the range, with the body
 // in it (so break, continue, and return mean what they would in a for loop).
-template <class R>
-__macro each(std::meta::token_sequence elem, R&& range,
-             std::meta::token_sequence body) {
-  return ^^{ iter::each_dir!(iter::direction::forward, $elem, $range, $body) };
+__macro each(std::meta::token_sequence head, std::meta::token_sequence body) {
+  return ^^{ iter::each_dir!(iter::direction::forward, $head, $body) };
 }
 
 // ------------------------------------------- the standard views' loops ----
@@ -276,7 +291,7 @@ struct loop_of_base {
   static consteval auto loop(token_sequence self, direction dir)
       -> token_sequence {
     auto e = unique_id("e");
-    return ^^{ iter::each_dir!($dir, auto&& $e, $self.base(), co_yield $e;); };
+    return ^^{ iter::each_dir!($dir, auto&& $e : $self.base(), co_yield $e;); };
   }
 };
 template <class V>
@@ -289,7 +304,7 @@ struct loop_traits<std::ranges::reverse_view<V>> {
   static consteval auto loop(token_sequence self, direction dir)
       -> token_sequence {
     auto e = unique_id("e");
-    return ^^{ iter::each_dir!(${!dir}, auto&& $e, $self.base(), co_yield $e;); };
+    return ^^{ iter::each_dir!(${!dir}, auto&& $e : $self.base(), co_yield $e;); };
   }
 };
 
@@ -300,7 +315,7 @@ struct loop_traits<std::ranges::filter_view<V, P>> {
     auto p = unique_id("p"), e = unique_id("e");
     return ^^{
       auto&& $p = $self.pred();
-      iter::each_dir!($dir, auto&& $e, $self.base(), if ($p($e)) co_yield $e;);
+      iter::each_dir!($dir, auto&& $e : $self.base(), if ($p($e)) co_yield $e;);
     };
   }
 };
@@ -315,7 +330,7 @@ struct loop_traits<std::ranges::transform_view<V, F>> {
     auto f = unique_id("f"), e = unique_id("e");
     return ^^{
       auto&& $f = *$self.$fn;
-      iter::each_dir!($dir, auto&& $e, $self.base(), co_yield $f($e););
+      iter::each_dir!($dir, auto&& $e : $self.base(), co_yield $f($e););
     };
   }
 };
@@ -328,7 +343,7 @@ struct loop_traits<std::ranges::take_while_view<V, P>> {
     if (dir == direction::forward)
       return ^^{
         auto&& $p = $self.pred();
-        iter::each_dir!($dir, auto&& $e, $self.base(),
+        iter::each_dir!($dir, auto&& $e : $self.base(),
                         if (!$p($e)) break; co_yield $e;);
       };
     // Backward: first find where it stops, then iterate that subrange.
@@ -338,7 +353,7 @@ struct loop_traits<std::ranges::take_while_view<V, P>> {
       auto&& $full = $self.base();
       auto $r = std::ranges::subrange(std::ranges::begin($full),
                                       std::ranges::find_if_not($full, $p));
-      iter::each_dir!($dir, auto&& $e, $r, co_yield $e;);
+      iter::each_dir!($dir, auto&& $e : $r, co_yield $e;);
     };
   }
 };
@@ -350,8 +365,8 @@ struct loop_traits<std::ranges::join_view<V>> {
       -> token_sequence {
     auto inner = unique_id("inner"), e = unique_id("e");
     return ^^{
-      iter::each_dir!($dir, auto&& $inner, $self.base(),
-                      iter::each_dir!($dir, auto&& $e, $inner, co_yield $e;););
+      iter::each_dir!($dir, auto&& $inner : $self.base(),
+                      iter::each_dir!($dir, auto&& $e : $inner, co_yield $e;););
     };
   }
 };
@@ -370,7 +385,7 @@ struct loop_traits<std::ranges::concat_view<Vs...>> {
       int i = dir == direction::forward ? k : n - 1 - k;
       auto e = unique_id("e");
       out += ^^{
-        iter::each_dir!($dir, auto&& $e, std::get<$i>($self.$views),
+        iter::each_dir!($dir, auto&& $e : std::get<$i>($self.$views),
                         co_yield $e;);
       };
     }
@@ -399,12 +414,12 @@ void peeled() {
   assert(got == "4 2 " && lt5_calls == 8 && even_calls == 10);
 
   reset(); got.clear();
-  each!(int i, v | take_while(lt5) | filter(even) | reverse,
+  each!(int i : v | take_while(lt5) | filter(even) | reverse,
         got += std::to_string(i) + " ";);
   assert(got == "4 2 " && lt5_calls == 5 && even_calls == 4);
 
   reset(); got.clear();
-  each!(int i, v | take_while(lt5) | transform(square) | filter(even) | reverse,
+  each!(int i : v | take_while(lt5) | transform(square) | filter(even) | reverse,
         got += std::to_string(i) + " ";);
   assert(got == "16 4 " && lt5_calls == 5 && square_calls == 4 &&
          even_calls == 4);
@@ -412,7 +427,7 @@ void peeled() {
   // Mutating through filter | reverse: one pass, so the predicate sees each
   // element once, before the body changes it.
   auto w = std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-  each!(int& i, w | filter([](int x) { return x % 2 == 0; }) | reverse,
+  each!(int& i : w | filter([](int x) { return x % 2 == 0; }) | reverse,
         i += 1;);
   assert((w == std::vector<int>{1, 3, 3, 5, 5, 7, 7, 9, 9, 11}));
 }
@@ -420,30 +435,65 @@ void peeled() {
 void jumps() {
   auto v = std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8, 9};
   std::string got;
-  each!(int i, v | std::views::filter(even),
+  each!(int i : v | std::views::filter(even),
         if (i == 4) continue; if (i == 8) break; got += std::to_string(i) + " ";);
   assert(got == "2 6 ");
 
   auto first_over = [&](int n) -> int {
-    each!(int i, v | std::views::transform(square), if (i > n) return i;);
+    each!(int i : v | std::views::transform(square), if (i > n) return i;);
     return -1;
   };
   assert(first_over(20) == 25);
   assert(first_over(100) == -1);
 }
 
+// The header is split at its first ':' outside brackets; the range's tokens
+// are parsed once, by an expression parameter.
+void headers() {
+  using namespace std::views;
+  auto v = std::vector<int>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+  std::string got;
+
+  // A lambda in the range: the closure type R is deduced from is the one
+  // iterated (transform's loop names its private member through R).
+  each!(int i : v | transform([](int x) { return x * 10; }) | reverse,
+        if (i < 80) break; got += std::to_string(i) + " ";);
+  assert(got == "100 90 80 ");
+
+  // A ':' in the range.
+  bool odd = true;
+  auto w = std::vector<int>{7};
+  auto is_odd = [](int x) { return x % 2 == 1; };
+  got.clear();
+  each!(int i : odd ? v | filter(is_odd) : w | filter(is_odd),
+        got += std::to_string(i) + " ";);
+  assert(got == "1 3 5 7 9 ");
+
+  // Structured bindings: the ',' is inside [].
+  auto ps = std::vector<std::pair<int, char>>{{1, 'a'}, {2, 'b'}};
+  got.clear();
+  each!(auto [n, c] : ps | reverse, got += std::to_string(n) + c;);
+  assert(got == "2b1a");
+
+  // A ':' in a splice in the declaration.
+  got.clear();
+  each!(typename [: true ? ^^int : ^^long :] i : v | take(2),
+        got += std::to_string(i) + " ";);
+  assert(got == "1 2 ");
+}
+
 // join and concat: the body at several places, inside several loops. Each
 // loop must do what the iterator loop does.
-#define SAME_AS_FOR(DECL, RANGE, ...)                                          \
+#define SAME_AS_FOR(HEAD, ...)                                                 \
   do {                                                                         \
     auto via_each = [&] {                                                      \
       std::string got;                                                         \
-      each!(DECL, RANGE, __VA_ARGS__);                                         \
+      each!(HEAD, __VA_ARGS__);                                                \
       return got;                                                              \
     };                                                                         \
     auto via_for = [&] {                                                       \
       std::string got;                                                         \
-      for (DECL : RANGE) {                                                     \
+      for (HEAD) {                                                             \
         __VA_ARGS__                                                            \
       }                                                                        \
       return got;                                                              \
@@ -458,31 +508,31 @@ void join_and_concat() {
        x = std::vector<int>{6, 7, 8};
   auto not2 = [](int i) { return i != 2; };
 
-  SAME_AS_FOR(int i, vv | join,
+  SAME_AS_FOR(int i : vv | join,
               if (i == 2) continue; if (i == 7) break; got += std::to_string(i););
-  SAME_AS_FOR(int i, vv | join | reverse,
+  SAME_AS_FOR(int i : vv | join | reverse,
               if (i == 8) continue; if (i == 3) break; got += std::to_string(i););
-  SAME_AS_FOR(int i, vv | join | filter(not2),
+  SAME_AS_FOR(int i : vv | join | filter(not2),
               if (i == 4) continue; got += std::to_string(i););
-  SAME_AS_FOR(int i, concat(v, w, x),
+  SAME_AS_FOR(int i : concat(v, w, x),
               if (i == 2) continue; if (i == 7) break; got += std::to_string(i););
-  SAME_AS_FOR(int i, concat(v, w, x) | reverse,
+  SAME_AS_FOR(int i : concat(v, w, x) | reverse,
               if (i == 5) continue; if (i == 2) break; got += std::to_string(i););
-  SAME_AS_FOR(int i, concat(v | filter(not2), w | reverse, vv | join),
+  SAME_AS_FOR(int i : concat(v | filter(not2), w | reverse, vv | join),
               if (i == 4) continue; if (i == 8) break; got += std::to_string(i););
 
   // Inner ranges that are prvalues.
   auto blocks = iota(1, 4) | transform([](int n) { return std::vector<int>(n, n); });
-  SAME_AS_FOR(int i, blocks | join, if (i == 2) continue; got += std::to_string(i););
+  SAME_AS_FOR(int i : blocks | join, if (i == 2) continue; got += std::to_string(i););
 
   // One predicate call per element.
   reset();
-  each!(int i, vv | join | filter(even), (void)i;);
+  each!(int i : vv | join | filter(even), (void)i;);
   assert(even_calls == 9);
 
   // Mutation, through both.
-  each!(int& i, concat(v, w), i *= 10;);
-  each!(int& i, vv | join | reverse, i += 1;);
+  each!(int& i : concat(v, w), i *= 10;);
+  each!(int& i : vv | join | reverse, i += 1;);
   assert((v == std::vector<int>{10, 20, 30} && w == std::vector<int>{40, 50}));
   assert((vv == std::vector<std::vector<int>>{{2, 3, 4}, {5, 6, 7}, {8, 9, 10}}));
 }
@@ -500,7 +550,7 @@ struct my_filter {
       -> token_sequence {
     auto e = std::meta::unique_id("e");
     return ^^{
-      iter::each_dir!($dir, auto&& $e, $self.base,
+      iter::each_dir!($dir, auto&& $e : $self.base,
                       if ($self.pred($e)) co_yield $e;);
     };
   }
@@ -515,8 +565,8 @@ struct my_join {  // the body sits inside two loops
       -> token_sequence {
     auto inner = std::meta::unique_id("inner"), e = std::meta::unique_id("e");
     return ^^{
-      iter::each_dir!($dir, auto&& $inner, $self.base,
-                      iter::each_dir!($dir, auto&& $e, $inner, co_yield $e;););
+      iter::each_dir!($dir, auto&& $inner : $self.base,
+                      iter::each_dir!($dir, auto&& $e : $inner, co_yield $e;););
     };
   }
 };
@@ -534,8 +584,8 @@ struct my_concat {  // the body is pasted at two co_yields
     if (dir == direction::reverse)
       std::swap(first, second);
     return ^^{
-      iter::each_dir!($dir, auto&& $e, $first, co_yield $e;);
-      iter::each_dir!($dir, auto&& $e, $second, co_yield $e;);
+      iter::each_dir!($dir, auto&& $e : $first, co_yield $e;);
+      iter::each_dir!($dir, auto&& $e : $second, co_yield $e;);
     };
   }
 };
@@ -548,7 +598,7 @@ struct my_reverse {
   static consteval auto loop(token_sequence self, direction dir)
       -> token_sequence {
     auto e = std::meta::unique_id("e");
-    return ^^{ iter::each_dir!(${!dir}, auto&& $e, $self.base, co_yield $e;); };
+    return ^^{ iter::each_dir!(${!dir}, auto&& $e : $self.base, co_yield $e;); };
   }
 };
 template <class V>
@@ -560,19 +610,19 @@ void push_style() {
 
   // Composed with standard views.
   reset();
-  each!(int i,
+  each!(int i :
         my_filter{v | std::views::transform([](int x) { return x * 3; }), even},
         got += std::to_string(i) + " ";);
   assert(got == "6 12 18 24 " && even_calls == 9);
 
   reset(); got.clear();
-  each!(int i, my_filter{v | std::views::take_while(lt5), even},
+  each!(int i : my_filter{v | std::views::take_while(lt5), even},
         got += std::to_string(i) + " ";);
   assert(got == "2 4 " && lt5_calls == 5 && even_calls == 4);
 
   // A push-style view of a push-style view.
   got.clear();
-  each!(int i, my_filter{my_filter{std::views::all(v), even},
+  each!(int i : my_filter{my_filter{std::views::all(v), even},
                          [](int x) { return x > 4; }},
         got += std::to_string(i) + " ";);
   assert(got == "6 8 ");
@@ -581,45 +631,45 @@ void push_style() {
   // both of join's loops.
   auto vv = std::vector<std::vector<int>>{{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
   got.clear();
-  each!(int i, my_join{std::views::all(vv)},
+  each!(int i : my_join{std::views::all(vv)},
         if (i == 2) continue; if (i == 7) break; got += std::to_string(i) + " ";);
   assert(got == "1 3 4 5 6 ");
 
   auto w = std::vector<int>{10, 20};
   got.clear();
-  each!(int i, my_concat{std::views::all(v), std::views::all(w)},
+  each!(int i : my_concat{std::views::all(v), std::views::all(w)},
         if (i % 2) continue; got += std::to_string(i) + " ";);
   assert(got == "2 4 6 8 10 20 ");
 
   // The body's own loops, and an each! in it, keep their break.
   got.clear();
-  each!(int i, my_filter{std::views::all(v), even},
+  each!(int i : my_filter{std::views::all(v), even},
         for (int k = 0; k < 10; ++k) { if (k == 1) break; got += "k"; }
-        each!(int j, std::views::iota(0, 5), if (j == 2) break; got += "j";);
+        each!(int j : std::views::iota(0, 5), if (j == 2) break; got += "j";);
         got += std::to_string(i) + " ";);
   assert(got == "kjj2 kjj4 kjj6 kjj8 ");
 
   // Reversed: a push-style view (with break and continue), and over a
   // standard view.
   got.clear();
-  each!(int i, my_reverse{my_join{std::views::all(vv)}},
+  each!(int i : my_reverse{my_join{std::views::all(vv)}},
         if (i == 8) continue; if (i == 3) break; got += std::to_string(i) + " ";);
   assert(got == "9 7 6 5 4 ");
 
   got.clear();
-  each!(int i, my_reverse{my_concat{std::views::all(v), std::views::all(w)}},
+  each!(int i : my_reverse{my_concat{std::views::all(v), std::views::all(w)}},
         got += std::to_string(i) + " ";);
   assert(got == "20 10 9 8 7 6 5 4 3 2 1 ");
 
   reset(); got.clear();
-  each!(int i, my_reverse{v | std::views::take_while(lt5) | std::views::filter(even)},
+  each!(int i : my_reverse{v | std::views::take_while(lt5) | std::views::filter(even)},
         got += std::to_string(i) + " ";);
   assert(got == "4 2 " && lt5_calls == 5 && even_calls == 4);
 
   // The view's element is a unique_id: the consumer's 'e' is its own.
   int e = 100;
   got.clear();
-  each!(int i, my_filter{std::views::all(v), even},
+  each!(int i : my_filter{std::views::all(v), even},
         got += std::to_string(i + e) + " ";);
   assert(got == "102 104 106 108 ");
 }
@@ -650,7 +700,7 @@ struct generator {
 };
 
 generator squares_of_evens(std::vector<int> const& v) {
-  each!(int i, my_filter{std::views::all(v), even}, co_yield i * i;);
+  each!(int i : my_filter{std::views::all(v), even}, co_yield i * i;);
 }
 
 void coroutine() {
@@ -665,6 +715,7 @@ void coroutine() {
 int main(int, char**) {
   peeled();
   jumps();
+  headers();
   join_and_concat();
   push_style();
   coroutine();

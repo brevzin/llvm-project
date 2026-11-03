@@ -899,6 +899,10 @@ static bool tokens_equal(APValue &Result, ASTContext &C, MetaActions &Meta,
                          bool AllowInjection, QualType ResultTy,
                          SourceRange Range, ArrayRef<Expr *> Args,
                          Decl *ContainingDecl);
+static bool tokens_find(APValue &Result, ASTContext &C, MetaActions &Meta,
+                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                        QualType ResultTy, SourceRange Range,
+                        ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
 static bool token_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -1131,6 +1135,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_metaInfo, 1, 1, make_macro},
     {Metafunction::MFRK_token, 1, 1, unique_id},
     {Metafunction::MFRK_bool, 1, 1, is_complete_declaration},
+    {Metafunction::MFRK_sizeT, 4, 4, tokens_find},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3134,6 +3139,114 @@ bool tokens_equal(APValue &Result, ASTContext &C, MetaActions &Meta,
   A.Profile(AID);
   B.Profile(BID);
   return SetAndSucceed(Result, makeBool(C, AID == BID));
+}
+
+// Whether two tokens are the same token, as tokens_equal compares them.
+static bool sameToken(const Token &A, const Token &B) {
+  if (A.getKind() != B.getKind())
+    return false;
+  if (A.isAnnotation()) {
+    llvm::FoldingSetNodeID AID, BID;
+    APValue(TokenSequenceData(&A, 1)).Profile(AID);
+    APValue(TokenSequenceData(&B, 1)).Profile(BID);
+    return AID == BID;
+  }
+  if (const IdentifierInfo *II = A.getIdentifierInfo())
+    return B.getIdentifierInfo() &&
+           II->getName() == B.getIdentifierInfo()->getName();
+  if (A.isLiteral() && A.getLiteralData() && B.getLiteralData())
+    return StringRef(A.getLiteralData(), A.getLength()) ==
+           StringRef(B.getLiteralData(), B.getLength());
+  return true;
+}
+
+// tokens_find(tokens, needle, pos, balanced): the position of the first
+// occurrence of 'needle' -- a token sequence (a token is one token) or a
+// punctuator -- at or after 'pos', or npos. If 'balanced', only an occurrence
+// outside any brackets ((), [], {}, [: :]) opened at or after 'pos' counts,
+// and the search ends at a closer that doesn't match such an opener (the end
+// of the group 'pos' is in).
+bool tokens_find(APValue &Result, ASTContext &C, MetaActions &Meta,
+                 EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                 QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                 Decl *ContainingDecl) {
+  assert(ResultTy == C.getSizeType());
+  APValue Haystack, Needle, PosV, BalancedV;
+  if (!Evaluator(Haystack, Args[0], true) ||
+      !Evaluator(Needle, Args[1], true) || !Evaluator(PosV, Args[2], true) ||
+      !Evaluator(BalancedV, Args[3], true))
+    return true;
+  if (!Haystack.isTokenSequence())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a token sequence");
+  TokenSequenceData Toks = Haystack.getTokenSequence();
+  uint64_t Pos = PosV.getInt().getZExtValue();
+  bool Balanced = BalancedV.getInt().getBoolValue();
+
+  // The needle: a single token kind (a punctuator, or a one-token sequence
+  // that is one), a single token, or a sequence.
+  std::optional<tok::TokenKind> Kind;
+  ArrayRef<Token> Seq;
+  if (Needle.isInt()) {
+    tok::TokenKind K =
+        getPunctuatorForMetaIndex(Needle.getInt().getZExtValue());
+    if (K == tok::unknown)
+      return DiagnoseReflectionKind(Diagnoser, Range, "a punctuator");
+    Kind = K;
+  } else if (Needle.isTokenSequence()) {
+    Seq = Needle.getTokenSequence();
+    if (Seq.size() == 1 && getMetaIndexForPunctuator(Seq[0].getKind()) != ~0u)
+      Kind = Seq[0].getKind();
+  } else {
+    return DiagnoseReflectionKind(Diagnoser, Range,
+                                  "a token, token sequence, or punctuator");
+  }
+
+  auto Found = [&](uint64_t I) {
+    return SetAndSucceed(Result, APValue(C.MakeIntValue(I, C.getSizeType())));
+  };
+  uint64_t NPos = ~uint64_t(0);
+  if (Pos > Toks.size())
+    return Found(NPos);
+  if (!Kind && Seq.empty())
+    return Found(Pos);
+
+  auto MatchesAt = [&](uint64_t I) {
+    if (Kind)
+      return Toks[I].is(*Kind);
+    if (Seq.size() > Toks.size() - I)
+      return false;
+    for (uint64_t J = 0; J != Seq.size(); ++J)
+      if (!sameToken(Toks[I + J], Seq[J]))
+        return false;
+    return true;
+  };
+
+  unsigned Depth = 0;
+  for (uint64_t I = Pos; I != Toks.size(); ++I) {
+    if (Depth == 0 && MatchesAt(I))
+      return Found(I);
+    if (!Balanced)
+      continue;
+    switch (Toks[I].getKind()) {
+    case tok::l_paren:
+    case tok::l_square:
+    case tok::l_brace:
+    case tok::l_splice:
+      ++Depth;
+      break;
+    case tok::r_paren:
+    case tok::r_square:
+    case tok::r_brace:
+    case tok::r_splice:
+      if (Depth == 0)
+        return Found(NPos);
+      --Depth;
+      break;
+    default:
+      break;
+    }
+  }
+  return Found(NPos);
 }
 
 // token_type(): only its type matters (<meta> defines std::meta::token as
