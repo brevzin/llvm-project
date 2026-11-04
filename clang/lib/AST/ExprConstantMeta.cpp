@@ -3998,6 +3998,36 @@ static bool evaluateMacroArgument(const Expr *E, ASTContext &C, APValue *Out) {
   return true;
 }
 
+// The reflection reflect_constant produces for the constant 'V' of type 'Ty'
+// (P4340): its value, normalized -- string literals a pointer (or subobject)
+// points into interned, customized subobjects replaced -- except that a value
+// of class type is a template parameter object, so the result is a reflection
+// of that object: the object a user-provided reflect_constant returns, or
+// else the interned TemplateParamObjectDecl for the normalized value.
+// reflect_constant, constant_of, and annotations all go through here, so that
+// they agree with each other and with template_arguments_of.
+static bool liftAsTemplateArgument(APValue &Result, ASTContext &C,
+                                   MetaActions &Meta, QualType Ty, APValue V,
+                                   SourceLocation Loc) {
+  if (Ty->isRecordType()) {
+    VarDecl *CustomVD = nullptr;
+    if (Meta.NormalizeReflectConstant(Ty, V, CustomVD, Loc))
+      return true;
+    const ValueDecl *Object = CustomVD
+                                  ? static_cast<const ValueDecl *>(CustomVD)
+                                  : C.getTemplateParamObjectDecl(Ty, V);
+    V = APValue(APValue::LValueBase{Object}, CharUnits::Zero(), {},
+                /*OnePastTheEnd=*/false, /*IsNullPtr=*/false);
+    return SetAndSucceed(Result, V.Lift(QualType{}));
+  }
+  if (Ty->isPointerType()) {
+    VarDecl *Unused = nullptr;
+    if (Meta.NormalizeReflectConstant(Ty, V, Unused, Loc))
+      return true;
+  }
+  return SetAndSucceed(Result, V.Lift(Ty));
+}
+
 bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                  EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                  QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
@@ -4029,13 +4059,8 @@ bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     APValue Constant = ER.Val;
     QualType ConstantTy = ComputeResultType(RV.getTypeOfReflectedResult(C),
                                             Constant);
-    if (ConstantTy->isRecordType()) {
-      auto *TPO = C.getTemplateParamObjectDecl(ConstantTy, Constant);
-      Constant = APValue(APValue::LValueBase{TPO}, CharUnits::Zero(), {}, false,
-                    false);
-      ConstantTy = QualType{};
-    }
-    return SetAndSucceed(Result, Constant.Lift(ConstantTy));
+    return liftAsTemplateArgument(Result, C, Meta, ConstantTy, Constant,
+                                  Range.getBegin());
   }
   case ReflectionKind::Declaration: {
     ValueDecl *Decl = RV.getReflectedDecl();
@@ -4078,14 +4103,8 @@ bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     }
 
     QualType ConstantTy = ComputeResultType(QT, Constant);
-    if (ConstantTy->isRecordType()) {
-      auto *TPO = C.getTemplateParamObjectDecl(ConstantTy, Constant);
-      Constant = APValue(APValue::LValueBase{TPO}, CharUnits::Zero(), {}, false,
-                    false);
-      ConstantTy = QualType{};
-    }
-
-    return SetAndSucceed(Result, Constant.Lift(ConstantTy));
+    return liftAsTemplateArgument(Result, C, Meta, ConstantTy, Constant,
+                                  Range.getBegin());
   }
   case ReflectionKind::Annotation: {
     CXX26AnnotationAttr *A = RV.getReflectedAnnotation();
@@ -4094,13 +4113,8 @@ bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
     QualType ConstantTy = desugarType(A->getArg()->getType(),
                                       /*UnwrapAliases=*/true, /*DropCV=*/true,
                                       /*DropRefs=*/false);
-    if (ConstantTy->isRecordType()) {
-      auto *TPO = C.getTemplateParamObjectDecl(ConstantTy, Constant);
-      Constant = APValue(APValue::LValueBase{TPO}, CharUnits::Zero(), {}, false,
-                    false);
-      ConstantTy = QualType{};
-    }
-    return SetAndSucceed(Result, Constant.Lift(ConstantTy));
+    return liftAsTemplateArgument(Result, C, Meta, ConstantTy, Constant,
+                                  Range.getBegin());
   }
   case ReflectionKind::Expression: {
     // The argument of an expression macro: the value it has as a constant
@@ -4113,13 +4127,8 @@ bool constant_of(APValue &Result, ASTContext &C, MetaActions &Meta,
           << 2 << "an expression that is not a constant expression" << Range;
 
     QualType ConstantTy = ComputeResultType(E->getType(), Constant);
-    if (ConstantTy->isRecordType()) {
-      auto *TPO = C.getTemplateParamObjectDecl(ConstantTy, Constant);
-      Constant = APValue(APValue::LValueBase{TPO}, CharUnits::Zero(), {}, false,
-                    false);
-      ConstantTy = QualType{};
-    }
-    return SetAndSucceed(Result, Constant.Lift(ConstantTy));
+    return liftAsTemplateArgument(Result, C, Meta, ConstantTy, Constant,
+                                  Range.getBegin());
   }
   case ReflectionKind::OverloadSet:
   case ReflectionKind::Null:
@@ -7332,31 +7341,9 @@ bool reflect_result(APValue &Result, ASTContext &C, MetaActions &Meta,
                 const_cast<ValueDecl *>(LVBase.get<const ValueDecl *>())));
 
   QualType ReflTy = ArgTy.getReflectedType();
-  if (!IsLValue && ReflTy->isRecordType()) {
-    // P4340 ext: a class type with a user-provided reflect_constant
-    // customization point yields a reflection of the object returned by the
-    // customization; other class types normalize customized subobjects and
-    // then intern a template parameter object as before.
-    VarDecl *CustomVD = nullptr;
-    if (Meta.NormalizeReflectConstant(ReflTy, Arg, CustomVD,
-                                      Range.getBegin()))
-      return true;
-    if (CustomVD)
-      return SetAndSucceed(Result, makeReflection(CustomVD));
-
-    auto *TPO = C.getTemplateParamObjectDecl(ReflTy, Arg);
-    Arg = APValue(APValue::LValueBase{TPO}, CharUnits::Zero(), {}, false,
-                  false);
-    ReflTy = QualType{};
-  } else if (!IsLValue && ReflTy->isPointerType()) {
-    // P4340 ext: a bare pointer into a string literal is normalized the same
-    // way it would be as a subobject (interned via FixedArray).
-    VarDecl *Unused = nullptr;
-    if (Meta.NormalizeReflectConstant(ReflTy, Arg, Unused, Range.getBegin()))
-      return true;
-  }
-
-  return SetAndSucceed(Result, Arg.Lift(ReflTy));
+  if (IsLValue)
+    return SetAndSucceed(Result, Arg.Lift(ReflTy));
+  return liftAsTemplateArgument(Result, C, Meta, ReflTy, Arg, Range.getBegin());
 }
 
 bool data_member_spec(APValue &Result, ASTContext &C, MetaActions &Meta,

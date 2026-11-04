@@ -49,8 +49,11 @@ static_assert(probe<Frac{2, 4}> == probe<Frac{1, 2}>);
 static_assert(probe<Frac{2, 4}> != probe<Frac{3, 4}>);
 static_assert(addr<Frac{2, 4}> == &frac_interned<1, 2>);
 
-// std::meta::reflect_constant agrees with template-argument conversion.
-static_assert(std::meta::reflect_constant(Frac{2, 4}) == ^^frac_interned<1, 2>);
+// std::meta::reflect_constant agrees with template-argument conversion: a
+// reflection of the object the customization returns (not of the variable
+// declaring it).
+static_assert(std::meta::reflect_constant(Frac{2, 4}) ==
+              std::meta::reflect_object(frac_interned<1, 2>));
 static_assert(std::meta::reflect_constant(Frac{2, 4}) ==
               std::meta::reflect_constant(Frac{1, 2}));
 static_assert(std::meta::reflect_constant(Frac{2, 4}) !=
@@ -104,7 +107,7 @@ template <PrivFrac F> constexpr const PrivFrac* priv_addr = &F;
 static_assert(std::meta::is_structural_type(^^PrivFrac));
 static_assert(priv_addr<PrivFrac{2, 4}> == &priv_frac_interned<1, 2>);
 static_assert(std::meta::reflect_constant(PrivFrac{2, 4}) ==
-              ^^priv_frac_interned<1, 2>);
+              std::meta::reflect_object(priv_frac_interned<1, 2>));
 static_assert([:std::meta::reflect_constant(PrivFrac{2, 4}):].denom() == 2);
 
 // A private defaulted customization point.
