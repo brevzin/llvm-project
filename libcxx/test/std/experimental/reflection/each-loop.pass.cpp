@@ -125,12 +125,6 @@ consteval auto loop_for(info R, token_sequence src, direction dir,
   };
 }
 
-// Whether 't' is the punctuator 'p'. (A token literal can't spell an
-// unbalanced '{' to compare against.)
-consteval bool is_punctuator(token t, punctuator p) {
-  return token_kind_of(t) == token_kind::punctuator && punctuator_of(t) == p;
-}
-
 // The consumer's body, with each top-level break -- not one inside the body's
 // own loop or switch, or inside a macro invocation's arguments (an inner
 // each!) -- replaced by 'on_break': a pasted body may sit inside several of
@@ -169,7 +163,7 @@ consteval auto rewrite_breaks(token_sequence body, token_sequence on_break,
       if (!is_do)                                // past the (header)
         j = body.balanced_find(punctuator::right_paren, j + 1) + 1;
       out += body.subseq(i, j - i);
-      if (j != n && is_punctuator(body[j], punctuator::left_brace))
+      if (j != n && body[j] == punctuator::left_brace)
         stack.push_back({.brace_depth = braces + 1, .is_do = is_do});
       else
         stack.push_back({.until_semi = true, .braces = braces,
@@ -177,9 +171,9 @@ consteval auto rewrite_breaks(token_sequence body, token_sequence on_break,
       i = j - 1;
       continue;
     }
-    if (token_kind_of(t) == token_kind::identifier && i + 2 < n &&
-        body[i + 1] == ^^{ ! } &&
-        is_punctuator(body[i + 2], punctuator::left_paren)) {
+    if (is_identifier(t) && i + 2 < n &&
+        body[i + 1] == punctuator::exclamation &&
+        body[i + 2] == punctuator::left_paren) {
       // A macro invocation: its arguments (an inner each!'s body) are its
       // own.
       std::size_t close = body.balanced_find(punctuator::right_paren, i + 3);
@@ -193,7 +187,7 @@ consteval auto rewrite_breaks(token_sequence body, token_sequence on_break,
       continue;
     }
     out += t;
-    if (token_kind_of(t) != token_kind::punctuator)
+    if (!is_punctuator(t))
       continue;
     switch (punctuator_of(t)) {
     case punctuator::left_brace:

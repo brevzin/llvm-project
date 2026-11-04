@@ -616,6 +616,7 @@ enum : unsigned {
   __metafn_unique_id,
   __metafn_is_complete_declaration,
   __metafn_tokens_find,
+  __metafn_is_unique_id,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -3584,6 +3585,13 @@ consteval auto unique_id(Ts const&... ts) -> token {
   return __metafunction(detail::__metafn_unique_id, id(ts...));
 }
 
+// Whether a token is an identifier unique_id made: a name nothing else can
+// spell, so that renaming it (replacing each occurrence in a token sequence)
+// cannot capture anything.
+consteval auto is_unique_id(token tok) -> bool {
+  return __metafunction(detail::__metafn_is_unique_id, tok);
+}
+
 // Tokenize strings into a token_sequence.
 // Arguments are concatenated and then lexed as C++ source code.
 // Accepts integers, characters, string literals, and types with data()/size().
@@ -3633,8 +3641,9 @@ consteval auto operands_of(info r) -> vector<info> {
 }
 
 // The lexical category of a single token. All operators and punctuators
-// collapse into `punctuator` (compare against a specific spelling with
-// `tok == ^^{ + }` when you need to distinguish them). A sequence that is
+// collapse into `punctuator` (compare against a specific one with
+// `tok == punctuator::plus`, or `tok == ^^{ + }`, when you need to distinguish
+// them). A sequence that is
 // empty or holds more than one token classifies as `unknown`.
 enum class token_kind {
   identifier,
@@ -3650,6 +3659,20 @@ enum class token_kind {
 // identifier_of(tok).
 consteval auto token_kind_of(token tok) -> token_kind {
   return token_kind(__metafunction(detail::__metafn_token_kind_of, tok));
+}
+
+// Whether a token is of each kind (token_kind_of(tok) == token_kind::...).
+consteval auto is_identifier(token tok) -> bool {
+  return token_kind_of(tok) == token_kind::identifier;
+}
+consteval auto is_keyword(token tok) -> bool {
+  return token_kind_of(tok) == token_kind::keyword;
+}
+consteval auto is_literal(token tok) -> bool {
+  return token_kind_of(tok) == token_kind::literal;
+}
+consteval auto is_punctuator(token tok) -> bool {
+  return token_kind_of(tok) == token_kind::punctuator;
 }
 
 consteval auto operator_of(token tok) -> operators {
@@ -3682,6 +3705,14 @@ enum class punctuator {
 // The punctuator a single token is.
 consteval auto punctuator_of(token tok) -> punctuator {
   return punctuator(__metafunction(detail::__metafn_punctuator_of, tok));
+}
+
+// Whether a token is that punctuator: tok == punctuator::left_brace (which a
+// token literal, ^^{ { }, cannot spell). Any other token -- an identifier, a
+// literal, a different punctuator -- is not.
+consteval bool operator==(token __t, punctuator __p) {
+  return __metafunction(detail::__metafn_tokens_find, __t,
+                        static_cast<size_t>(__p), size_t(0), false) == 0;
 }
 
 // The punctuator's (primary) spelling.

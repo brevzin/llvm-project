@@ -903,6 +903,11 @@ static bool tokens_find(APValue &Result, ASTContext &C, MetaActions &Meta,
                         EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                         QualType ResultTy, SourceRange Range,
                         ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool is_unique_id(APValue &Result, ASTContext &C, MetaActions &Meta,
+                         EvalFn Evaluator, DiagFn Diagnoser,
+                         bool AllowInjection, QualType ResultTy,
+                         SourceRange Range, ArrayRef<Expr *> Args,
+                         Decl *ContainingDecl);
 
 static bool token_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -1136,6 +1141,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_token, 1, 1, unique_id},
     {Metafunction::MFRK_bool, 1, 1, is_complete_declaration},
     {Metafunction::MFRK_sizeT, 4, 4, tokens_find},
+    {Metafunction::MFRK_bool, 1, 1, is_unique_id},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -2754,6 +2760,22 @@ bool unique_id(APValue &Result, ASTContext &C, MetaActions &Meta,
   Tok.setLength(II.getLength());
   Token Toks[] = {Tok};
   return SetAndSucceed(Result, APValue(CreateTokenSequenceData(C, Toks)));
+}
+
+/// is_unique_id(token): whether the token is an identifier unique_id made.
+/// Its name is 'prefix#N', which nothing else -- source, id(), tokenize() --
+/// can produce: that spelling is this file's to know.
+bool is_unique_id(APValue &Result, ASTContext &C, MetaActions &Meta,
+                  EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                  QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                  Decl *ContainingDecl) {
+  assert(ResultTy == C.BoolTy);
+  std::optional<Token> Tok;
+  if (!getSingleToken(Evaluator, Args[0], Tok))
+    return true;
+  bool IsUnique = Tok && Tok->is(tok::identifier) &&
+                  Tok->getIdentifierInfo()->getName().contains('#');
+  return SetAndSucceed(Result, makeBool(C, IsUnique));
 }
 
 // Ordinals must match std::meta::token_kind in <meta>.
