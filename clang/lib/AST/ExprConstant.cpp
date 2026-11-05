@@ -73,6 +73,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/SipHash.h"
@@ -23971,10 +23972,53 @@ bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
       return false;
   }
 
-  // Build the string literal token. The literal data includes quotes.
+  // Build the string literal token: the literal whose value is 'Content', so
+  // the spelling has quotes and escapes: '"', '\', control characters, and
+  // bytes that aren't part of a valid UTF-8 sequence (which the lexer would
+  // otherwise warn about). The latter two as three-digit octal escapes, which,
+  // unlike hex escapes, can't run into a following digit.
   SmallString<68> LiteralData;
   LiteralData.push_back('"');
-  LiteralData.append(Content);
+  auto PushOctal = [&](unsigned char Ch) {
+    LiteralData.push_back('\\');
+    LiteralData.push_back('0' + ((Ch >> 6) & 7));
+    LiteralData.push_back('0' + ((Ch >> 3) & 7));
+    LiteralData.push_back('0' + (Ch & 7));
+  };
+  for (size_t I = 0, N = Content.size(); I != N; ++I) {
+    unsigned char Ch = Content[I];
+    if (Ch >= 0x80) {
+      auto *Begin = reinterpret_cast<const llvm::UTF8 *>(Content.data() + I);
+      unsigned Len = llvm::getNumBytesForUTF8(Ch);
+      if (I + Len <= N && llvm::isLegalUTF8Sequence(Begin, Begin + Len)) {
+        LiteralData.append(Content.begin() + I, Content.begin() + I + Len);
+        I += Len - 1;
+      } else {
+        PushOctal(Ch);
+      }
+      continue;
+    }
+    switch (Ch) {
+    case '"':
+      LiteralData.append("\\\"");
+      break;
+    case '\\':
+      LiteralData.append("\\\\");
+      break;
+    case '\n':
+      LiteralData.append("\\n");
+      break;
+    case '\t':
+      LiteralData.append("\\t");
+      break;
+    default:
+      if (Ch < 0x20 || Ch == 0x7f)
+        PushOctal(Ch);
+      else
+        LiteralData.push_back(Ch);
+      break;
+    }
+  }
   LiteralData.push_back('"');
 
   // Allocate the literal data in ASTContext.
