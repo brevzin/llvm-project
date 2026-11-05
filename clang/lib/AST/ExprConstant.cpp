@@ -23037,6 +23037,21 @@ static bool EvaluateOperandAsRValue(EvalInfo &Info, const Expr *SubExpr,
 }
 
 /// Extract a string from an argument expression, appending to Result.
+/// Evaluate 'E', a subexpression of the expression being evaluated, as an
+/// rvalue. (Not the top-level EvaluateAsRValue: that also checks that the
+/// result is a constant expression and that no allocation is still live,
+/// which holds only once the whole evaluation is done.)
+static bool EvaluateSubexpressionAsRValue(EvalInfo &Info, const Expr *E,
+                                          APValue &Result) {
+  if (!::Evaluate(Result, Info, E))
+    return false;
+  if (!E->isGLValue())
+    return true;
+  LValue LV;
+  LV.setFrom(Info.Ctx, Result);
+  return handleLValueToRValueConversion(Info, E, E->getType(), LV, Result);
+}
+
 /// Handles four cases:
 /// 1. User-defined string types with size()/data() (when SizeCall is provided)
 /// 2. String literals and pointers/arrays to char
@@ -23074,7 +23089,7 @@ static bool ExtractStringFromArg(EvalInfo &Info, Expr *Arg,
   if (Arg->getType()->isCharType()) {
     // Char argument: append as single character.
     APValue Val;
-    if (!EvaluateAsRValue(Info, Arg, Val))
+    if (!EvaluateSubexpressionAsRValue(Info, Arg, Val))
       return false;
     Result.push_back(static_cast<char>(Val.getInt().getExtValue()));
     return true;
@@ -23083,7 +23098,7 @@ static bool ExtractStringFromArg(EvalInfo &Info, Expr *Arg,
   if (Arg->getType()->isIntegralOrEnumerationType()) {
     // Integer argument: convert to decimal string.
     APValue Val;
-    if (!EvaluateAsRValue(Info, Arg, Val))
+    if (!EvaluateSubexpressionAsRValue(Info, Arg, Val))
       return false;
     Val.getInt().toString(Result, 10);
     return true;
@@ -23114,7 +23129,7 @@ static bool ExtractStringFromArg(EvalInfo &Info, Expr *Arg,
       if (!EvaluateLValue(Arg, LV, Info))
         return false;
       LV.moveInto(Val);
-    } else if (!EvaluateAsRValue(Info, Arg, Val)) {
+    } else if (!EvaluateSubexpressionAsRValue(Info, Arg, Val)) {
       return false;
     }
 
