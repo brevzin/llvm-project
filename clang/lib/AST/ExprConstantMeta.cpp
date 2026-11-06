@@ -908,6 +908,11 @@ static bool is_unique_id(APValue &Result, ASTContext &C, MetaActions &Meta,
                          bool AllowInjection, QualType ResultTy,
                          SourceRange Range, ArrayRef<Expr *> Args,
                          Decl *ContainingDecl);
+static bool operator_form_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                             EvalFn Evaluator, DiagFn Diagnoser,
+                             bool AllowInjection, QualType ResultTy,
+                             SourceRange Range, ArrayRef<Expr *> Args,
+                             Decl *ContainingDecl);
 
 static bool token_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -1142,6 +1147,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_bool, 1, 1, is_complete_declaration},
     {Metafunction::MFRK_sizeT, 4, 4, tokens_find},
     {Metafunction::MFRK_bool, 1, 1, is_unique_id},
+    {Metafunction::MFRK_sizeT, 1, 1, operator_form_of},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3614,6 +3620,97 @@ bool operator_of(APValue &Result, ASTContext &C, MetaActions &Meta,
 
   return SetAndSucceed(Result,
                        APValue(C.MakeIntValue(OperatorId, C.getSizeType())));
+}
+
+// Ordinals must match std::meta::operator_form in <meta>.
+enum class MetaOperatorForm : uint64_t { Prefix = 0, Postfix = 1, Binary = 2 };
+
+// operator_form_of(r): the form of expression the operator function (or
+// operator function template) r implements -- prefix (@x), postfix (x@,
+// including x(...), x[...], and x->), or binary (x @ y) -- as determined by
+// the operator and its number of operands, counting an implicit object
+// parameter. (Postfix ++ and -- take a second, dummy int operand.) The same
+// domain as operator_of, except allocation and deallocation functions, which
+// implement no operator expression.
+bool operator_form_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                      EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                      QualType ResultTy, SourceRange Range,
+                      ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+  assert(ResultTy == C.getSizeType());
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  RV = MaybeUnproxy(C, RV);
+
+  auto Form = [&](MetaOperatorForm F) {
+    return SetAndSucceed(Result,
+                         APValue(C.MakeIntValue(uint64_t(F), C.getSizeType())));
+  };
+
+  // A binary expression (as operator_of takes, e.g. a macro's operand).
+  if (RV.isReflectedExpression()) {
+    OverloadedOperatorKind OO;
+    Expr *LHS, *RHS;
+    if (decomposeBinaryOperation(RV.getReflectedExpression(), OO, LHS, RHS))
+      return Form(MetaOperatorForm::Binary);
+    return Diagnoser(Range.getBegin(), diag::metafn_not_an_operator)
+           << DescriptionOf(RV) << Range;
+  }
+
+  FunctionDecl *FD = nullptr;
+  if (RV.isReflectedTemplate()) {
+    if (auto *FTD = dyn_cast_or_null<FunctionTemplateDecl>(
+            RV.getReflectedTemplate().getAsTemplateDecl()))
+      FD = FTD->getTemplatedDecl();
+  } else if (RV.isReflectedDecl()) {
+    FD = dyn_cast<FunctionDecl>(RV.getReflectedDecl());
+  }
+  OverloadedOperatorKind OO = FD ? FD->getOverloadedOperator() : OO_None;
+  if (OO == OO_None)
+    return Diagnoser(Range.getBegin(), diag::metafn_not_an_operator)
+           << DescriptionOf(RV) << Range;
+
+  switch (OO) {
+  case OO_New:
+  case OO_Delete:
+  case OO_Array_New:
+  case OO_Array_Delete:
+    return DiagnoseReflectionKind(
+        Diagnoser, Range,
+        "an operator function other than an allocation or deallocation "
+        "function",
+        DescriptionOf(RV));
+  case OO_Call:
+  case OO_Subscript:
+  case OO_Arrow:
+    return Form(MetaOperatorForm::Postfix);
+  case OO_Tilde:
+  case OO_Exclaim:
+  case OO_Coawait:
+    return Form(MetaOperatorForm::Prefix);
+  default:
+    break;
+  }
+
+  // The rest depend on the number of operands. (A pack has none yet.)
+  if (llvm::any_of(FD->parameters(),
+                   [](ParmVarDecl *P) { return P->isParameterPack(); }))
+    return DiagnoseReflectionKind(
+        Diagnoser, Range,
+        "an operator function template without a function parameter pack",
+        DescriptionOf(RV));
+  unsigned Operands = FD->getNumParams();
+  if (auto *MD = dyn_cast<CXXMethodDecl>(FD);
+      MD && MD->isImplicitObjectMemberFunction())
+    ++Operands;
+
+  if (OO == OO_PlusPlus || OO == OO_MinusMinus)
+    return Form(Operands == 2 ? MetaOperatorForm::Postfix
+                              : MetaOperatorForm::Prefix);
+  return Form(Operands == 1 ? MetaOperatorForm::Prefix
+                            : MetaOperatorForm::Binary);
 }
 
 bool source_location_of(APValue &Result, ASTContext &C, MetaActions &Meta,

@@ -40,8 +40,10 @@ consteval auto u8display_string_of(info) -> u8string_view;
 consteval auto has_identifier(info) -> bool;
 
 enum operators;
+enum class operator_form;  // P2996 ext
 
 consteval auto operator_of(info) -> operators;
+consteval auto operator_form_of(info) -> operator_form;  // P2996 ext
 
 consteval auto source_location_of(info r) -> source_location;
 
@@ -617,6 +619,7 @@ enum : unsigned {
   __metafn_is_complete_declaration,
   __metafn_tokens_find,
   __metafn_is_unique_id,
+  __metafn_operator_form_of,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1158,6 +1161,21 @@ using enum operators;
 // operator function template.
 consteval auto operator_of(info r) -> operators {
   return operators(__metafunction(detail::__metafn_operator_of, r));
+}
+
+// (P2996 ext) The form of expression an operator function implements, as the
+// expression grammar has it: a prefix (unary-)expression, @x; a postfix-
+// expression, x@ -- which includes x(...), x[...], and x-> as well as x++
+// and x--; or a binary expression, x @ y. operator_of names the operator;
+// this tells apart the two forms of + - * & (prefix or binary) and of ++ --
+// (prefix or postfix).
+enum class operator_form { prefix, postfix, binary };
+
+// Returns the form of the operator implemented by the represented operator
+// function or operator function template (other than an allocation or
+// deallocation function, and one with a function parameter pack).
+consteval auto operator_form_of(info r) -> operator_form {
+  return operator_form(__metafunction(detail::__metafn_operator_form_of, r));
 }
 
 // Returns whether the reflected entity has an associated identifier.
