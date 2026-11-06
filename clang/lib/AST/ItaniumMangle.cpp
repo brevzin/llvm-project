@@ -2806,6 +2806,9 @@ CXXNameMangler::mangleOperatorName(OverloadedOperatorKind OO, unsigned Arity) {
   // Proposed in cxx-abi github issue 43.
   //              ::= ss        # <=>
   case OO_Spaceship: Out << "ss"; break;
+  // P4340 ext: a vendor extended operator, which has one operand (the object).
+  //              ::= v1 8template  # operator template
+  case OO_Template: Out << "v18template"; break;
 
   case OO_None:
   case NUM_OVERLOADED_OPERATORS:
@@ -6671,9 +6674,9 @@ void CXXNameMangler::mangleTemplateArg(TemplateArgument A, bool NeedExactType) {
                                  NeedExactType);
         break;
       }
-      // P4340 ext: an argument normalized through a reflect_constant
-      // customization point designates a specific variable; its identity is
-      // the argument, so mangle it as a reference to that entity:
+      // P4340 ext: an argument normalized through an 'operator template'
+      // designates a specific variable; its identity is the argument, so
+      // mangle it as a reference to that entity:
       //   <expr-primary> ::= L <mangled-name> E
       Out << 'L';
       mangle(D);

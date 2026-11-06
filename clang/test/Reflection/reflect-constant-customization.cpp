@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -std=c++2d -freflection -verify %s
 
-// P4340 ext: declaration surface for the reflect_constant customization
-// point. See reflect-constant.md. This file tests only the declaration-side
+// P4340 ext: declaration surface for 'operator template'. See
+// reflect-constant.md. This file tests only the declaration-side
 // rules: recognized shapes, =default / =delete, access, and the effect on
 // is_structural / usability as an NTTP that flows from the structural bit.
 
@@ -12,25 +12,25 @@ namespace std::meta {
 // ==== Recognized shapes ====
 
 struct Ok1 {
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 struct Ok2 {
-  consteval auto reflect_constant() const& -> std::meta::info;
+  consteval operator template() const&;
 };
 struct Ok3 {
-  consteval auto reflect_constant(this Ok3 const&) -> std::meta::info;
+  consteval operator template(this Ok3 const&);
 };
 struct Ok4 {
-  consteval auto reflect_constant(this Ok4) -> std::meta::info;
+  consteval operator template(this Ok4);
 };
 
 // The customization point may have any access.
 class Private {
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 class Protected {
 protected:
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 
 // ==== Defaulted and deleted ====
@@ -38,55 +38,54 @@ protected:
 class Defaulted {
   int i;
 public:
-  consteval auto reflect_constant() const -> std::meta::info = default;
+  consteval operator template() const = default;
 };
 
 struct Deleted {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info = delete;
+  consteval operator template() const = delete;
 };
 
 class DefaultedOutOfLine {
   int i;
 public:
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
-consteval auto DefaultedOutOfLine::reflect_constant() const
-    -> std::meta::info = default;
+consteval DefaultedOutOfLine::operator template() const = default;
 
 // ==== Bad shapes ====
 
 struct NotConsteval {
-  constexpr auto reflect_constant() const -> std::meta::info; // expected-error {{'reflect_constant' customization point must be a consteval member function}}
+  constexpr operator template() const; // expected-error {{'operator template' must be a consteval member function}}
 };
 
 struct NotConst {
-  consteval auto reflect_constant() -> std::meta::info; // expected-error {{'reflect_constant' customization point must be const-qualified}}
+  consteval operator template(); // expected-error {{'operator template' must be const-qualified}}
 };
 
 struct RValueRef {
-  consteval auto reflect_constant() const&& -> std::meta::info; // expected-error {{'reflect_constant' customization point must not be &&-qualified}}
+  consteval operator template() const&&; // expected-error {{'operator template' must not be &&-qualified}}
 };
 
 struct HasParams {
-  consteval auto reflect_constant(int) const -> std::meta::info; // expected-error {{'reflect_constant' customization point must take no parameters}}
+  consteval operator template(int) const; // expected-error {{'operator template' must take no parameters}}
 };
 
 struct WrongReturn {
-  consteval auto reflect_constant() const -> int; // expected-error {{'reflect_constant' customization point must return 'std::meta::info'}}
+  consteval int operator template() const; // expected-error {{'operator template' cannot have a return type}}
 };
 
 struct TemplateCP {
   template <class T>
-  consteval auto reflect_constant() const -> std::meta::info; // expected-error {{'reflect_constant' customization point must not be a template}}
+  consteval operator template() const; // expected-error {{'operator template' must not be a template}}
 };
 
 struct BadExplicitObject {
-  consteval auto reflect_constant(this BadExplicitObject&&) -> std::meta::info; // expected-error {{'reflect_constant' customization point must have an object parameter of type}}
+  consteval operator template(this BadExplicitObject&&); // expected-error {{'operator template' must have an object parameter of type}}
 };
 
 struct WrongExplicitObjectType {
-  consteval auto reflect_constant(this int) -> std::meta::info; // expected-error {{'reflect_constant' customization point must have an object parameter of type}}
+  consteval operator template(this int); // expected-error {{'operator template' must have an object parameter of type}}
 };
 
 // ==== Structural-type effects ====
@@ -102,33 +101,32 @@ private:
   int i; // private member: not C++26-structural
 
 public:
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 static_assert(is_structural(^^NotOtherwiseStructural));
 
 // Private customization points (user-provided or defaulted) still opt in.
 class PrivateCustomized {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 static_assert(is_structural(^^PrivateCustomized));
 
 class PrivateDefaulted {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info = default;
+  consteval operator template() const = default;
 };
 static_assert(is_structural(^^PrivateDefaulted));
 
 class PrivateDefaultedOutOfLine {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
-consteval auto PrivateDefaultedOutOfLine::reflect_constant() const
-    -> std::meta::info = default;
+consteval PrivateDefaultedOutOfLine::operator template() const = default;
 static_assert(is_structural(^^PrivateDefaultedOutOfLine));
 
 class PrivateDeleted {
-  consteval auto reflect_constant() const -> std::meta::info = delete;
+  consteval operator template() const = delete;
 };
 static_assert(!is_structural(^^PrivateDeleted));
 
@@ -153,6 +151,6 @@ static_assert(is_structural(^^HasCustomizedMember));
 // Mutable members always disqualify, customization point or not.
 struct MutableCustomized {
   mutable int i;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 static_assert(!is_structural(^^MutableCustomized));

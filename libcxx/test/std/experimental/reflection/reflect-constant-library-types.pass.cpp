@@ -12,7 +12,7 @@
 // ADDITIONAL_COMPILE_FLAGS: -std=c++2d -freflection
 
 // P4340 ext (reflect-constant.md): standard library types with defaulted
-// reflect_constant customization points, usable as constant template
+// 'operator template's, usable as constant template
 // parameters: tuple, basic_string_view, span, optional, expected, variant,
 // chrono types, complex, the comparison categories, bitset, and
 // reference_wrapper.
@@ -105,10 +105,10 @@ namespace frac {
 struct Frac {
   int numer;
   int denom;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 template <int N, int D> constexpr Frac interned{N, D};
-consteval auto Frac::reflect_constant() const -> std::meta::info {
+consteval Frac::operator template() const {
   int g = [](int a, int b) {
     while (b) { int t = a % b; a = b; b = t; }
     return a;

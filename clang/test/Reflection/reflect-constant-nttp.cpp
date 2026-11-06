@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -std=c++2d -freflection -verify %s
 
 // P4340 ext: identity-based conversion of constant template parameters
-// through the reflect_constant customization point (stage 3: top-level
+// through 'operator template' (stage 3: top-level
 // semantics only; subobject recursion is tested separately).
 
 namespace std::meta {
@@ -16,12 +16,12 @@ consteval int gcd(int a, int b) {
 struct Frac {
   int numer;
   int denom;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 
 template <int N, int D> constexpr Frac interned = Frac{N, D};
 
-consteval auto Frac::reflect_constant() const -> std::meta::info {
+consteval Frac::operator template() const {
   int g = gcd(numer, denom);
   int n = numer / g, d = denom / g;
   // A minimal interning scheme (a real one would use substitute()).
@@ -55,7 +55,7 @@ static_assert(addr<interned<2, 4>> == &interned<1, 2>);
 // checking access.
 class PrivFrac {
   int numer, denom;
-  consteval auto reflect_constant() const -> std::meta::info; // #privfrac-cp
+  consteval operator template() const; // #privfrac-cp
 public:
   consteval PrivFrac(int n, int d) : numer(n), denom(d) {}
   consteval int value() const { return numer * 100 + denom; }
@@ -63,7 +63,7 @@ public:
 
 template <int N, int D> constexpr PrivFrac priv_interned = PrivFrac{N, D};
 
-consteval auto PrivFrac::reflect_constant() const -> std::meta::info {
+consteval PrivFrac::operator template() const {
   int g = gcd(numer, denom);
   int n = numer / g, d = denom / g;
   if (n == 1 && d == 2) return ^^priv_interned<1, 2>;
@@ -74,9 +74,11 @@ template <PrivFrac F> constexpr const PrivFrac* priv_addr = &F;
 static_assert(priv_addr<PrivFrac{2, 4}> == &priv_interned<1, 2>);
 static_assert(priv_addr<PrivFrac{2, 4}>->value() == 102);
 
-// Access is still checked for ordinary calls.
+// A program can't call it at all (private or not): the language does, and
+// std::meta::reflect_constant does.
 consteval std::meta::info call_private(PrivFrac f) {
-  return f.reflect_constant(); // expected-error {{'reflect_constant' is a private member of 'PrivFrac'}}
+  return f.operator template(); // expected-error {{'operator template' can be named only in its own declaration (use 'std::meta::reflect_constant' to invoke it)}}
+                               // expected-error@-1 {{'operator template' is a private member of 'PrivFrac'}}
                                // expected-note@#privfrac-cp {{implicitly declared private here}}
 }
 
@@ -84,7 +86,7 @@ consteval std::meta::info call_private(PrivFrac f) {
 
 struct BadKind {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info {
+  consteval operator template() const {
     return ^^int; // a type, not an object
   }
 };
@@ -93,10 +95,10 @@ void test_bad_kind() { g<BadKind{1}>(); } // expected-error {{no matching functi
 
 struct WrongType {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 constexpr int not_a_wrongtype = 0;
-consteval auto WrongType::reflect_constant() const -> std::meta::info {
+consteval WrongType::operator template() const {
   return ^^not_a_wrongtype; // object of type int, not WrongType const
 }
 template <WrongType W> void h(); // expected-note {{an object of type 'const int' rather than 'const WrongType'}}
@@ -104,11 +106,11 @@ void test_wrong_type() { h<WrongType{1}>(); } // expected-error {{no matching fu
 
 struct NoLinkage {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 // A local static has static storage duration and is usable in constant
 // expressions, but has no linkage.
-consteval auto NoLinkage::reflect_constant() const -> std::meta::info {
+consteval NoLinkage::operator template() const {
   static constexpr NoLinkage local{7};
   return ^^local;
 }
@@ -117,10 +119,10 @@ void test_no_linkage() { k<NoLinkage{1}>(); } // expected-error {{no matching fu
 
 struct NotIdempotent {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 template <int N> constexpr NotIdempotent ni = NotIdempotent{N};
-consteval auto NotIdempotent::reflect_constant() const -> std::meta::info {
+consteval NotIdempotent::operator template() const {
   // ni<100> has value {100}, which renormalizes to ni<200>: not idempotent.
   return i < 100 ? ^^ni<100> : ^^ni<200>;
 }
@@ -129,8 +131,8 @@ void test_not_idempotent() { m<NotIdempotent{5}>(); } // expected-error {{no mat
 
 // ==== Deleted opt-out ====
 
-struct Deleted { // expected-note {{'Deleted' is not a structural type because its 'reflect_constant' customization point is deleted}}
+struct Deleted { // expected-note {{'Deleted' is not a structural type because its 'operator template' is deleted}}
   int i;
-  consteval auto reflect_constant() const -> std::meta::info = delete;
+  consteval operator template() const = delete;
 };
 template <Deleted D> void n(); // expected-error {{type 'Deleted' of non-type template parameter is not a structural type}}

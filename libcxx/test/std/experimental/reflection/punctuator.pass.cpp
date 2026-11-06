@@ -86,7 +86,8 @@ consteval bool agrees_with_operators() {
     // Only the operators that are not a single punctuator lack one.
     bool multi = name == "new" || name == "delete" || name == "array_new" ||
                  name == "array_delete" || name == "co_await" ||
-                 name == "parentheses" || name == "square_brackets";
+                 name == "parentheses" || name == "square_brackets" ||
+                 name == "template";
     if (found == multi)
       return false;
   }

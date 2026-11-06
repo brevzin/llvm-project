@@ -102,6 +102,11 @@ OVERLOADED_OPERATOR_MULTI(Subscript      , "[]"                       , false, t
 // resolution machinery for it.
 OVERLOADED_OPERATOR_MULTI(Conditional    , "?"                        , false, true , false)
 OVERLOADED_OPERATOR(Coawait              , "co_await", kw_co_await    , true , false, false)
+// P4340 ext: 'operator template', the special member function that says what
+// a value of its class is as a constant template argument (C++29, with
+// -freflection). It implements no expression, so it is neither unary nor
+// binary; its shape is checked separately (CheckReflectConstantCustomization).
+OVERLOADED_OPERATOR(Template             , "template", kw_template    , false, false, true)
 
 #undef OVERLOADED_OPERATOR_MULTI
 #undef OVERLOADED_OPERATOR

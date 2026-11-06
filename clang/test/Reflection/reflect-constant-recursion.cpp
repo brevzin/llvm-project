@@ -1,6 +1,6 @@
 // RUN: %clang_cc1 -std=c++2d -freflection -verify %s
 
-// P4340 ext: stage 4 of the reflect_constant design — subobject
+// P4340 ext: stage 4 of the 'operator template' design — subobject
 // normalization, the defaulted customization (private members allowed,
 // defaulted-as-deleted), and the copyability requirement for subobjects.
 
@@ -16,12 +16,12 @@ consteval int gcd(int a, int b) {
 struct Frac {
   int numer;
   int denom;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 
 template <int N, int D> constexpr Frac interned = Frac{N, D};
 
-consteval auto Frac::reflect_constant() const -> std::meta::info {
+consteval Frac::operator template() const {
   int g = gcd(numer, denom);
   int n = numer / g, d = denom / g;
   if (n == 1 && d == 2) return ^^interned<1, 2>;
@@ -77,7 +77,7 @@ class D {
 public:
   constexpr D(int i) : i(i) { }
   constexpr int get() const { return i; }
-  consteval auto reflect_constant() const -> std::meta::info = default;
+  consteval operator template() const = default;
 };
 template <D d> constexpr int fd() { return d.get(); }
 static_assert(fd<D(5)>() == 5);
@@ -92,11 +92,11 @@ class InnerNoOptIn {
 public:
   constexpr InnerNoOptIn(int i) : i(i) { }
 };
-class OuterShallow { // expected-note {{'OuterShallow' is not a structural type because its 'reflect_constant' customization point is deleted}}
+class OuterShallow { // expected-note {{'OuterShallow' is not a structural type because its 'operator template' is deleted}}
   InnerNoOptIn in;
 public:
   constexpr OuterShallow(int i) : in(i) { }
-  consteval auto reflect_constant() const -> std::meta::info = default;
+  consteval operator template() const = default;
 };
 template <OuterShallow O> void shallow1(); // expected-error {{type 'OuterShallow' of non-type template parameter is not a structural type}}
 
@@ -106,14 +106,14 @@ class InnerOptIn {
 public:
   constexpr InnerOptIn(int i) : i(i) { }
   constexpr int get() const { return i; }
-  consteval auto reflect_constant() const -> std::meta::info = default;
+  consteval operator template() const = default;
 };
 class OuterOk {
   InnerOptIn in;
 public:
   constexpr OuterOk(int i) : in(i) { }
   constexpr int get() const { return in.get(); }
-  consteval auto reflect_constant() const -> std::meta::info = default;
+  consteval operator template() const = default;
 };
 template <OuterOk O> constexpr int shallow2() { return O.get(); }
 static_assert(shallow2<OuterOk(5)>() == 5);
@@ -126,10 +126,10 @@ struct NotStructural {
 };
 // ...and over a non-structural member, it is defaulted as deleted, which is
 // infectious.
-class HasBad { // expected-note {{'HasBad' is not a structural type because its 'reflect_constant' customization point is deleted}}
+class HasBad { // expected-note {{'HasBad' is not a structural type because its 'operator template' is deleted}}
   NotStructural ns;
 public:
-  consteval auto reflect_constant() const -> std::meta::info = default;
+  consteval operator template() const = default;
 };
 template <HasBad H> void bad1(); // expected-error {{type 'HasBad' of non-type template parameter is not a structural type}}
 
@@ -139,10 +139,10 @@ struct NoCopy {
   int i;
   constexpr NoCopy(int i) : i(i) { }
   NoCopy(const NoCopy&) = delete;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 template <int N> constexpr NoCopy nc{N};
-consteval auto NoCopy::reflect_constant() const -> std::meta::info {
+consteval NoCopy::operator template() const {
   return ^^nc<1>;
 }
 
@@ -153,5 +153,5 @@ static_assert(fnc<nc<1>> == fnc<nc<1>>);
 
 // Subobject: the normalized value must be copied into the enclosing object.
 struct Wrap { NoCopy inner; int t; };
-template <Wrap W> void fw(); // expected-note {{subobject of type 'NoCopy' cannot be normalized through its 'reflect_constant' customization point because 'NoCopy' is not copyable in constant expressions}}
+template <Wrap W> void fw(); // expected-note {{subobject of type 'NoCopy' cannot be normalized through its 'operator template' because 'NoCopy' is not copyable in constant expressions}}
 void test_wrap() { fw<Wrap{{5}, 2}>(); } // expected-error {{no matching function}}

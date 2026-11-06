@@ -1394,7 +1394,7 @@ bool Sema::RequireStructuralType(QualType T, SourceLocation Loc) {
     if (T->isStdMetaTokenSequenceType())
       return true;
 
-    // P4340 ext: a deleted reflect_constant customization point makes the
+    // P4340 ext: a deleted 'operator template' makes the
     // type non-structural regardless of its subobjects.
     if (RD->hasDeletedReflectConstant()) {
       Diag(RD->getLocation(), diag::note_not_structural_deleted_reflect)
@@ -7331,12 +7331,11 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
     }
   }
 
-  // P4340 ext: a class type with a user-provided reflect_constant
-  // customization point converts by identity, not by value. Evaluate the
-  // customization on the argument; the converted template argument then
-  // designates the returned object directly (a Declaration-kind argument
-  // referring to the returned variable), giving identity-based uniquing and
-  // reference-style mangling.
+  // P4340 ext: a class type with a user-provided 'operator template' converts
+  // by identity, not by value. Evaluate the customization on the argument; the
+  // converted template argument then designates the returned object directly (a
+  // Declaration-kind argument referring to the returned variable), giving
+  // identity-based uniquing and reference-style mangling.
   if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
       ParamType->isRecordType() &&
       !DeductionArg->isValueDependent() && !ArgPE) {
@@ -7519,7 +7518,7 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
     } else {
       // P4340 ext: before interning a template parameter object from a class
       // value, normalize every subobject of customized type through its
-      // reflect_constant customization point, so that value-equal-after-
+      // 'operator template', so that value-equal-after-
       // normalization arguments unify.
       if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
           ParamType->isRecordType() &&
@@ -8098,9 +8097,9 @@ ExprResult Sema::BuildExpressionFromDeclTemplateArgument(
     if (RefExpr.isInvalid())
       return ExprError();
   } else if (ParamType->isRecordType()) {
-    // P4340 ext: for a class type with a reflect_constant customization
-    // point, the argument declaration is the object returned by the
-    // customization, not a template parameter object.
+    // P4340 ext: for a class type with an 'operator template', the argument
+    // declaration is the object returned by the customization, not a template
+    // parameter object.
     assert((isa<TemplateParamObjectDecl>(VD) ||
             (isa<VarDecl>(VD) &&
              ParamType->getAsCXXRecordDecl()->hasReflectConstant())) &&

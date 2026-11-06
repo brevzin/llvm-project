@@ -1628,6 +1628,11 @@ void MicrosoftCXXNameMangler::mangleOperatorName(OverloadedOperatorKind OO,
     Error(Loc, "conditional operator");
     break;
   }
+  // P4340 ext: consteval, so never emitted.
+  case OO_Template: {
+    Error(Loc, "operator template");
+    break;
+  }
 
   case OO_None:
   case NUM_OVERLOADED_OPERATORS:

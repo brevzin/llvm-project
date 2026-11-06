@@ -3323,7 +3323,8 @@ def err_macro_member : Error<
 def err_macro_virtual : Error<"an expression macro cannot be virtual">;
 def err_macro_operator_kind : Error<
   "%select{a conversion function|a literal operator|an allocation or "
-  "deallocation function|operator co_await}0 cannot be an expression macro">;
+  "deallocation function|operator co_await|operator template}0 cannot be an "
+  "expression macro">;
 def err_macro_operator_raw_parameter : Error<
   "an operator expression macro cannot have a token sequence parameter">;
 def err_macro_defaulted_deleted : Error<
@@ -5735,8 +5736,7 @@ def note_not_structural_mutable_field : Note<
   "%0 is not a structural type because it has a mutable "
   "non-static data member">;
 def note_not_structural_deleted_reflect : Note<
-  "%0 is not a structural type because its 'reflect_constant' "
-  "customization point is deleted">;
+  "%0 is not a structural type because its 'operator template' is deleted">;
 def note_not_structural_rvalue_ref_field : Note<
   "%0 is not a structural type because it has a non-static data member "
   "of rvalue reference type">;
@@ -10757,7 +10757,7 @@ def warn_cxx17_compat_defaulted_comparison : Warning<
 def err_defaulted_comparison_template : Error<
   "comparison operator template cannot be defaulted">;
 def err_reflect_constant_bad_shape : Error<
-  "'reflect_constant' customization point "
+  "'operator template' "
   "%select{must be a consteval member function|"
   "must not be a template|"
   "must take no parameters (besides an object parameter)|"
@@ -10765,24 +10765,31 @@ def err_reflect_constant_bad_shape : Error<
   "must not be &&-qualified|"
   "must return 'std::meta::info'|"
   "must have an object parameter of type %1}0">;
+def err_operator_template_return_type : Error<
+  "'operator template' cannot have a return type">;
+def err_operator_template_use : Error<
+  "'operator template' can be named only in its own declaration (use "
+  "'std::meta::reflect_constant' to invoke it)">;
+def err_operator_template_unavailable : Error<
+  "'operator template' requires C++29 and '-freflection'">;
 def err_defaulted_reflect_constant_template : Error<
-  "'reflect_constant' customization point template cannot be defaulted">;
+  "'operator template' cannot be a defaulted template">;
 def err_reflect_constant_bad_result : Error<
-  "'reflect_constant' customization point for %0 returned a reflection of "
+  "'operator template' for %0 returned a reflection of "
   "%select{something other than an object or variable|"
   "an object without static storage duration|"
   "an object not usable in constant expressions|"
   "an object with no linkage|"
   "an object of type %2 rather than %1}3">;
 def err_reflect_constant_not_idempotent : Error<
-  "'reflect_constant' customization point for %0 is not idempotent: calling "
-  "it on its own result returned a reflection of a different object">;
+  "'operator template' for %0 is not idempotent: calling it on its own "
+  "result returned a reflection of a different object">;
 def err_reflect_constant_deleted : Error<
   "%0 cannot be used as a constant template parameter because its "
-  "'reflect_constant' customization point is deleted">;
+  "'operator template' is deleted">;
 def err_reflect_constant_subobject_not_copyable : Error<
-  "subobject of type %0 cannot be normalized through its 'reflect_constant' "
-  "customization point because %0 is not copyable in constant expressions">;
+  "subobject of type %0 cannot be normalized through its 'operator template' "
+  "because %0 is not copyable in constant expressions">;
 def err_implied_std_meta_member_not_found : Error<
   "using a string literal as a constant template parameter requires "
   "'std::meta::%0', which is not available; include <experimental/meta>">;

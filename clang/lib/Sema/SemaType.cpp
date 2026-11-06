@@ -3226,11 +3226,25 @@ static QualType GetDeclSpecTypeForDeclarator(TypeProcessingState &state,
       D.getName().getKind() == UnqualifiedIdKind::IK_Identifier &&
       D.getName().Identifier &&
       D.getName().Identifier->getName() == "operator for";
+  // P4340 ext: like a conversion function, 'operator template' has no return
+  // type of its own: its name says what it returns, std::meta::info.
+  bool IsOperatorTemplate =
+      D.getName().getKind() == UnqualifiedIdKind::IK_OperatorFunctionId &&
+      D.getName().OperatorFunctionId.Operator == OO_Template;
   if (IsOperatorFor) {
     if (D.getDeclSpec().getTypeSpecType() != DeclSpec::TST_unspecified)
       SemaRef.Diag(D.getDeclSpec().getTypeSpecTypeLoc(),
                    diag::err_operator_for_return_type);
     T = SemaRef.Context.VoidTy;
+    processTypeAttrs(state, T, TAL_DeclSpec,
+                     D.getMutableDeclSpec().getAttributes());
+  } else if (IsOperatorTemplate) {
+    if (D.getDeclSpec().getTypeSpecType() != DeclSpec::TST_unspecified) {
+      SemaRef.Diag(D.getDeclSpec().getTypeSpecTypeLoc(),
+                   diag::err_operator_template_return_type);
+      D.setInvalidType();
+    }
+    T = SemaRef.Context.MetaInfoTy;
     processTypeAttrs(state, T, TAL_DeclSpec,
                      D.getMutableDeclSpec().getAttributes());
   } else

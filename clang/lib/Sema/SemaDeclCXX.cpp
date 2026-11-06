@@ -6950,12 +6950,10 @@ Sema::getDefaultedFunctionKind(const FunctionDecl *FD) {
       return CXXSpecialMemberKind::Destructor;
   }
 
-  // P4340 ext: a member named reflect_constant with a matching shape is the
-  // constant-template-parameter customization point.
+  // P4340 ext: 'operator template', what a value of the class is as a
+  // constant template argument.
   if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
-      FD->getDeclName().isIdentifier() &&
-      FD->getName() == "reflect_constant" && isa<CXXMethodDecl>(FD) &&
-      !isa<CXXConstructorDecl>(FD))
+      FD->getOverloadedOperator() == OO_Template && isa<CXXMethodDecl>(FD))
     return DefaultedFunctionKind::createReflectConstant();
 
   switch (FD->getDeclName().getCXXOverloadedOperator()) {
@@ -7449,21 +7447,20 @@ void Sema::CheckCompletedCXXClass(Scope *S, CXXRecordDecl *Record) {
       if (!isa<CXXDestructorDecl>(M))
         CompleteMemberFunction(M);
 
-      // P4340 ext: recognize and validate a reflect_constant customization
-      // point (user-provided, defaulted, or deleted).
+      // P4340 ext: recognize and validate an 'operator template'
+      // (user-provided, defaulted, or deleted).
       if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
-          M->getDeclName().isIdentifier() &&
-          M->getName() == "reflect_constant" && !M->isImplicit()) {
+          M->getOverloadedOperator() == OO_Template && !M->isImplicit() &&
+          !M->isInvalidDecl()) {
         if (CheckReflectConstantCustomization(M))
           M->setInvalidDecl();
       }
     } else if (auto *FTD = dyn_cast<FunctionTemplateDecl>(D)) {
-      // P4340 ext: a member function template spelled reflect_constant is
-      // never a valid customization point; diagnose the shape here since the
-      // CXXMethodDecl branch above only sees non-template members.
+      // P4340 ext: an 'operator template' can't be a template; diagnose the
+      // shape here since the CXXMethodDecl branch above only sees
+      // non-template members.
       if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
-          FTD->getDeclName().isIdentifier() &&
-          FTD->getName() == "reflect_constant")
+          FTD->getTemplatedDecl()->getOverloadedOperator() == OO_Template)
         if (auto *M = dyn_cast<CXXMethodDecl>(FTD->getTemplatedDecl()))
           if (CheckReflectConstantCustomization(M))
             M->setInvalidDecl();
@@ -8029,7 +8026,7 @@ bool Sema::CheckReflectConstantCustomization(CXXMethodDecl *MD) {
   //
   // Defaulting exempts the access of DIRECT subobjects only: a private member
   // or base is fine here, but its TYPE must be structural on its own (C++26
-  // structural, or via its own reflect_constant customization point).
+  // structural, or via its own 'operator template').
   // Defaulting does not reach through to bless indirect subobjects.
   bool Deleted = MD->isDeleted();
   if (!Deleted && MD->isDefaulted()) {
@@ -13123,9 +13120,16 @@ Decl *Sema::ActOnUsingDeclaration(Scope *S, AccessSpecifier AS,
   }
 
   switch (Name.getKind()) {
+  case UnqualifiedIdKind::IK_OperatorFunctionId:
+    // P4340 ext: 'operator template' can be named only in its own
+    // declaration (and isn't inherited).
+    if (Name.OperatorFunctionId.Operator == OO_Template) {
+      Diag(Name.getBeginLoc(), diag::err_operator_template_use);
+      return nullptr;
+    }
+    break;
   case UnqualifiedIdKind::IK_ImplicitSelfParam:
   case UnqualifiedIdKind::IK_Identifier:
-  case UnqualifiedIdKind::IK_OperatorFunctionId:
   case UnqualifiedIdKind::IK_LiteralOperatorId:
   case UnqualifiedIdKind::IK_ConversionFunctionId:
     break;
@@ -17390,6 +17394,25 @@ bool Sema::CheckOverloadedOperatorDeclaration(FunctionDecl *FnDecl) {
   if (Op == OO_New || Op == OO_Array_New)
     return CheckOperatorNewDeclaration(*this, FnDecl);
 
+  // P4340 ext: 'operator template' is a special member function, not an
+  // operator any expression invokes, so none of the rules below apply; its
+  // shape is checked as a customization point
+  // (CheckReflectConstantCustomization).
+  if (Op == OO_Template) {
+    if (!getLangOpts().Reflection || !getLangOpts().CPlusPlus29)
+      return Diag(FnDecl->getLocation(),
+                  diag::err_operator_template_unavailable);
+    auto *MD = dyn_cast<CXXMethodDecl>(FnDecl);
+    if (!MD)
+      return Diag(FnDecl->getLocation(),
+                  diag::err_operator_overload_must_be_member)
+             << FnDecl->getDeclName();
+    if (MD->isStatic())
+      return Diag(FnDecl->getLocation(), diag::err_operator_overload_static)
+             << FnDecl;
+    return false;
+  }
+
   // C++ [over.oper]p7:
   //   An operator function shall either be a member function or
   //   be a non-member function and have at least one parameter
@@ -19233,9 +19256,8 @@ void Sema::SetDeclDefaulted(Decl *Dcl, SourceLocation DefaultLoc) {
     else
       DefineDefaultedComparison(DefaultLoc, FD, DefKind.asComparison());
   } else if (DefKind.isReflectConstant()) {
-    // P4340 ext: an out-of-line defaulted reflect_constant customization
-    // point. The shape was validated at class completion; a defaulted
-    // customization has no body to define.
+    // P4340 ext: an out-of-line defaulted 'operator template'. The shape was
+    // validated at class completion; a defaulted one has no body to define.
   } else {
     auto *MD = cast<CXXMethodDecl>(FD);
 

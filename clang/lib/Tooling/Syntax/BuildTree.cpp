@@ -231,6 +231,7 @@ static syntax::NodeKind getOperatorNodeKind(const CXXOperatorCallExpr &E) {
   case OO_Call:
     return syntax::NodeKind::CallExpression;
   case OO_Conditional: // not overloadable
+  case OO_Template:    // no operator expression invokes it
   case NUM_OVERLOADED_OPERATORS:
   case OO_None:
     llvm_unreachable("Not an overloadable operator");

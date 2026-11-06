@@ -30,6 +30,7 @@
 #include "clang/Sema/Template.h"
 #include "clang/Sema/TemplateDeduction.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
@@ -402,6 +403,9 @@ public:
 
   void EnsureDeclarationOfImplicitMembers(CXXRecordDecl *RD) override {
     S.ForceDeclarationOfImplicitMembers(RD);
+    // (Not in ForceDeclarationOfImplicitMembers itself: that also runs for
+    // dllexport classes and when typo correction lists a class's members.)
+    S.DeclareImplicitOperatorTemplate(RD);
   }
 
   bool NormalizeReflectConstant(QualType T, APValue &V, VarDecl *&ResultVD,
@@ -1025,6 +1029,14 @@ ExprResult Sema::ConstevalOnlyRecorder::RecordAndReturn(ExprResult Res) {
 ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
                                      SourceLocation TemplateKWLoc,
                                      CXXScopeSpec &SS, UnqualifiedId &Id) {
+  // P4340 ext: 'operator template' can be named only in its own declaration
+  // (members_of still finds it).
+  if (Id.getKind() == UnqualifiedIdKind::IK_OperatorFunctionId &&
+      Id.OperatorFunctionId.Operator == OO_Template) {
+    Diag(Id.getBeginLoc(), diag::err_operator_template_use);
+    return ExprError();
+  }
+
   TemplateArgumentListInfo TArgBuffer;
 
   DeclarationNameInfo NameInfo;
@@ -3513,6 +3525,57 @@ DeclResult Sema::BuildReflectionSpliceNamespace(SpliceSpecifier *Splice) {
   return ER.Val.getReflectedNamespace();
 }
 
+// Whether RD's implicitly-declared 'operator template' is defined as deleted:
+// RD has a direct base class or non-static data member that is not public, or
+// whose type (or array element type) is not structural. (A mutable member
+// makes RD non-structural, but doesn't delete its operator template.)
+static bool implicitOperatorTemplateIsDeleted(ASTContext &C,
+                                              CXXRecordDecl *RD) {
+  for (const CXXBaseSpecifier &B : RD->bases())
+    if (B.getAccessSpecifier() != AS_public ||
+        !C.getBaseElementType(B.getType())->isStructuralType())
+      return true;
+  for (FieldDecl *F : RD->fields())
+    if (F->getAccess() != AS_public ||
+        !C.getBaseElementType(F->getType())->isStructuralType())
+      return true;
+  return false;
+}
+
+void Sema::DeclareImplicitOperatorTemplate(CXXRecordDecl *RD) {
+  if (!getLangOpts().Reflection || !getLangOpts().CPlusPlus29 || !RD)
+    return;
+  RD = RD->getDefinition();
+  if (!RD || !RD->isCompleteDefinition() || RD->isDependentType() ||
+      RD->isAnonymousStructOrUnion() || RD->isInvalidDecl())
+    return;
+
+  // A user-declared one (even one whose constraints aren't satisfied, as for
+  // vector<T, A> with a custom allocator) suppresses the implicit one, as a
+  // user-declared copy constructor does; and so does an earlier implicit one.
+  DeclarationName Name =
+      Context.DeclarationNames.getCXXOperatorName(OO_Template);
+  if (!RD->lookup(Name).empty())
+    return;
+
+  //   consteval std::meta::info C::operator template() const
+  // an inline public member of its class.
+  SourceLocation Loc = RD->getLocation();
+  FunctionProtoType::ExtProtoInfo EPI;
+  EPI.TypeQuals.addConst();
+  QualType FnTy = Context.getFunctionType(Context.MetaInfoTy, {}, EPI);
+  auto *MD = CXXMethodDecl::Create(
+      Context, RD, Loc, DeclarationNameInfo(Name, Loc), FnTy,
+      /*TInfo=*/nullptr, SC_None, getCurFPFeatures().isFPConstrained(),
+      /*isInline=*/true, ConstexprSpecKind::Consteval, Loc);
+  MD->setAccess(AS_public);
+  MD->setImplicit();
+  MD->setDefaulted();
+  if (implicitOperatorTemplateIsDeleted(Context, RD))
+    SetDeclDeleted(MD, Loc);
+  RD->addDecl(MD);
+}
+
 CXXMethodDecl *Sema::LookupReflectConstantCustomization(CXXRecordDecl *RD) {
   if (!RD || !RD->hasDefinition() || !RD->hasReflectConstant())
     return nullptr;
@@ -3520,7 +3583,8 @@ CXXMethodDecl *Sema::LookupReflectConstantCustomization(CXXRecordDecl *RD) {
   // The customization is not inherited, so look only at direct members.
   // A constrained customization with unsatisfied constraints counts as
   // absent (it never set HasReflectConstant, but be defensive here too).
-  DeclarationName Name(&Context.Idents.get("reflect_constant"));
+  DeclarationName Name =
+      Context.DeclarationNames.getCXXOperatorName(OO_Template);
   for (NamedDecl *ND : RD->lookup(Name))
     if (auto *MD = dyn_cast<CXXMethodDecl>(ND->getUnderlyingDecl()))
       if (MD->getParent() == RD->getDefinition()) {
@@ -3561,14 +3625,15 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
     return false;
   }
 
-  // Evaluate ArgExpr.reflect_constant() as a constant expression, then
+  // Evaluate ArgExpr.operator template() as a constant expression, then
   // re-evaluate on the result until it is idempotent-checked (exactly one
   // extra round).
   auto EvaluateCallOn = [&](Expr *Obj, APValue &Out) -> bool {
     EnterExpressionEvaluationContext ConstantEvaluated(
         *this, ExpressionEvaluationContext::ImmediateFunctionContext);
 
-    DeclarationName Name(&Context.Idents.get("reflect_constant"));
+    DeclarationName Name =
+        Context.DeclarationNames.getCXXOperatorName(OO_Template);
     LookupResult LR(*this, DeclarationNameInfo(Name, Loc), LookupMemberName);
     // The customization point may be private: the language invokes it on the
     // class's behalf, so access is not checked.
@@ -3576,6 +3641,7 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
     LR.resolveKind();
     LR.suppressDiagnostics();
 
+    llvm::SaveAndRestore<bool> Invoking(InvokingOperatorTemplate, true);
     ExprResult Ref = BuildMemberReferenceExpr(
         Obj, Obj->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
         SourceLocation(), nullptr, LR, nullptr, nullptr);

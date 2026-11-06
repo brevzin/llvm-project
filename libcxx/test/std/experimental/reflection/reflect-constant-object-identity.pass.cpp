@@ -11,7 +11,7 @@
 // UNSUPPORTED: c++03 || c++11 || c++14 || c++17 || c++20 || c++23
 // ADDITIONAL_COMPILE_FLAGS: -std=c++2d -freflection
 
-// P4340 ext: for a class with a user-provided reflect_constant, the object it
+// P4340 ext: for a class with a user-provided 'operator template', the object it
 // returns *is* the template parameter object. Everything that produces "the
 // template parameter object for v" -- reflect_constant, template_arguments_of,
 // constant_of, an annotation's constant -- produces an object reflection of
@@ -22,10 +22,10 @@
 
 struct Frac {
   int numer, denom;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 template <int N, int D> constexpr auto interned = Frac{N, D};
-consteval auto Frac::reflect_constant() const -> std::meta::info {
+consteval Frac::operator template() const {
   int g = std::gcd(numer, denom);
   return substitute(^^interned, {std::meta::reflect_constant(numer / g),
                                  std::meta::reflect_constant(denom / g)});

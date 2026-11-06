@@ -298,6 +298,15 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
   }
 
   if (FunctionDecl *FD = dyn_cast<FunctionDecl>(D)) {
+    // P4340 ext: 'operator template' can be named only in its own
+    // declaration -- not called, not reflected (members_of still finds it).
+    // The language invokes it, as does std::meta::reflect_constant.
+    if (FD->getOverloadedOperator() == OO_Template &&
+        !InvokingOperatorTemplate) {
+      Diag(Loc, diag::err_operator_template_use);
+      return true;
+    }
+
     // See if this is a deleted function.
     if (FD->isDeleted() && !isReflectionContext()) {
       auto *Ctor = dyn_cast<CXXConstructorDecl>(FD);

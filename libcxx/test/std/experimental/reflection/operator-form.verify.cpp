@@ -27,11 +27,26 @@ int operator""_x(unsigned long long);
 
 constexpr auto a = operator_form_of(^^A::operator new);
 // expected-error@-1 {{constexpr variable 'a' must be initialized by a constant expression}}
-// expected-note@*:* {{expected a reflection of an operator function other than an allocation or deallocation function}}
+// expected-note@*:* {{expected a reflection of an operator function that implements an operator expression}}
 
 constexpr auto b = operator_form_of(^^A::operator delete);
 // expected-error@-1 {{constexpr variable 'b' must be initialized by a constant expression}}
-// expected-note@*:* {{expected a reflection of an operator function other than an allocation or deallocation function}}
+// expected-note@*:* {{expected a reflection of an operator function that implements an operator expression}}
+
+struct T {
+  int x;
+  consteval operator template() const = default;
+};
+consteval auto members_operator_template() -> std::meta::info {
+  for (auto m : members_of(^^T, std::meta::access_context::unchecked()))
+    if (is_operator_function(m) &&
+        operator_of(m) == std::meta::operators::op_template)
+      return m;
+  return {};
+}
+constexpr auto t = operator_form_of(members_operator_template());
+// expected-error@-1 {{constexpr variable 't' must be initialized by a constant expression}}
+// expected-note@*:* {{expected a reflection of an operator function that implements an operator expression}}
 
 constexpr auto c = operator_form_of(^^operator-);
 // expected-error@-1 {{constexpr variable 'c' must be initialized by a constant expression}}

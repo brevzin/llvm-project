@@ -12,7 +12,7 @@
 // ADDITIONAL_COMPILE_FLAGS: -std=c++29 -freflection
 
 // P4341 ext: std::vector and std::basic_string as constant template
-// parameters. Their reflect_constant customization points (constrained to the
+// parameters. Their 'operator template's (constrained to the
 // default allocator, and for vector to structural element types) intern the
 // contents via reflect_constant_array and return a __ctp_container
 // specialization holding a persisted copy.

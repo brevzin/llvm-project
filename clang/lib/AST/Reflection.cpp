@@ -168,7 +168,7 @@ static constexpr OverloadedOperatorKind MetaOperatorOrder[] = {
     OO_EqualEqual, OO_ExclaimEqual, OO_Less, OO_Greater, OO_LessEqual,
     OO_GreaterEqual, OO_Spaceship, OO_AmpAmp, OO_PipePipe, OO_LessLess,
     OO_GreaterGreater, OO_LessLessEqual, OO_GreaterGreaterEqual, OO_PlusPlus,
-    OO_MinusMinus, OO_Comma,
+    OO_MinusMinus, OO_Comma, OO_Template,
 };
 
 OverloadedOperatorKind getOverloadedOperatorForMetaIndex(unsigned Index) {

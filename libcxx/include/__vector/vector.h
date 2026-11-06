@@ -260,7 +260,7 @@ private:
   // parameters. When the constraints are not satisfied the customization
   // point counts as absent, and vector is simply not structural. Defined in
   // <meta>, which provides the machinery used to persist the contents.
-  _LIBCPP_HIDE_FROM_ABI consteval auto reflect_constant() const -> decltype(^^::)
+  _LIBCPP_HIDE_FROM_ABI consteval operator template() const
     requires is_same_v<_Allocator, allocator<_Tp>> && __is_structural(_Tp);
 #endif
 

@@ -1326,8 +1326,10 @@ Sema::BuildMemberReferenceExpr(Scope *S, Expr *Base, SourceLocation OpLoc,
   }
   NamedDecl *ND = Members.front();
 
+  // The name is where the splice is (so that diagnostics about the use --
+  // deleted, inaccessible, ... -- point at it, not at the declaration).
   DeclarationNameInfo NameInfo(cast<NamedDecl>(ND)->getDeclName(),
-                               ND->getLocation());
+                               RHS->getBeginLoc());
   for (NamedDecl *M : Members) {
     CXXRecordDecl *DerivedRecord = [](QualType QT) {
       if (QualType PT = QT->getPointeeType(); !PT.isNull())

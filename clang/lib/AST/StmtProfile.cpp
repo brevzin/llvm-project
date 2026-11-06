@@ -1990,6 +1990,9 @@ static Stmt::StmtClass DecodeOperatorCall(const CXXOperatorCallExpr *S,
   case OO_Coawait:
     UnaryOp = UO_Coawait;
     return Stmt::UnaryOperatorClass;
+
+  case OO_Template: // no operator expression invokes it
+    break;
   }
 
   llvm_unreachable("Invalid overloaded operator expression");

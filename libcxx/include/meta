@@ -1115,6 +1115,7 @@ enum class operators {
   op_ampersand_ampersand, op_pipe_pipe, op_less_less, op_greater_greater,
   op_less_less_equals, op_greater_greater_equals, op_plus_plus, op_minus_minus,
   op_comma,
+  op_template,  // P4340 ext: operator template
 };
 
 // The name of a declaration, as the metafunctions that look up or declare
@@ -1173,7 +1174,8 @@ enum class operator_form { prefix, postfix, binary };
 
 // Returns the form of the operator implemented by the represented operator
 // function or operator function template (other than an allocation or
-// deallocation function, and one with a function parameter pack).
+// deallocation function, 'operator template', and one with a function
+// parameter pack).
 consteval auto operator_form_of(info r) -> operator_form {
   return operator_form(__metafunction(detail::__metafn_operator_form_of, r));
 }
@@ -1185,23 +1187,23 @@ consteval auto has_identifier(info r) -> bool {
 
 // Returns the string representation of the operator.
 consteval auto symbol_of(operators op) -> string_view {
-  static constexpr string_view op_names[45] = {
+  static constexpr string_view op_names[46] = {
       {}, "new", "delete", "new[]", "delete[]", "co_await", "()", "[]", "->",
       "->*", "~", "!", "+", "-", "*", "/", "%", "^", "&", "|", "=", "+=", "-=",
       "*=", "/=", "%=", "^=", "&=", "|=", "==", "!=", "<", ">", "<=", ">=",
-      "<=>", "&&", "||", "<<", ">>", "<<=", ">>=", "++", "--", ","
+      "<=>", "&&", "||", "<<", ">>", "<<=", ">>=", "++", "--", ",", "template"
   };
   return op_names[int(op)];
 }
 
 consteval auto u8symbol_of(operators op) -> u8string_view {
-  static constexpr u8string_view op_names[45] = {
+  static constexpr u8string_view op_names[46] = {
       {}, u8"new", u8"delete", u8"new[]", u8"delete[]", u8"co_await", u8"()",
       u8"[]", u8"->", u8"->*", u8"~", u8"!", u8"+", u8"-", u8"*", u8"/", u8"%",
       u8"^", u8"&", u8"|", u8"=", u8"+=", u8"-=", u8"*=", u8"/=", u8"%=",
       u8"^=", u8"&=", u8"|=", u8"==", u8"!=", u8"<", u8">", u8"<=", u8">=",
       u8"<=>", u8"&&", u8"||", u8"<<", u8">>", u8"<<=", u8">>=", u8"++",
-      u8"--", u8","
+      u8"--", u8",", u8"template"
   };
   return op_names[int(op)];
 }
@@ -2809,7 +2811,7 @@ consteval auto reflect_constant_string(std::u8string_view In) -> info {
 #if _LIBCPP_STD_VER >= 29
 // P4341 ext (non-transient constexpr allocation): the template parameter
 // objects behind containers used as constant template parameters. The
-// reflect_constant customization points of vector and basic_string (declared
+// 'operator template's of vector and basic_string (declared
 // in their headers, defined below) intern their contents via
 // reflect_constant_array and substitute the resulting array into this
 // variable template; two equal containers reach the same specialization, and
@@ -2867,23 +2869,21 @@ consteval auto define_static_string(u8string_view in) -> const char8_t * {
 }
 
 #if _LIBCPP_STD_VER >= 29
-// P4341 ext: the reflect_constant customization points declared in <vector>
-// and <string>. The contents are interned via reflect_constant_array (equal
-// contents yield the same array), and the returned reflection designates the
+// P4341 ext: the 'operator template's declared in <vector> and <string>. The
+// contents are interned via reflect_constant_array (equal contents yield the
+// same array), and the returned reflection designates the
 // __ctp_container specialization holding a persisted copy of the container:
 // that variable is the template parameter object, so equal containers give
 // the same specialization within and across translation units.
 template <class _Tp, class _Allocator>
-consteval auto vector<_Tp, _Allocator>::reflect_constant() const
-    -> decltype(^^::)
+consteval vector<_Tp, _Allocator>::operator template() const
   requires is_same_v<_Allocator, allocator<_Tp>> && __is_structural(_Tp)
 {
   return meta::substitute(^^meta::__ctp_container, {^^vector, meta::reflect_constant_array(*this)});
 }
 
 template <class _CharT, class _Traits, class _Allocator>
-consteval auto basic_string<_CharT, _Traits, _Allocator>::reflect_constant()
-    const -> decltype(^^::)
+consteval basic_string<_CharT, _Traits, _Allocator>::operator template() const
   requires is_same_v<_Allocator, allocator<_CharT>>
 {
   return meta::substitute(^^meta::__ctp_container, {^^basic_string, meta::reflect_constant_array(*this)});
@@ -3240,6 +3240,7 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
     case operators::op_array_new:
     case operators::op_array_delete:
     case operators::op_co_await:
+    case operators::op_template:
       result += " ";
       [[fallthrough]];
     default:
@@ -3289,6 +3290,7 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
     case operators::op_array_new:
     case operators::op_array_delete:
     case operators::op_co_await:
+    case operators::op_template:
       result += " ";
       [[fallthrough]];
     default:

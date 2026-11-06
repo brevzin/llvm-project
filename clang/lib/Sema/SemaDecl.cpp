@@ -10177,6 +10177,9 @@ Sema::ActOnFunctionDeclarator(Scope *S, Declarator &D, DeclContext *DC,
       case OO_Coawait:
         BadOperatorKind = 3;
         break;
+      case OO_Template:
+        BadOperatorKind = 4;
+        break;
       default:
         break;
       }

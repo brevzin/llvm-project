@@ -1487,23 +1487,23 @@ public:
 
   /// Determine whether this is a structural type.
   ///
-  /// P4340 ext: a class with a non-deleted reflect_constant customization
-  /// point is structural regardless of the C++26 subobject rules (unless it
-  /// has mutable members, which addedMember folds into StructuralIfLiteral
-  /// only for the default path; the customization path re-checks). A class
-  /// with a deleted customization point is never structural.
+  /// P4340 ext: a class with a user-declared, non-deleted 'operator template'
+  /// is structural regardless of the C++26 subobject rules (unless it has
+  /// mutable members, which addedMember folds into StructuralIfLiteral only
+  /// for the default path; this path re-checks). One with a deleted
+  /// 'operator template' never is. Otherwise -- as its implicit 'operator
+  /// template' would say -- the C++26 rules decide.
   bool isStructural() const {
     if (data().HasReflectConstant)
       return !data().HasDeletedReflectConstant && !hasMutableFields();
     return isLiteral() && data().StructuralIfLiteral;
   }
 
-  /// P4340 ext: whether this class declares a reflect_constant customization
-  /// point (user-provided, defaulted, or deleted).
+  /// P4340 ext: whether this class has a user-declared, eligible 'operator
+  /// template' (user-provided, defaulted, or deleted).
   bool hasReflectConstant() const { return data().HasReflectConstant; }
 
-  /// P4340 ext: whether the declared reflect_constant customization point is
-  /// deleted.
+  /// P4340 ext: whether that 'operator template' is deleted.
   bool hasDeletedReflectConstant() const {
     return data().HasDeletedReflectConstant;
   }

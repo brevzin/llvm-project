@@ -6455,17 +6455,32 @@ public:
   bool CheckExplicitlyDefaultedComparison(Scope *S, FunctionDecl *MD,
                                           DefaultedComparisonKind DCK);
 
-  /// P4340 ext: validate the shape of a reflect_constant customization point
+  /// P4340 ext: validate the shape of an 'operator template'
   /// (user-provided, defaulted, or deleted) and record it on the class.
   /// \return \c true on error.
   bool CheckReflectConstantCustomization(CXXMethodDecl *MD);
 
-  /// P4340 ext: find the reflect_constant customization point declared by
+  /// P4340 ext: find the 'operator template' declared by
   /// \p RD, if any (does not consider base classes; the customization is
   /// deliberately not inherited).
   CXXMethodDecl *LookupReflectConstantCustomization(CXXRecordDecl *RD);
 
-  /// P4340 ext: evaluate ArgExpr.reflect_constant() for a template argument
+  /// P4340 ext: declare RD's implicit 'operator template', if it needs one:
+  /// a complete, non-dependent class (other than an anonymous struct or
+  /// union) that declares no 'operator template' of its own. It is defaulted,
+  /// or defined as deleted when RD has a non-public direct base class or
+  /// non-static data member, or one whose type isn't structural. Declared
+  /// lazily: only reflection, enumerating RD's members, asks for it. (It
+  /// changes nothing else -- a class without a user-declared one behaves just
+  /// as an implicit one says.)
+  void DeclareImplicitOperatorTemplate(CXXRecordDecl *RD);
+
+  /// P4340 ext: set while the language itself calls an 'operator template'
+  /// (see EvaluateReflectConstantCustomization). A program can name one only
+  /// in its declaration; std::meta::reflect_constant is the way to invoke it.
+  bool InvokingOperatorTemplate = false;
+
+  /// P4340 ext: evaluate ArgExpr.operator template() for a template argument
   /// of customized class type \p ParamType, validate the conditions on the
   /// returned object (static storage duration, usable in constant
   /// expressions, linkage, type C const), and run the idempotence check.
@@ -6479,8 +6494,8 @@ public:
                                             VarDecl *&ResultVD);
 
   /// P4340 ext: recursively normalize the value \p V of type \p T by running
-  /// every subobject of customized class type through its reflect_constant
-  /// customization point and replacing the subobject's value with the value
+  /// every subobject of customized class type through its 'operator template'
+  /// and replacing the subobject's value with the value
   /// of the returned object. Used both when interning a template parameter
   /// object and by std::meta::reflect_constant.
   ///

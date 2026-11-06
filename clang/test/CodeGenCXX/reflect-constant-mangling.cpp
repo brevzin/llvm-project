@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -std=c++2d -freflection -triple x86_64-unknown-linux-gnu -emit-llvm -o - %s | FileCheck %s
 
-// P4340 ext: a template argument normalized through a reflect_constant
-// customization point mangles as a reference to the returned entity
+// P4340 ext: a template argument normalized through an 'operator template'
+// mangles as a reference to the returned entity
 // (L <mangled-name> E), so value-equal spellings in different TUs agree on
 // the specialization and distinct normalized objects get distinct symbols.
 
@@ -17,12 +17,12 @@ consteval int gcd(int a, int b) {
 struct Frac {
   int numer;
   int denom;
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 
 template <int N, int D> constexpr Frac interned = Frac{N, D};
 
-consteval auto Frac::reflect_constant() const -> std::meta::info {
+consteval Frac::operator template() const {
   int g = gcd(numer, denom);
   int n = numer / g, d = denom / g;
   if (n == 1 && d == 2) return ^^interned<1, 2>;

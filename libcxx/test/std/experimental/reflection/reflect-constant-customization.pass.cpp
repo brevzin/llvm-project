@@ -13,7 +13,7 @@
 
 // <experimental/meta>
 
-// P4340 ext: user-provided reflect_constant customization points, routed
+// P4340 ext: user-provided 'operator template's, routed
 // through both std::meta::reflect_constant and constant template parameters.
 
 #include <experimental/meta>
@@ -23,7 +23,7 @@ struct Frac {
   int numer;
   int denom;
 
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 };
 
 // Note: this cannot be an in-class static member template, since Frac is
@@ -32,7 +32,7 @@ struct Frac {
 template <int N, int D>
 constexpr Frac frac_interned{N, D};
 
-consteval auto Frac::reflect_constant() const -> std::meta::info {
+consteval Frac::operator template() const {
   int g = std::gcd(numer, denom);
   return std::meta::substitute(
       ^^frac_interned,
@@ -72,7 +72,7 @@ static_assert([:std::meta::reflect_constant(Stuff{{2, 4}, 6}):].x == 6);
 // The extended structural-type definition is visible to the library.
 struct Deleted {
   int i;
-  consteval auto reflect_constant() const -> std::meta::info = delete;
+  consteval operator template() const = delete;
 };
 static_assert(!std::meta::is_structural_type(^^Deleted));
 static_assert(std::meta::is_structural_type(^^Frac));
@@ -83,7 +83,7 @@ class PrivFrac {
   int numer_;
   int denom_;
 
-  consteval auto reflect_constant() const -> std::meta::info;
+  consteval operator template() const;
 
 public:
   constexpr PrivFrac(int n, int d) : numer_(n), denom_(d) {}
@@ -94,7 +94,7 @@ public:
 template <int N, int D>
 constexpr PrivFrac priv_frac_interned{N, D};
 
-consteval auto PrivFrac::reflect_constant() const -> std::meta::info {
+consteval PrivFrac::operator template() const {
   int g = std::gcd(numer_, denom_);
   return std::meta::substitute(
       ^^priv_frac_interned,
@@ -113,7 +113,7 @@ static_assert([:std::meta::reflect_constant(PrivFrac{2, 4}):].denom() == 2);
 // A private defaulted customization point.
 class PrivDefaulted {
   int i_;
-  consteval auto reflect_constant() const -> std::meta::info = default;
+  consteval operator template() const = default;
 
 public:
   constexpr PrivDefaulted(int i) : i_(i) {}

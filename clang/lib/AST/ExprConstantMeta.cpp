@@ -1899,9 +1899,9 @@ unsigned parentOf(APValue &Result, Decl *D) {
 bool isSpecialMember(FunctionDecl *FD) {
   bool IsSpecial = false;
   if (const auto *MD = dyn_cast<CXXMethodDecl>(FD)) {
-    IsSpecial = (isa<CXXDestructorDecl>(MD) ||
-                 MD->isCopyAssignmentOperator() ||
-                 MD->isMoveAssignmentOperator());
+    IsSpecial = (isa<CXXDestructorDecl>(MD) || MD->isCopyAssignmentOperator() ||
+                 MD->isMoveAssignmentOperator() ||
+                 MD->getOverloadedOperator() == OO_Template); // P4340 ext
 
     if (auto *CtorD = dyn_cast<CXXConstructorDecl>(MD))
       IsSpecial = IsSpecial || (CtorD->isDefaultConstructor() ||
@@ -3630,8 +3630,8 @@ enum class MetaOperatorForm : uint64_t { Prefix = 0, Postfix = 1, Binary = 2 };
 // including x(...), x[...], and x->), or binary (x @ y) -- as determined by
 // the operator and its number of operands, counting an implicit object
 // parameter. (Postfix ++ and -- take a second, dummy int operand.) The same
-// domain as operator_of, except allocation and deallocation functions, which
-// implement no operator expression.
+// domain as operator_of, except allocation and deallocation functions and
+// 'operator template', which implement no operator expression.
 bool operator_form_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                       QualType ResultTy, SourceRange Range,
@@ -3677,10 +3677,10 @@ bool operator_form_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   case OO_Delete:
   case OO_Array_New:
   case OO_Array_Delete:
+  case OO_Template:
     return DiagnoseReflectionKind(
         Diagnoser, Range,
-        "an operator function other than an allocation or deallocation "
-        "function",
+        "an operator function that implements an operator expression",
         DescriptionOf(RV));
   case OO_Call:
   case OO_Subscript:
@@ -5458,6 +5458,13 @@ bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
   case ReflectionKind::Declaration: {
     ValueDecl *Decl = RV.getReflectedDecl();
     Meta.EnsureInstantiated(Decl, Args[1]->getSourceRange());
+
+    // P4340 ext: 'operator template' can't be called directly, so neither
+    // can a pointer to it be formed.
+    if (auto *FD = dyn_cast<FunctionDecl>(Decl);
+        FD && FD->getOverloadedOperator() == OO_Template)
+      return Diagnoser(Range.getBegin(), diag::metafn_cannot_extract)
+             << 2 << DescriptionOf(RV) << Range;
 
     if (auto *FD = dyn_cast<FunctionDecl>(Decl);
         FD && !isa<CXXConstructorDecl, CXXDestructorDecl>(FD))
@@ -9144,6 +9151,11 @@ bool lookup(APValue &Result, ASTContext &C, MetaActions &Meta, EvalFn Evaluator,
   if (readDeclarationName(C, Evaluator, Diagnoser, Range, Args[1], Args[2],
                           Args[3], Name))
     return true;
+
+  // P4340 ext: 'operator template' can be named only in its own declaration,
+  // so ^^S::operator template is ill-formed -- and lookup finds nothing.
+  if (Name.getCXXOverloadedOperator() == OO_Template)
+    return NotFound();
 
   SmallVector<NamedDecl *, 4> Found;
   if (!Meta.LookupQualified(DC, Name, Range.getBegin(), Found))
