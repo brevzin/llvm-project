@@ -9274,7 +9274,11 @@ TreeTransform<Derived>::TransformCXXReflectExpr(CXXReflectExpr *E) {
   case ReflectionKind::DataMemberSpec:
   case ReflectionKind::DeclarationSpec:
   case ReflectionKind::Annotation:
-    llvm_unreachable("reflect expression should not have this reflection kind");
+    // No reflect-expression produces these: such an expression is the
+    // replacement of a substituted template parameter (e.g., when a
+    // concept-id is checked again inside another template), so it is never
+    // dependent and needs no transformation.
+    return E;
   }
   llvm_unreachable("invalid reflection");
 }
