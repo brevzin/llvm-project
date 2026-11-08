@@ -49,6 +49,7 @@ consteval auto source_location_of(info r) -> source_location;
 
 // type queries
 consteval auto type_of(info) -> info;
+consteval auto has_parent(info) -> bool;
 consteval auto parent_of(info) -> info;
 consteval auto dealias(info) -> info;
 
@@ -620,6 +621,7 @@ enum : unsigned {
   __metafn_tokens_find,
   __metafn_is_unique_id,
   __metafn_operator_form_of,
+  __metafn_has_parent,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1217,6 +1219,11 @@ consteval auto source_location_of(info r) -> source_location {
 // Returns the type of the provided reflection of an expression.
 consteval auto type_of(info r) -> info {
   return __metafunction(detail::__metafn_type_of, r);
+}
+
+// Returns whether parent_of(r) is a constant expression.
+consteval auto has_parent(info r) -> bool {
+  return __metafunction(detail::__metafn_has_parent, r);
 }
 
 // Returns the containing class or namespace of a class or namespace member.

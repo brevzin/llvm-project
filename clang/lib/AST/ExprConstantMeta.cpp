@@ -913,6 +913,10 @@ static bool operator_form_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                              bool AllowInjection, QualType ResultTy,
                              SourceRange Range, ArrayRef<Expr *> Args,
                              Decl *ContainingDecl);
+static bool has_parent(APValue &Result, ASTContext &C, MetaActions &Meta,
+                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                       QualType ResultTy, SourceRange Range,
+                       ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
 static bool token_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -1148,6 +1152,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_sizeT, 4, 4, tokens_find},
     {Metafunction::MFRK_bool, 1, 1, is_unique_id},
     {Metafunction::MFRK_sizeT, 1, 1, operator_form_of},
+    {Metafunction::MFRK_bool, 1, 1, has_parent},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3861,6 +3866,32 @@ bool type_of(APValue &Result, ASTContext &C, MetaActions &Meta,
   }
   }
   llvm_unreachable("unknown reflection kind");
+}
+
+// has_parent(r): whether parent_of(r) is a constant expression. It answers by
+// asking parent_of itself, so the two cannot disagree: the global namespace,
+// entities with C language linkage, types that are neither class nor
+// enumeration types, and reflections of anything other than an entity or a
+// direct base class relationship have no parent.
+bool has_parent(APValue &Result, ASTContext &C, MetaActions &Meta,
+                EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+  assert(ResultTy == C.BoolTy);
+
+  // An argument that is not a constant expression is an error, not a
+  // reflection without a parent.
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+
+  APValue Scratch;
+  decltype(Diagnoser) SwallowDiags{};
+  bool NoParent =
+      parent_of(Scratch, C, Meta, Evaluator, SwallowDiags, AllowInjection,
+                C.MetaInfoTy, Range, Args, ContainingDecl);
+  return SetAndSucceed(Result, makeBool(C, !NoParent));
 }
 
 bool parent_of(APValue &Result, ASTContext &C, MetaActions &Meta,
