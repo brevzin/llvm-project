@@ -408,9 +408,9 @@ public:
     S.DeclareImplicitOperatorTemplate(RD);
   }
 
-  bool NormalizeReflectConstant(QualType T, APValue &V, VarDecl *&ResultVD,
+  bool NormalizeReflectConstant(QualType T, APValue &V, APValue &Result,
                                 SourceLocation Loc) override {
-    ResultVD = nullptr;
+    Result = APValue();
     CXXRecordDecl *RD = T->getAsCXXRecordDecl();
     if (!RD || !RD->hasDefinition() || !RD->hasReflectConstant() ||
         RD->hasDeletedReflectConstant()) {
@@ -433,7 +433,7 @@ public:
       return true;
 
     return S.EvaluateReflectConstantCustomization(
-        Materialized.get(), T.getUnqualifiedType(), Loc, ResultVD);
+        Materialized.get(), T.getUnqualifiedType(), Loc, Result);
   }
 
   void EnsureInstantiationOfExceptionSpec(SourceLocation Loc,
@@ -3602,8 +3602,8 @@ CXXMethodDecl *Sema::LookupReflectConstantCustomization(CXXRecordDecl *RD) {
 bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
                                                 QualType ParamType,
                                                 SourceLocation Loc,
-                                                VarDecl *&ResultVD) {
-  ResultVD = nullptr;
+                                                APValue &Result) {
+  Result = APValue();
   CXXRecordDecl *RD = ParamType->getAsCXXRecordDecl();
   assert(RD && RD->hasReflectConstant() && "not a customized class type");
 
@@ -3620,10 +3620,8 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
 
   // A defaulted customization keeps the value-based template parameter
   // object machinery; the caller handles that case.
-  if (CP->isDefaulted()) {
-    ResultVD = nullptr;
+  if (CP->isDefaulted())
     return false;
-  }
 
   // Evaluate ArgExpr.operator template() as a constant expression, then
   // re-evaluate on the result until it is idempotent-checked (exactly one
@@ -3667,36 +3665,53 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
     return false;
   };
 
-  // Extract the designated variable from the returned reflection, checking
-  // the conditions from the design (returns true on error, with Select set
-  // for err_reflect_constant_bad_result).
-  auto ExtractVar = [&](const APValue &Refl, VarDecl *&VD,
-                        unsigned &Select, QualType &FoundTy) -> bool {
-    VD = nullptr;
+  // An lvalue expression of type 'const C' designating the object 'Obj'.
+  auto DesignateObject = [&](const APValue &Obj) -> Expr * {
+    Expr *OVE = new (Context) OpaqueValueExpr(Loc, ExpectedTy, VK_LValue);
+    return ConstantExpr::Create(Context, OVE, Obj);
+  };
+
+  // Turn the returned reflection into an lvalue designating the object O --
+  // the object declared by a variable, or a subobject of such an object --
+  // checking the conditions on O (returns true on error, with Select set for
+  // err_reflect_constant_bad_result).
+  auto ExtractObject = [&](const APValue &Refl, APValue &Obj, unsigned &Select,
+                           QualType &FoundTy) -> bool {
+    Obj = APValue();
     FoundTy = QualType();
-    if (!Refl.isReflection()) {
-      Select = 0;
+    Select = 0;
+    if (!Refl.isReflection())
       return true;
-    }
+
     switch (Refl.getReflectionKind()) {
     case ReflectionKind::Declaration:
-      VD = dyn_cast<VarDecl>(Refl.getReflectedDecl());
+      if (auto *VD = dyn_cast<VarDecl>(Refl.getReflectedDecl());
+          VD && !VD->getType()->isReferenceType()) {
+        Obj = APValue(APValue::LValueBase(VD), CharUnits::Zero(),
+                      ArrayRef<APValue::LValuePathEntry>(),
+                      /*OnePastTheEnd=*/false);
+        FoundTy = VD->getType();
+      }
       break;
-    case ReflectionKind::Object: {
-      APValue Obj = Refl.getReflectedObject();
-      if (Obj.isLValue() && Obj.hasLValuePath() &&
-          Obj.getLValuePath().empty() && !Obj.isLValueOnePastTheEnd())
-        VD = const_cast<VarDecl *>(dyn_cast_or_null<VarDecl>(
-            Obj.getLValueBase().dyn_cast<const ValueDecl *>()));
+    case ReflectionKind::Object:
+      Obj = Refl.getReflectedObject();
+      FoundTy = Refl.getTypeOfReflectedResult(Context);
       break;
-    }
     default:
       break;
     }
+    // O is a variable's object or one of its subobjects (not, e.g., a
+    // temporary, a string literal, or one past the end of an array).
+    VarDecl *VD = nullptr;
+    if (Obj.isLValue() && Obj.hasLValuePath() && !Obj.isLValueOnePastTheEnd())
+      VD = const_cast<VarDecl *>(dyn_cast_or_null<VarDecl>(
+          Obj.getLValueBase().dyn_cast<const ValueDecl *>()));
     if (!VD) {
-      Select = 0;
+      Obj = APValue();
       return true;
     }
+    bool IsSubobject = !Obj.getLValuePath().empty();
+
     if (!VD->hasGlobalStorage()) {
       Select = 1;
       return true;
@@ -3717,23 +3732,44 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
       Select = 3;
       return true;
     }
-    FoundTy = VD->getType();
-    if (!Context.hasSameType(FoundTy.getCanonicalType(),
-                             ExpectedTy.getCanonicalType())) {
+    // A subobject inherits the variable's constness (usable in constant
+    // expressions implies const); compare the types without qualifiers.
+    if (!Context.hasSameUnqualifiedType(FoundTy, ExpectedTy) ||
+        (!IsSubobject && !FoundTy.isConstQualified())) {
       Select = 4;
       return true;
     }
+    // A subobject must itself be usable in constant expressions: not a
+    // mutable member, nor an inactive union member.
+    if (IsSubobject) {
+      Expr::EvalResult ER;
+      if (!DesignateObject(Obj)->EvaluateAsRValue(ER, Context,
+                                                  /*InConstantContext=*/true)) {
+        Select = 2;
+        return true;
+      }
+    }
     return false;
+  };
+
+  // Whether the lvalues A and B designate the same object.
+  auto SameObject = [](const APValue &A, const APValue &B) {
+    auto CanonicalBase = [](const APValue &V) -> const Decl * {
+      const auto *D = V.getLValueBase().dyn_cast<const ValueDecl *>();
+      return D ? D->getCanonicalDecl() : nullptr;
+    };
+    return CanonicalBase(A) == CanonicalBase(B) &&
+           A.getLValuePath() == B.getLValuePath();
   };
 
   APValue First;
   if (EvaluateCallOn(ArgExpr, First))
     return true;
 
-  VarDecl *VD = nullptr;
+  APValue Obj;
   unsigned Select = 0;
   QualType FoundTy;
-  if (ExtractVar(First, VD, Select, FoundTy)) {
+  if (ExtractObject(First, Obj, Select, FoundTy)) {
     Diag(Loc, diag::err_reflect_constant_bad_result)
         << Context.getCanonicalTagType(RD) << ExpectedTy << FoundTy << Select;
     return true;
@@ -3741,23 +3777,18 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
 
   // Idempotence check: calling the customization on its own result must
   // return a reflection of the same object.
-  ExprResult VDRef = BuildDeclRefExpr(VD, VD->getType().getNonReferenceType(),
-                                      VK_LValue, Loc);
-  if (VDRef.isInvalid())
-    return true;
   APValue Second;
-  if (EvaluateCallOn(VDRef.get(), Second))
+  if (EvaluateCallOn(DesignateObject(Obj), Second))
     return true;
 
-  VarDecl *VD2 = nullptr;
-  if (ExtractVar(Second, VD2, Select, FoundTy) ||
-      VD2->getCanonicalDecl() != VD->getCanonicalDecl()) {
+  APValue Obj2;
+  if (ExtractObject(Second, Obj2, Select, FoundTy) || !SameObject(Obj, Obj2)) {
     Diag(Loc, diag::err_reflect_constant_not_idempotent)
         << Context.getCanonicalTagType(RD);
     return true;
   }
 
-  ResultVD = VD;
+  Result = std::move(Obj);
   return false;
 }
 
@@ -3907,15 +3938,21 @@ bool Sema::NormalizeReflectConstantValue(QualType T, APValue &V,
       if (Materialized.isInvalid())
         return true;
 
-      VarDecl *VD = nullptr;
+      APValue Obj;
       if (EvaluateReflectConstantCustomization(
-              Materialized.get(), T.getUnqualifiedType(), Loc, VD))
+              Materialized.get(), T.getUnqualifiedType(), Loc, Obj))
         return true;
-      assert(VD && "non-defaulted customization must produce an object");
+      assert(Obj.isLValue() &&
+             "non-defaulted customization must produce an object");
 
-      // Replace V with the value of the returned object.
-      if (APValue *Val = VD->evaluateValue()) {
-        V = *Val;
+      // Replace V with the value of the returned object (which can be a
+      // subobject of a variable's object).
+      QualType ObjTy = Context.getCanonicalTagType(RD).withConst();
+      Expr *ObjRef = ConstantExpr::Create(
+          Context, new (Context) OpaqueValueExpr(Loc, ObjTy, VK_LValue), Obj);
+      Expr::EvalResult ER;
+      if (ObjRef->EvaluateAsRValue(ER, Context, /*InConstantContext=*/true)) {
+        V = std::move(ER.Val);
         return false;
       }
       Diag(Loc, diag::err_reflect_constant_bad_result)

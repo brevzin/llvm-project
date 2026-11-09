@@ -6485,13 +6485,14 @@ public:
   /// returned object (static storage duration, usable in constant
   /// expressions, linkage, type C const), and run the idempotence check.
   ///
-  /// On success, \p ResultVD is the variable whose object the converted
-  /// template argument designates.
+  /// On success with a user-provided customization, \p Result is an lvalue
+  /// designating the returned object: a variable's object or a subobject of
+  /// one. With a defaulted customization, \p Result is left empty.
   ///
   /// \return \c true on error (diagnosed).
   bool EvaluateReflectConstantCustomization(Expr *ArgExpr, QualType ParamType,
                                             SourceLocation Loc,
-                                            VarDecl *&ResultVD);
+                                            APValue &Result);
 
   /// P4340 ext: recursively normalize the value \p V of type \p T by running
   /// every subobject of customized class type through its 'operator template'

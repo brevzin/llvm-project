@@ -905,29 +905,29 @@ static QualType ComputeLValueType(const APValue &V) {
 
   SplitQualType SQT = V.getLValueBase().getType().split();
 
-  for (auto p = V.getLValuePath().begin();
-       p != V.getLValuePath().end(); ++p) {
-    const Decl *D = V.getLValuePath().back().getAsBaseOrMember().getPointer();
-    if (D) {  // base or member case
-      if (auto *VD = dyn_cast<FieldDecl>(D)) {
-        QualType QT = VD->getType();
-        SQT.Ty = QT.getTypePtr();
+  // Walk the path: an entry is an array index exactly when the type reached
+  // so far is an array type; otherwise it names a base class or a member.
+  for (APValue::LValuePathEntry Entry : V.getLValuePath()) {
+    if (const ArrayType *AT = QualType(SQT.Ty, 0)->getAsArrayTypeUnsafe()) {
+      QualType QT = AT->getElementType();
+      SQT.Ty = QT.getTypePtr();
+      if (QT.isConstQualified())
+        SQT.Quals.addConst();
+      if (QT.isVolatileQualified())
+        SQT.Quals.addVolatile();
+      continue;
+    }
 
-        if (QT.isConstQualified()) SQT.Quals.addConst();
-        if (QT.isVolatileQualified()) SQT.Quals.addVolatile();
-
-        continue;
-      } else if (auto *TD = dyn_cast<CXXRecordDecl>(D)) {
-        SQT.Ty = TD->getASTContext().getCanonicalTagType(TD).getTypePtr();
-        continue;
-      }
-
-      llvm_unreachable("unknown lvalue path kind");
-    } else { // array case
-      QualType QT = cast<ArrayType>(SQT.Ty)->getElementType();
+    const Decl *D = Entry.getAsBaseOrMember().getPointer();
+    if (auto *FD = dyn_cast<FieldDecl>(D)) {
+      QualType QT = FD->getType();
       SQT.Ty = QT.getTypePtr();
       if (QT.isConstQualified()) SQT.Quals.addConst();
       if (QT.isVolatileQualified()) SQT.Quals.addVolatile();
+    } else if (auto *RD = dyn_cast<CXXRecordDecl>(D)) {
+      SQT.Ty = RD->getASTContext().getCanonicalTagType(RD).getTypePtr();
+    } else {
+      llvm_unreachable("unknown lvalue path kind");
     }
   }
   return QualType(SQT.Ty, SQT.Quals.getAsOpaqueValue());

@@ -237,6 +237,18 @@ static const ValueDecl *getAsSimpleValueDeclRef(const ASTContext &Ctx,
   return nullptr;
 }
 
+// P4340 ext: a class-type structural value holding an lvalue designates the
+// subobject an 'operator template' returned; print it as if it were a
+// reference to that subobject.
+static QualType getStructuralValuePrintingType(const TemplateArgument &Arg) {
+  QualType T = Arg.getStructuralValueType();
+  const APValue &V = Arg.getAsStructuralValue();
+  if (T->isRecordType() && V.isLValue())
+    if (const auto *D = V.getLValueBase().dyn_cast<const ValueDecl *>())
+      return D->getASTContext().getLValueReferenceType(T.withConst());
+  return T;
+}
+
 TemplateArgument::TemplateArgument(const ASTContext &Ctx, QualType Type,
                                    const APValue &V, bool IsDefaulted) {
   if (Type->isIntegralOrEnumerationType() && V.isInt())
@@ -555,7 +567,8 @@ void TemplateArgument::print(const PrintingPolicy &Policy, raw_ostream &Out,
   }
 
   case StructuralValue:
-    getAsStructuralValue().printPretty(Out, Policy, getStructuralValueType());
+    getAsStructuralValue().printPretty(Out, Policy,
+                                       getStructuralValuePrintingType(*this));
     break;
 
   case NullPtr:
@@ -708,7 +721,7 @@ static const T &DiagTemplateArg(const T &DB, const TemplateArgument &Arg) {
     LangOpts.CPlusPlus = true;
     PrintingPolicy Policy(LangOpts);
     Arg.getAsStructuralValue().printPretty(OS, Policy,
-                                           Arg.getStructuralValueType());
+                                           getStructuralValuePrintingType(Arg));
     return DB << OS.str();
   }
 

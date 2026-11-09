@@ -109,13 +109,13 @@ public:
   virtual void EnsureDeclarationOfImplicitMembers(CXXRecordDecl *RD) = 0;
 
   // P4340 ext: if 'T' is a class type with a user-provided 'operator
-  // template', evaluates it on 'V' and returns the designated
-  // variable via 'ResultVD' (checking the conditions on the returned object
-  // and idempotence). If 'T' has no user-provided customization point,
-  // returns 'false' with 'ResultVD' null after normalizing the subobjects of
-  // 'V' in place. Returns 'true' on (diagnosed) error.
-  virtual bool NormalizeReflectConstant(QualType T, APValue &V,
-                                        VarDecl *&ResultVD,
+  // template', evaluates it on 'V' and returns, via 'Result', an lvalue
+  // designating the returned object -- a variable's object or a subobject of
+  // one (checking the conditions on the returned object and idempotence). If
+  // 'T' has no user-provided customization point, returns 'false' with
+  // 'Result' empty after normalizing the subobjects of 'V' in place. Returns
+  // 'true' on (diagnosed) error.
+  virtual bool NormalizeReflectConstant(QualType T, APValue &V, APValue &Result,
                                         SourceLocation Loc) = 0;
 
   // Ensures instantiation of the exception specification of 'FD'.

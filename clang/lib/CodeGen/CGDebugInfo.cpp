@@ -2753,6 +2753,11 @@ CGDebugInfo::CollectTemplateParams(std::optional<TemplateArgs> OArgs,
     } break;
     case TemplateArgument::StructuralValue: {
       QualType T = TA.getStructuralValueType();
+      // P4340 ext: a class-type argument holding an lvalue designates the
+      // subobject an 'operator template' returned; describe it as a
+      // reference.
+      if (T->isRecordType() && TA.getAsStructuralValue().isLValue())
+        T = CGM.getContext().getLValueReferenceType(T.withConst());
       llvm::DIType *TTy = getOrCreateType(T, Unit);
       llvm::Constant *V = ConstantEmitter(CGM).emitAbstract(
           SourceLocation(), TA.getAsStructuralValue(), T);

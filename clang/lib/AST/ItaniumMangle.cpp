@@ -6710,11 +6710,17 @@ void CXXNameMangler::mangleTemplateArg(TemplateArgument A, bool NeedExactType) {
     mangleNullPointer(A.getNullPtrType());
     break;
   }
-  case TemplateArgument::StructuralValue:
-    mangleValueInTemplateArg(A.getStructuralValueType(),
-                             A.getAsStructuralValue(),
+  case TemplateArgument::StructuralValue: {
+    QualType T = A.getStructuralValueType();
+    // P4340 ext: a class-type argument holding an lvalue designates the
+    // subobject an 'operator template' returned; mangle it as a reference to
+    // that subobject, like the whole-variable case above.
+    if (T->isRecordType() && A.getAsStructuralValue().isLValue())
+      T = Context.getASTContext().getLValueReferenceType(T.withConst());
+    mangleValueInTemplateArg(T, A.getAsStructuralValue(),
                              /*TopLevel=*/true, NeedExactType);
     break;
+  }
   case TemplateArgument::Pack: {
     //  <template-arg> ::= J <template-arg>* E
     Out << 'J';

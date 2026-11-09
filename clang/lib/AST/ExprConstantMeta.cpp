@@ -1562,6 +1562,11 @@ static APValue getNthTemplateArgument(ASTContext &C,
     }
     case TemplateArgument::StructuralValue: {
       APValue SV = templArgument.getAsStructuralValue();
+      // P4340 ext: a class-type argument holding an lvalue designates the
+      // subobject a user-provided 'operator template' returned: an object.
+      if (templArgument.getStructuralValueType()->isRecordType() &&
+          SV.isLValue())
+        return SV.Lift(QualType{});
       return SV.Lift(templArgument.getStructuralValueType());
     }
     case TemplateArgument::Integral: {
@@ -4130,26 +4135,28 @@ static bool evaluateMacroArgument(const Expr *E, ASTContext &C, APValue *Out) {
 // (P4340): its value, normalized -- string literals a pointer (or subobject)
 // points into interned, customized subobjects replaced -- except that a value
 // of class type is a template parameter object, so the result is a reflection
-// of that object: the object a user-provided reflect_constant returns, or
-// else the interned TemplateParamObjectDecl for the normalized value.
+// of that object: the object a user-provided 'operator template' returns (a
+// variable's object or a subobject of one), or else the interned
+// TemplateParamObjectDecl for the normalized value.
 // reflect_constant, constant_of, and annotations all go through here, so that
 // they agree with each other and with template_arguments_of.
 static bool liftAsTemplateArgument(APValue &Result, ASTContext &C,
                                    MetaActions &Meta, QualType Ty, APValue V,
                                    SourceLocation Loc) {
   if (Ty->isRecordType()) {
-    VarDecl *CustomVD = nullptr;
-    if (Meta.NormalizeReflectConstant(Ty, V, CustomVD, Loc))
+    APValue Custom;
+    if (Meta.NormalizeReflectConstant(Ty, V, Custom, Loc))
       return true;
-    const ValueDecl *Object = CustomVD
-                                  ? static_cast<const ValueDecl *>(CustomVD)
-                                  : C.getTemplateParamObjectDecl(Ty, V);
-    V = APValue(APValue::LValueBase{Object}, CharUnits::Zero(), {},
-                /*OnePastTheEnd=*/false, /*IsNullPtr=*/false);
+    if (Custom.isLValue())
+      V = std::move(Custom);
+    else
+      V = APValue(APValue::LValueBase{C.getTemplateParamObjectDecl(Ty, V)},
+                  CharUnits::Zero(), {}, /*OnePastTheEnd=*/false,
+                  /*IsNullPtr=*/false);
     return SetAndSucceed(Result, V.Lift(QualType{}));
   }
   if (Ty->isPointerType()) {
-    VarDecl *Unused = nullptr;
+    APValue Unused;
     if (Meta.NormalizeReflectConstant(Ty, V, Unused, Loc))
       return true;
   }

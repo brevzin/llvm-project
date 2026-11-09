@@ -1893,10 +1893,16 @@ void MicrosoftCXXNameMangler::mangleTemplateArg(const TemplateDecl *TD,
       Out << "M";
       mangleType(TA.getNonTypeTemplateArgumentType(), SourceRange(), QMM_Drop);
     }
-    mangleTemplateArgValue(TA.getStructuralValueType(),
-                           TA.getAsStructuralValue(),
-                           TplArgKind::StructuralValue,
-                           /*WithScalarType=*/false);
+    {
+      QualType T = TA.getStructuralValueType();
+      // P4340 ext: a class-type argument holding an lvalue designates the
+      // subobject an 'operator template' returned; mangle it as a reference.
+      if (T->isRecordType() && TA.getAsStructuralValue().isLValue())
+        T = getASTContext().getLValueReferenceType(T.withConst());
+      mangleTemplateArgValue(T, TA.getAsStructuralValue(),
+                             TplArgKind::StructuralValue,
+                             /*WithScalarType=*/false);
+    }
     break;
   case TemplateArgument::Expression:
     mangleExpression(TA.getAsExpr(), cast<NonTypeTemplateParmDecl>(Parm));

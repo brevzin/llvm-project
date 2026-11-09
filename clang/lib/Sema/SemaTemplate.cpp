@@ -7333,9 +7333,10 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
 
   // P4340 ext: a class type with a user-provided 'operator template' converts
   // by identity, not by value. Evaluate the customization on the argument; the
-  // converted template argument then designates the returned object directly (a
-  // Declaration-kind argument referring to the returned variable), giving
-  // identity-based uniquing and reference-style mangling.
+  // converted template argument then designates the returned object directly,
+  // giving identity-based uniquing and reference-style mangling: a
+  // Declaration-kind argument when it is a variable's object, or a
+  // structural value holding an lvalue when it is a subobject of one.
   if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 &&
       ParamType->isRecordType() &&
       !DeductionArg->isValueDependent() && !ArgPE) {
@@ -7360,16 +7361,22 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
           return ExprError();
       }
 
-      VarDecl *ArgVD = nullptr;
-      if (EvaluateReflectConstantCustomization(Init.get(), ParamType,
-                                               StartLoc, ArgVD))
+      APValue Obj;
+      if (EvaluateReflectConstantCustomization(Init.get(), ParamType, StartLoc,
+                                               Obj))
         return ExprError();
 
-      if (ArgVD) {
-        SugaredConverted = TemplateArgument(ArgVD, ParamType);
+      if (Obj.isLValue()) {
+        SugaredConverted = TemplateArgument(Context, ParamType, Obj);
+        if (Obj.getLValuePath().empty()) {
+          // Canonicalize the variable, as for any Declaration argument.
+          auto *VD = cast<ValueDecl>(
+              Obj.getLValueBase().get<const ValueDecl *>()->getCanonicalDecl());
+          Obj = APValue(APValue::LValueBase(VD), Obj.getLValueOffset(),
+                        Obj.getLValuePath(), /*OnePastTheEnd=*/false);
+        }
         CanonicalConverted =
-            TemplateArgument(cast<ValueDecl>(ArgVD->getCanonicalDecl()),
-                             ParamType.getCanonicalType());
+            TemplateArgument(Context, ParamType.getCanonicalType(), Obj);
         return Arg;
       }
       // A defaulted customization falls through to the ordinary value-based
@@ -8287,6 +8294,12 @@ static Expr *BuildExpressionFromNonTypeTemplateArgumentValue(
     ExprValueKind VK = VK_PRValue;
     if (T->isReferenceType()) {
       T = T->getPointeeType();
+      VK = VK_LValue;
+    } else if (T->isRecordType() && Val.isLValue()) {
+      // P4340 ext: an argument for a class type with a user-provided
+      // 'operator template' that designates a subobject of a variable's
+      // object; like any template parameter object, it is a const lvalue.
+      T = T.withConst();
       VK = VK_LValue;
     }
     auto *OVE = new (S.Context) OpaqueValueExpr(Loc, T, VK);
