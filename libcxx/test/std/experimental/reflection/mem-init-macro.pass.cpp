@@ -25,7 +25,7 @@
 __macro init_if_member(std::meta::token_sequence init) {
   std::meta::info ctor = std::meta::macro_expansion_context();
   if (!std::meta::is_constructor(ctor))
-    std::constexpr_error_str("init-if-member",
+    std::consteval_error_str("init-if-member",
                              "init_if_member! must initialize a constructor");
   std::string_view name = identifier_of(init[0]);
   for (std::meta::info m : nonstatic_data_members_of(

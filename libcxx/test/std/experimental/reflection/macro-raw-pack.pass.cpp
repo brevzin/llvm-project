@@ -129,7 +129,7 @@ consteval auto parse_named(token_sequence arg) -> named_arg {
       token_kind_of(toks[0]) != std::meta::token_kind::identifier ||
       token_kind_of(toks[1]) != std::meta::token_kind::punctuator ||
       punctuator_of(toks[1]) != punctuator::equals)
-    std::constexpr_error_str("call", "expected 'name = value'");
+    std::consteval_error_str("call", "expected 'name = value'");
   token_sequence value = ^^{};
   for (std::size_t i = 2; i != toks.size(); ++i)
     value += toks[i];
@@ -141,7 +141,7 @@ consteval auto parse_named(token_sequence arg) -> named_arg {
 __macro call(token_sequence fn, token_sequence... args) {
   auto r = std::meta::test_expression(^^{ ^^\(fn) });
   if (!r)
-    std::constexpr_error_str("call", "the callee must name a single function");
+    std::consteval_error_str("call", "the callee must name a single function");
   std::meta::info f = extract<std::meta::info>(constant_of(*r));
 
   std::vector<named_arg> named{parse_named(args)...};
@@ -157,12 +157,12 @@ __macro call(token_sequence fn, token_sequence... args) {
       }
     if (!found) {
       if (!has_default_argument(p))
-        std::constexpr_error_str("call", "missing argument for a parameter");
+        std::consteval_error_str("call", "missing argument for a parameter");
       break;
     }
   }
   if (used != named.size())
-    std::constexpr_error_str("call", "unknown or unusable argument name");
+    std::consteval_error_str("call", "unknown or unusable argument name");
   return ^^{ \(fn)(\(list)) };
 }
 

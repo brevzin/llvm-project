@@ -96,14 +96,13 @@ inline constexpr struct begin_fn {
   template <class R>
   __macro operator()(this begin_fn, R&& r) {
     if (not std::is_lvalue_reference_v<R> and not enable_borrowed_range<std::remove_cv_t<R>>) {
-      std::constexpr_error_str("no-begin", "rvalue range is not borrowed");
+      std::consteval_error_str("no-begin", "rvalue range is not borrowed");
     }
     else if (std::is_array_v<std::remove_reference_t<R>>) {
       if (not is_complete_type(remove_all_extents(^^std::remove_reference_t<R>))) {
-        std::constexpr_error_str("no-begin", "T is an array with incomplete element type");
-      } else {
-        return ^^{ (\(as_lvalue(r)) + 0) };
+        std::consteval_error_str("no-begin", "T is an array with incomplete element type");
       }
+      return ^^{ (\(as_lvalue(r)) + 0) };
     }
     else if (requires(R&& t) { { auto(t.begin()) } -> std::input_or_output_iterator; }) {
       return ^^{ auto(\(as_lvalue(r)).begin()) };
@@ -112,10 +111,8 @@ inline constexpr struct begin_fn {
       return ^^{ ::rng::impl::adl_begin(\(as_lvalue(r))) };
     }
     else {
-      std::constexpr_error_str("no-begin", "no viable begin for this type");
+      std::consteval_error_str("no-begin", "no viable begin for this type");
     }
-
-    return ^^{};  // unreachable: the error produces no expansion
   }
 } begin{};
 

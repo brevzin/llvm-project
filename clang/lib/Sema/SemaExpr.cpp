@@ -8472,7 +8472,7 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
           << Macro;
       return true;
     }
-    // A std::constexpr_error_str in the body is the macro explicitly
+    // A std::consteval_error_str in the body is the macro explicitly
     // declining to produce an expansion, not a bug in it.
     bool Explicit = llvm::any_of(Notes, [](const PartialDiagnosticAt &PD) {
       return PD.second.getDiagID() == diag::note_constexpr_message ||

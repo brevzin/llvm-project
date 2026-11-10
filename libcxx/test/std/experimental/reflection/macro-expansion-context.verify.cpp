@@ -34,7 +34,7 @@ struct S {
 // own message rather than a confusing failure deeper in the expansion.
 __macro needs_function() {
   if (!std::meta::is_function(std::meta::macro_expansion_context()))
-    std::constexpr_error_str("needs-function",
+    std::consteval_error_str("needs-function",
                              "this macro must be invoked inside a function");
   return ^^{ 0 };
 }

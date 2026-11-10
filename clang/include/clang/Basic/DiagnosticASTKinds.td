@@ -42,7 +42,7 @@ def note_constexpr_invalid_punctuator : Note<
 def note_constexpr_id_not_identifier : Note<
   "std::meta::id produces '%0', which %select{is not an identifier|"
   "is a keyword}1">;
-// P2758: std::constexpr_print_str / constexpr_warning_str / constexpr_error_str
+// P2758: std::constexpr_print_str / constexpr_warning_str / consteval_error_str
 // (via __builtin_constexpr_diag). The err/warn/note trio is emitted directly
 // by the constant evaluator when the call is manifestly constant-evaluated;
 // note_constexpr_message additionally serves as the failure note when an
@@ -61,7 +61,7 @@ def warn_constexpr_message_tag : Warning<
 def err_constexpr_message : Error<"constexpr message: %0">;
 def err_constexpr_message_tag : Error<
   "constexpr message with tag '%0': %1">;
-// Marks an evaluation that ended at a std::constexpr_error_str that already
+// Marks an evaluation that ended at a std::consteval_error_str that already
 // reported an error: the evaluation is constexpr-erroneous, and its caller
 // need not diagnose it again (see Expr::isConstexprErroneous).
 def note_constexpr_erroneous : Note<

@@ -159,11 +159,9 @@ consteval std::meta::token_sequence prefixed(std::meta::token_sequence fmt) {
     ::std::integral_constant<const char*,
                              ::std::define_static_string(\(fmt))>::value
   });
-  if (!e) {
-    std::constexpr_error_str("magic-log",
+  if (!e)
+    std::consteval_error_str("magic-log",
                              "the format string must be a constant string");
-    return {};
-  }
   // (str_lit takes a string_view, but not a const char*.)
   std::string_view text = extract<const char*>(constant_of(*e));
   return ^^{ \(std::meta::str_lit("[{}] ", text)) };
@@ -189,11 +187,9 @@ __macro magic_log(std::meta::token_sequence fmt,
     call += ^^{ this->get_name() };
     break;
   case explicit_object:
-    if (!has_identifier(s.object_parameter)) {
-      std::constexpr_error_str(
+    if (!has_identifier(s.object_parameter))
+      std::consteval_error_str(
           "magic-log", "the explicit object parameter must be named");
-      return {};
-    }
     call += magic::prefixed(fmt);
     call += ^^{ \(std::meta::id(identifier_of(s.object_parameter))).get_name() };
     break;

@@ -969,12 +969,12 @@ namespace {
     bool EvaluatingSyntheticDoExprFrame = false;
 
     /// Whether this evaluation is of an expression macro's body. A
-    /// std::constexpr_error_str reached here fails the evaluation (so the
+    /// std::consteval_error_str reached here fails the evaluation (so the
     /// invocation produces no expansion, making the macro invocation an
     /// invalid expression) instead of emitting the error directly.
     bool EvaluatingMacroBody = false;
 
-    /// Whether this evaluation reached a std::constexpr_error_str that
+    /// Whether this evaluation reached a std::consteval_error_str that
     /// reported an error (P2758): the evaluation is constexpr-erroneous and
     /// ends there. Nothing after it may be evaluated, so no further message
     /// may be emitted, even when evaluation continues after a failure to
@@ -22812,7 +22812,7 @@ static bool readConstexprDiagString(EvalInfo &Info, const Expr *PtrE,
 }
 
 /// P2758 (std::constexpr_print_str / constexpr_warning_str /
-/// constexpr_error_str): emit a message during constant evaluation.
+/// consteval_error_str): emit a message during constant evaluation.
 /// Kinds: 0 = print (note), 1 = warning, 2 = error.
 ///
 /// A kind-2 call is constexpr-erroneous: it ends the evaluation (nothing after

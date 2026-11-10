@@ -12,12 +12,13 @@
 // ADDITIONAL_COMPILE_FLAGS: -freflection -std=c++2d
 
 // P2758: std::constexpr_print_str / constexpr_warning_str /
-// constexpr_error_str, and their interaction with expression macros. A
-// constexpr_error_str ends the evaluation, and makes the program ill-formed:
+// consteval_error_str, and their interaction with expression macros. A
+// consteval_error_str ends the evaluation, and makes the program ill-formed:
 // it is reported once, and the expression isn't diagnosed again as
-// non-constant. In a macro body it means the macro produces no expansion, so
-// during substitution the invocation is an invalid expression (a
-// requires-expression evaluates to false), while a plain use reports the
+// non-constant. It is [[noreturn]] and consteval: a constexpr function calls
+// it under 'if consteval'. In a macro body it means the macro produces no
+// expansion, so during substitution the invocation is an invalid expression
+// (a requires-expression evaluates to false), while a plain use reports the
 // macro's message.
 
 #include <debugging>
@@ -29,24 +30,43 @@ using namespace std::string_view_literals;
 // --- the library facade, outside of macros -------------------------------
 
 constexpr int reject_zero(int a) {
-  if (a == 0)
-    std::constexpr_error_str("reject-zero", "can't call with a == 0"); // expected-error@*:* {{constexpr message with tag 'reject-zero': can't call with a == 0}}
+  if consteval {
+    if (a == 0)
+      std::consteval_error_str("reject-zero", "can't call with a == 0"); // expected-error@*:* {{constexpr message with tag 'reject-zero': can't call with a == 0}}
+  }
   return a;
 }
 
 constexpr int ok = reject_zero(2);
 constexpr int bad = reject_zero(0); // the error is emitted, and nothing else
 static_assert(bad == 0);            // 'bad' is invalid: not diagnosed again
+int at_runtime(int i) { return reject_zero(i); } // no effect at runtime
 
 // Nothing after the error is evaluated.
-constexpr bool stops() {
+consteval bool stops() {
   std::constexpr_print_str("before"); // expected-note@*:* {{constexpr message: before}}
-  std::constexpr_error_str("stop", "stopped here"); // expected-error@*:* {{constexpr message with tag 'stop': stopped here}}
+  std::consteval_error_str("stop", "stopped here"); // expected-error@*:* {{constexpr message with tag 'stop': stopped here}}
   std::constexpr_print_str("after");
-  std::constexpr_error_str("stop", "not reached");
-  return true;
+  std::consteval_error_str("stop", "not reached");
 }
 static_assert(stops());
+
+// [[noreturn]]: a function needs nothing after the call, on that path.
+consteval int positive(int a) {
+  if (a > 0)
+    return a;
+  std::consteval_error_str("positive", "not positive"); // expected-error@*:* {{constexpr message with tag 'positive': not positive}}
+}
+static_assert(positive(1) == 1);
+constexpr int not_positive = positive(0);
+
+// Outside 'if consteval', a call in a constexpr function is an immediate
+// invocation with constant arguments, so it is evaluated where it is written.
+constexpr int unguarded(int a) {
+  if (a == 0)
+    std::consteval_error_str("unguarded", "evaluated here"); // expected-error@*:* {{constexpr message with tag 'unguarded': evaluated here}}
+  return a;
+}
 
 constexpr bool warn_odd(int a) {
   if (a % 2 == 1)
@@ -73,7 +93,7 @@ constexpr bool bad_tag() {
 template <class T>
 __macro int_only(T&& x) { // expected-note {{in call to}}
   if constexpr (!std::is_same_v<std::remove_cvref_t<T>, int>)
-    std::constexpr_error_str("int-only", "only int is supported"); // expected-note@*:* {{constexpr message with tag 'int-only': only int is supported}}
+    std::consteval_error_str("int-only", "only int is supported"); // expected-note@*:* {{constexpr message with tag 'int-only': only int is supported}}
   // Reached only for int_only!(1) (once): an error ends the evaluation.
   std::constexpr_print_str("int-only expanded"); // expected-note@*:* {{constexpr message: int-only expanded}}
   return ^^{ \(x) };

@@ -98,7 +98,7 @@ __macro try_(T&& e) {
   // `try_` only means anything inside a function: it early-returns from one.
   m::info where = m::macro_expansion_context();
   if (!m::is_function(where))
-    std::constexpr_error_str("bad-try-context",
+    std::consteval_error_str("bad-try-context",
                              "try_ must be invoked inside a function");
 
   // Computed in the macro body -- NOT injected as `using` aliases.

@@ -253,7 +253,7 @@ consteval auto paste_yields(token_sequence loop, token_sequence elem,
 __macro each_dir(direction dir, token_sequence head, token_sequence body) {
   auto [elem, range] = head.balanced_split_at(punctuator::colon);
   if (range.empty())
-    std::constexpr_error_str("each", "expected 'declaration : range'");
+    std::consteval_error_str("each", "expected 'declaration : range'");
   return ^^{ iter::each_range!($dir, $elem, $range, $body) };
 }
 

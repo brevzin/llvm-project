@@ -771,7 +771,7 @@ public:
                         bool InConstantContext = false) const;
 
   /// Whether the notes from a failed evaluation say that it is
-  /// constexpr-erroneous (P2758): it ended at a std::constexpr_error_str,
+  /// constexpr-erroneous (P2758): it ended at a std::consteval_error_str,
   /// which already reported an error, so the program is ill-formed and the
   /// caller should not diagnose the expression as non-constant on top of
   /// it. (Such an expression can still be a constant expression; the caller

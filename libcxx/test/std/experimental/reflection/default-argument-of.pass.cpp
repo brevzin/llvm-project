@@ -74,13 +74,13 @@ struct named_arg {
 };
 consteval auto parse_named(token_sequence arg) -> named_arg {
   if (arg.size() < 3 || arg[1] != ^^{ = })
-    std::constexpr_error_str("call", "expected 'name = value'");
+    std::consteval_error_str("call", "expected 'name = value'");
   return {identifier_of(arg[0]), arg.subseq(2)};
 }
 __macro call(token_sequence fn, token_sequence... args) {
   auto r = std::meta::test_expression(^^{ ^^\(fn) });
   if (!r)
-    std::constexpr_error_str("call", "the callee must name a single function");
+    std::consteval_error_str("call", "the callee must name a single function");
   info f = extract<info>(constant_of(*r));
   std::vector<named_arg> named{parse_named(args)...};
   token_sequence list;
@@ -97,7 +97,7 @@ __macro call(token_sequence fn, token_sequence... args) {
       }
     if (!found) {
       if (!has_default_argument(p))
-        std::constexpr_error_str("call", "missing argument for a parameter");
+        std::consteval_error_str("call", "missing argument for a parameter");
       arg = ^^{ \(default_argument_of(p)) };
     }
     if (!first)
@@ -106,7 +106,7 @@ __macro call(token_sequence fn, token_sequence... args) {
     first = false;
   }
   if (used != named.size())
-    std::constexpr_error_str("call", "unknown argument name");
+    std::consteval_error_str("call", "unknown argument name");
   return ^^{ \(fn)(\(list)) };
 }
 

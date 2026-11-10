@@ -674,8 +674,9 @@ error, as is naming any macro.
 ### Explicit failure
 
 A macro can decline to produce an expansion by calling
-`std::constexpr_error_str` (P2758, `<debugging>`) in its body. Everywhere
-else `constexpr_error_str` follows the paper: the evaluation is
+`std::consteval_error_str` (P2758, `<debugging>`; `[[noreturn]]`, so nothing
+needs to follow it) in its body. Everywhere else `consteval_error_str`
+follows the paper: the evaluation is
 *constexpr-erroneous*. It ends at the call, the message is emitted, and the
 program is ill-formed, but the expression is not diagnosed again as
 non-constant. A macro body evaluation that reports an error, though, produces
@@ -689,7 +690,7 @@ note: constexpr message: index must be a constant expression
 ```
 
 This is what lets `ranges::begin`-style ladders be written as literal
-if-else: the "ill-formed" rungs are `constexpr_error_str` calls, observable
+if-else: the "ill-formed" rungs are `consteval_error_str` calls, observable
 through `requires` exactly as the CPO machinery's constrained overload sets
 are. `std::constexpr_warning_str` and `std::constexpr_print_str` work in
 macro bodies too (a warning does not suppress the expansion), which gives
@@ -733,7 +734,7 @@ inline constexpr struct begin_fn {
                          }) {
       return ^^{ ::rng::impl::adl_begin(\(as_lvalue(r))) };
     } else {
-      std::constexpr_error_str("no-begin", "no viable begin for this type");
+      std::consteval_error_str("no-begin", "no viable begin for this type");
     }
   }
 } begin{};
@@ -808,7 +809,7 @@ template <class T>
 __macro try_(T&& e) {
   info where = macro_expansion_context();
   if (!is_function(where))
-    std::constexpr_error_str("bad-try-context",
+    std::consteval_error_str("bad-try-context",
                              "try_ must be invoked inside a function");
 
   info CT = substitute(^^try_traits, {remove_cvref(type_of(e))});

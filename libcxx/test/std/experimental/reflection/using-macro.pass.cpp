@@ -70,9 +70,9 @@ consteval void expand(token_sequence item, token_sequence prefix,
     return;
   }
   if (lb == item.begin() || !is(lb[-1], punctuator::colon_colon))
-    std::constexpr_error_str("using_", "a group must follow '::'");
+    std::consteval_error_str("using_", "a group must follow '::'");
   if (!is(item[item.size() - 1], punctuator::right_brace))
-    std::constexpr_error_str("using_", "nothing may follow a group");
+    std::consteval_error_str("using_", "nothing may follow a group");
   token_sequence head = prefix + join(std::ranges::subrange(item.begin(), lb));
   for (token_sequence inner : split_commas(std::ranges::subrange(lb + 1, item.end() - 1)))
     expand(inner, head, out);

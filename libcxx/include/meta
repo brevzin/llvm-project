@@ -3828,7 +3828,7 @@ consteval auto as_lvalue(info r) -> info {
 // e.g. a `try_`-style macro asks for the enclosing function's return type via
 // return_type_of -- without injecting anything into the expansion to recompute
 // it there. A macro that only makes sense in one kind of context should check
-// the kind it got and decline (std::constexpr_error_str) otherwise.
+// the kind it got and decline (std::consteval_error_str) otherwise.
 //
 // Only meaningful inside an expression macro body; evaluating it in an
 // ordinary constant expression is an error.

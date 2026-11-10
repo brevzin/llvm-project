@@ -219,7 +219,7 @@ static bool convertArgumentToType(Sema &S, Expr *&Value, QualType Ty) {
 /// and the second argument is a non-wide string literal.
 /// __builtin_constexpr_diag(kind, tag, tag_len, msg, msg_len): the engine
 /// behind std::constexpr_print_str / constexpr_warning_str /
-/// constexpr_error_str (P2758). The strings arrive flattened as pointer and
+/// consteval_error_str (P2758). The strings arrive flattened as pointer and
 /// length; the message may be char or char8_t.
 static bool BuiltinConstexprDiag(Sema &S, CallExpr *TheCall) {
   if (S.checkArgCount(TheCall, 5))

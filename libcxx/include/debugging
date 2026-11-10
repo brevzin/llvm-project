@@ -25,8 +25,8 @@ namespace std {
   constexpr void constexpr_print_str(tag-string, u8string_view) noexcept;
   constexpr void constexpr_warning_str(tag-string, string_view) noexcept;
   constexpr void constexpr_warning_str(tag-string, u8string_view) noexcept;
-  constexpr void constexpr_error_str(tag-string, string_view) noexcept;
-  constexpr void constexpr_error_str(tag-string, u8string_view) noexcept;
+  [[noreturn]] consteval void consteval_error_str(tag-string, string_view) noexcept;
+  [[noreturn]] consteval void consteval_error_str(tag-string, u8string_view) noexcept;
 }
 
 */
@@ -93,15 +93,19 @@ inline constexpr void constexpr_warning_str(__tag_string __tag,
                            __msg.data(), __msg.size());
 }
 
-inline constexpr void constexpr_error_str(__tag_string __tag,
-                                          string_view __msg) noexcept {
+// An evaluation of a call to consteval_error_str is constexpr-erroneous: it
+// reports the error and ends there, so the call never returns.
+[[noreturn]] consteval void consteval_error_str(__tag_string __tag,
+                                                string_view __msg) noexcept {
   __builtin_constexpr_diag(2, __tag.__str_.data(), __tag.__str_.size(),
                            __msg.data(), __msg.size());
+  __builtin_unreachable();
 }
-inline constexpr void constexpr_error_str(__tag_string __tag,
-                                          u8string_view __msg) noexcept {
+[[noreturn]] consteval void consteval_error_str(__tag_string __tag,
+                                                u8string_view __msg) noexcept {
   __builtin_constexpr_diag(2, __tag.__str_.data(), __tag.__str_.size(),
                            __msg.data(), __msg.size());
+  __builtin_unreachable();
 }
 
 _LIBCPP_END_NAMESPACE_STD

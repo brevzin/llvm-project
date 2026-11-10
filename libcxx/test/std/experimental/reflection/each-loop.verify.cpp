@@ -21,7 +21,7 @@
 __macro each(std::meta::token_sequence head, std::meta::token_sequence body) {
   auto [elem, range] = head.balanced_split_at(std::meta::punctuator::colon);
   if (range.empty())
-    std::constexpr_error_str("each", "expected 'declaration : range'");
+    std::consteval_error_str("each", "expected 'declaration : range'");
   return ^^{ for (\(elem) : \(range)) { \(body) } };
 }
 
