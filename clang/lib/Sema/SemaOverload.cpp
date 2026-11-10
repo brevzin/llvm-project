@@ -6789,6 +6789,10 @@ Sema::EvaluateConvertedConstantExpression(Expr *E, QualType T, APValue &Value,
     }
   }
 
+  // A constexpr-erroneous evaluation has already been diagnosed.
+  if (Expr::isConstexprErroneous(Notes))
+    return ExprError();
+
   // It's not a constant expression. Produce an appropriate diagnostic.
   if (Notes.size() == 1 &&
       Notes[0].second.getDiagID() == diag::note_invalid_subexpr_in_const_expr) {

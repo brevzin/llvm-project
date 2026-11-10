@@ -61,6 +61,11 @@ def warn_constexpr_message_tag : Warning<
 def err_constexpr_message : Error<"constexpr message: %0">;
 def err_constexpr_message_tag : Error<
   "constexpr message with tag '%0': %1">;
+// Marks an evaluation that ended at a std::constexpr_error_str that already
+// reported an error: the evaluation is constexpr-erroneous, and its caller
+// need not diagnose it again (see Expr::isConstexprErroneous).
+def note_constexpr_erroneous : Note<
+  "constant evaluation ended by the error above">;
 def note_constexpr_diag_bad_tag : Note<
   "tag of a constexpr message may only contain letters, digits, '_', '-', "
   "and '='">;

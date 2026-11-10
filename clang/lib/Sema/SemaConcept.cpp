@@ -798,6 +798,9 @@ ExprResult ConstraintSatisfactionChecker::EvaluateSlow(
   if (!SubstitutedAtomicExpr.get()->EvaluateAsConstantExpr(EvalResult,
                                                            S.Context) ||
       !EvaluationDiags.empty()) {
+    // A constexpr-erroneous evaluation has already been diagnosed.
+    if (Expr::isConstexprErroneous(EvaluationDiags))
+      return ExprError();
     // C++2a [temp.constr.atomic]p1
     //   ...E shall be a constant expression of type bool.
     S.Diag(SubstitutedAtomicExpr.get()->getBeginLoc(),

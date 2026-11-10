@@ -12,8 +12,10 @@
 // ADDITIONAL_COMPILE_FLAGS: -freflection -std=c++2d
 
 // P2758: std::constexpr_print_str / constexpr_warning_str /
-// constexpr_error_str, and their interaction with expression macros: a
-// constexpr_error in a macro body means the macro produces no expansion, so
+// constexpr_error_str, and their interaction with expression macros. A
+// constexpr_error_str ends the evaluation, and makes the program ill-formed:
+// it is reported once, and the expression isn't diagnosed again as
+// non-constant. In a macro body it means the macro produces no expansion, so
 // during substitution the invocation is an invalid expression (a
 // requires-expression evaluates to false), while a plain use reports the
 // macro's message.
@@ -33,8 +35,18 @@ constexpr int reject_zero(int a) {
 }
 
 constexpr int ok = reject_zero(2);
-constexpr int bad = reject_zero(0); // the error is emitted, evaluation still succeeds
-static_assert(bad == 0);
+constexpr int bad = reject_zero(0); // the error is emitted, and nothing else
+static_assert(bad == 0);            // 'bad' is invalid: not diagnosed again
+
+// Nothing after the error is evaluated.
+constexpr bool stops() {
+  std::constexpr_print_str("before"); // expected-note@*:* {{constexpr message: before}}
+  std::constexpr_error_str("stop", "stopped here"); // expected-error@*:* {{constexpr message with tag 'stop': stopped here}}
+  std::constexpr_print_str("after");
+  std::constexpr_error_str("stop", "not reached");
+  return true;
+}
+static_assert(stops());
 
 constexpr bool warn_odd(int a) {
   if (a % 2 == 1)
@@ -62,6 +74,8 @@ template <class T>
 __macro int_only(T&& x) { // expected-note {{in call to}}
   if constexpr (!std::is_same_v<std::remove_cvref_t<T>, int>)
     std::constexpr_error_str("int-only", "only int is supported"); // expected-note@*:* {{constexpr message with tag 'int-only': only int is supported}}
+  // Reached only for int_only!(1) (once): an error ends the evaluation.
+  std::constexpr_print_str("int-only expanded"); // expected-note@*:* {{constexpr message: int-only expanded}}
   return ^^{ \(x) };
 }
 

@@ -2,8 +2,10 @@
 
 // P2758: __builtin_constexpr_diag(kind, tag, tag_len, msg, msg_len).
 // Kind 0 = print (note), 1 = warning, 2 = error. Only a manifestly
-// constant-evaluated call has an effect; a kind-2 call additionally renders
-// the program ill-formed but remains a constant expression.
+// constant-evaluated call has an effect. A kind-2 call is constexpr-erroneous:
+// it ends the evaluation (nothing after it is evaluated) and renders the
+// program ill-formed, but the expression can still be a constant expression,
+// so it is diagnosed once, by the message, and not again as non-constant.
 
 constexpr int reject_zero(int a) {
   if (a == 0)
@@ -16,8 +18,8 @@ constexpr int reject_zero(int a) {
 constexpr int ok1 = reject_zero(2);
 static_assert(reject_zero(3) == 3);
 
-// Evaluating the error call emits the message; the evaluation itself still
-// succeeds (the expression remains constant), so there is no note chain.
+// Evaluating the error call emits the message, and nothing else: the variable
+// is invalid, so neither it nor its uses are diagnosed again.
 constexpr int bad1 = reject_zero(0);
 static_assert(bad1 == 0);
 
@@ -62,3 +64,68 @@ constexpr bool u8msg() {
   return true;
 }
 static_assert(u8msg());
+
+// Nothing after an error call is evaluated: not another message, nor
+// something that isn't a constant expression.
+constexpr int stops(int a) {
+  __builtin_constexpr_diag(0, "", 0, "before", 6); // expected-note {{constexpr message: before}}
+  if (a == 0) {
+    __builtin_constexpr_diag(2, "first", 5, "first error", 11); // expected-error {{constexpr message with tag 'first': first error}}
+    __builtin_constexpr_diag(2, "second", 6, "second error", 12);
+    __builtin_constexpr_diag(0, "", 0, "after", 5);
+    return 1 / a;
+  }
+  return a;
+}
+constexpr int bad2 = stops(0);
+
+// Every context that requires a constant expression reports the message once,
+// and nothing more.
+constexpr int fail(int a) {
+  if (a == 0)
+    __builtin_constexpr_diag(2, "fail", 4, "zero", 4); // expected-error 18 {{constexpr message with tag 'fail': zero}}
+  return a;
+}
+int global = fail(0);           // not dynamically initialized instead
+constinit int ci = fail(0);
+static_assert(fail(0) == 0);
+template <int N> struct T {};
+T<fail(0)> t;
+int arr[fail(0) + 1];           // not a variable length array
+enum E { e = fail(0) };
+struct S { int bf : fail(0) + 1; };
+void ne() noexcept(fail(0));
+alignas(fail(0) + 8) int al;
+template <int N> constexpr int vt = fail(N);
+int uv = vt<0>;
+struct D {
+  constexpr D(int a) : v(fail(a)) {}
+  int v;
+};
+constexpr D d(0);
+consteval int ce(int a) { return fail(a); }
+int u = ce(0);                  // the initializer, not again the invocation
+void locals(int x) {
+  const int a = fail(0);
+  static_assert(a == 0);
+  ce(0); // expected-warning {{expression result unused}}
+  int b = ce(1) + ce(0);
+  if constexpr (fail(0)) {}
+  switch (x) { case fail(0): break; }
+  (void)b;
+}
+template <int N> requires (fail(N) == 0) void rq() {}
+void use_rq() { rq<0>(); } // expected-error {{no matching function for call to 'rq'}}
+                           // expected-note@-2 {{candidate template ignored: failed template argument deduction}}
+
+// A constexpr function whose every evaluation reports an error still can be
+// part of a constant expression: it is not diagnosed as never being one.
+constexpr int always_fails() {
+  __builtin_constexpr_diag(2, "", 0, "always", 6);
+  return 0;
+}
+
+// Evaluations that don't require a constant expression stay silent, and the
+// error still ends them: the call is not folded, but made at runtime, where
+// it has no effect.
+int at_runtime() { return fail(0) + reject_zero(0); }

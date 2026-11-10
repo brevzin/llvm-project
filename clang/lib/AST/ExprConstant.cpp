@@ -974,6 +974,13 @@ namespace {
     /// invalid expression) instead of emitting the error directly.
     bool EvaluatingMacroBody = false;
 
+    /// Whether this evaluation reached a std::constexpr_error_str that
+    /// reported an error (P2758): the evaluation is constexpr-erroneous and
+    /// ends there. Nothing after it may be evaluated, so no further message
+    /// may be emitted, even when evaluation continues after a failure to
+    /// gather more notes.
+    bool ConstexprErroneous = false;
+
     /// Whether a parameter of the macro whose body is being evaluated holds a
     /// reflection of a value-dependent expression (an argument in a template
     /// that does not depend on it for its type). Asking what such an
@@ -22806,14 +22813,21 @@ static bool readConstexprDiagString(EvalInfo &Info, const Expr *PtrE,
 
 /// P2758 (std::constexpr_print_str / constexpr_warning_str /
 /// constexpr_error_str): emit a message during constant evaluation.
-/// Kinds: 0 = print (note), 1 = warning, 2 = error. A kind-2 call emits the
-/// error but remains a constant expression (the *program* is ill-formed) --
-/// except inside an expression-macro body, where it fails the evaluation so
-/// that the invocation produces no expansion and the macro invocation is an
-/// invalid expression (observable through a requires-expression during
-/// substitution).
+/// Kinds: 0 = print (note), 1 = warning, 2 = error.
+///
+/// A kind-2 call is constexpr-erroneous: it ends the evaluation (nothing after
+/// it is evaluated), and if the evaluation is manifestly constant-evaluated,
+/// the program is ill-formed. The evaluation fails with
+/// note_constexpr_erroneous, so that its caller can tell that it was already
+/// diagnosed (Expr::isConstexprErroneous) and need not report the expression
+/// as non-constant. Inside an expression-macro body, it instead fails with the
+/// message as the note: the invocation produces no expansion and the macro
+/// invocation is an invalid expression (observable through a
+/// requires-expression during substitution).
 static bool EvaluateBuiltinConstexprDiag(EvalInfo &Info, const CallExpr *E) {
   assert(E->getNumArgs() == 5 && "Sema checks the arity");
+  if (Info.ConstexprErroneous)
+    return false;
 
   APSInt KindVal;
   if (!EvaluateInteger(E->getArg(0), KindVal, Info))
@@ -22846,13 +22860,20 @@ static bool EvaluateBuiltinConstexprDiag(EvalInfo &Info, const CallExpr *E) {
     return false;
   }
 
-  // Only a manifestly constant evaluation reports; speculative evaluations,
-  // constant folding of runtime expressions, and the potential-constant
-  // check of a constexpr function's definition all stay silent (and stay
-  // constant).
-  if (!Info.InConstantContext || Info.checkingPotentialConstantExpression() ||
-      Info.SpeculativeEvaluationDepth != 0)
+  // The potential-constant check of a constexpr function's definition stays
+  // silent: a call that reports an error can still be part of a constant
+  // expression.
+  if (Info.checkingPotentialConstantExpression())
     return true;
+
+  // Only an evaluation that requires a constant expression reports: one in a
+  // constant context, not speculative, and that gathers notes to explain a
+  // failure. (Evaluations in a constant context that gather no notes are
+  // Sema's probes, e.g. computing value ranges for warnings, which would
+  // otherwise repeat each message.) An error ends the evaluation regardless.
+  if (!Info.InConstantContext || Info.SpeculativeEvaluationDepth != 0 ||
+      !Info.EvalStatus.Diag)
+    return Kind != 2;
 
   DiagnosticsEngine &Diags = Info.Ctx.getDiagnostics();
   // Report at the innermost frame that is in user code: the builtin call
@@ -22888,7 +22909,9 @@ static bool EvaluateBuiltinConstexprDiag(EvalInfo &Info, const CallExpr *E) {
     else
       Diags.Report(Loc, diag::err_constexpr_message_tag) << Tag.str()
                                                          << Msg.str();
-    break;
+    Info.ConstexprErroneous = true;
+    Info.FFDiag(E, diag::note_constexpr_erroneous);
+    return false;
   }
   return true;
 }
@@ -23012,6 +23035,12 @@ public:
   bool VisitCXXBuiltinReportTokensExpr(const CXXBuiltinReportTokensExpr *E);
 };
 } // end anonymous namespace
+
+bool Expr::isConstexprErroneous(ArrayRef<PartialDiagnosticAt> Notes) {
+  return llvm::any_of(Notes, [](const PartialDiagnosticAt &Note) {
+    return Note.second.getDiagID() == diag::note_constexpr_erroneous;
+  });
+}
 
 /// Evaluate \p SubExpr to an APValue rvalue. Sema is responsible for
 /// inserting any user-defined conversion to std::meta::info or

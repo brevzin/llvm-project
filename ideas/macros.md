@@ -675,10 +675,11 @@ error, as is naming any macro.
 
 A macro can decline to produce an expansion by calling
 `std::constexpr_error_str` (P2758, `<debugging>`) in its body. Everywhere
-else `constexpr_error_str` follows the paper: the message is emitted, the
-program is ill-formed, and the evaluation *remains constant* — but a macro
-body evaluation that reports an error produces no expansion, so the
-invocation is an **invalid expression**. During substitution that is a
+else `constexpr_error_str` follows the paper: the evaluation is
+*constexpr-erroneous*. It ends at the call, the message is emitted, and the
+program is ill-formed, but the expression is not diagnosed again as
+non-constant. A macro body evaluation that reports an error, though, produces
+no expansion, so the invocation is an **invalid expression**. During substitution that is a
 substitution failure: `requires { v[i]; }` is `false` rather than an error.
 In a plain context the invocation reports the macro's message:
 

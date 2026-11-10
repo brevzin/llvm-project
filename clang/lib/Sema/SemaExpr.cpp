@@ -19655,6 +19655,10 @@ Sema::VerifyIntegerConstantExpression(Expr *E, llvm::APSInt *Result,
     return E;
   }
 
+  // A constexpr-erroneous evaluation has already been diagnosed.
+  if (Expr::isConstexprErroneous(Notes))
+    return ExprError();
+
   // If our only note is the usual "invalid subexpression" note, just point
   // the caret at its location rather than producing an essentially
   // redundant note.
@@ -20045,6 +20049,9 @@ static void EvaluateAndDiagnoseImmediateInvocation(
       Eval, SemaRef.getASTContext(), ConstantExprKind::ImmediateInvocation);
   if (!Result || !Notes.empty()) {
     SemaRef.FailedImmediateInvocations.insert(CE);
+    // A constexpr-erroneous evaluation has already been diagnosed.
+    if (Expr::isConstexprErroneous(Notes))
+      return;
     Expr *InnerExpr = CE->getSubExpr()->IgnoreImplicit();
     if (auto *FunctionalCast = dyn_cast<CXXFunctionalCastExpr>(InnerExpr))
       InnerExpr = FunctionalCast->getSubExpr()->IgnoreImplicit();

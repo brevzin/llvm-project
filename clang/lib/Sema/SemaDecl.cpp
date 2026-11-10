@@ -15199,6 +15199,36 @@ bool Sema::ExprContainsConstevalOnlyValue(Expr *E) {
   return false;
 }
 
+/// The immediate invocations within \p S.
+static void
+collectImmediateInvocations(Stmt *S,
+                            llvm::SmallPtrSetImpl<ConstantExpr *> &Found) {
+  if (!S)
+    return;
+  if (auto *CE = dyn_cast<ConstantExpr>(S); CE && CE->isImmediateInvocation())
+    Found.insert(CE);
+  for (Stmt *Child : S->children())
+    collectImmediateInvocations(Child, Found);
+}
+
+/// Drops the pending immediate invocations within the initializer \p Init,
+/// whose evaluation was constexpr-erroneous: that evaluation evaluated them,
+/// and reported the error, so they need not be evaluated (and the error
+/// reported) again when the expression evaluation context ends.
+static void discardImmediateInvocationsIn(Sema &S, Expr *Init) {
+  auto &Candidates = S.ExprEvalContexts.back().ImmediateInvocationCandidates;
+  if (Candidates.empty())
+    return;
+  llvm::SmallPtrSet<ConstantExpr *, 4> InInit;
+  collectImmediateInvocations(Init, InInit);
+  llvm::erase_if(Candidates, [&](Sema::ImmediateInvocationCandidate C) {
+    if (!InInit.contains(C.getPointer()))
+      return false;
+    S.FailedImmediateInvocations.insert(C.getPointer());
+    return true;
+  });
+}
+
 void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
   if (var->isInvalidDecl()) return;
 
@@ -15540,7 +15570,13 @@ void Sema::CheckCompleteVariableDeclaration(VarDecl *var) {
       HasConstInit = var->checkForConstantInitialization(Notes);
     }
 
-    if (HasConstInit) {
+    if (!HasConstInit && Expr::isConstexprErroneous(Notes)) {
+      // The initialization is constexpr-erroneous, which has already been
+      // diagnosed: it is not dynamic initialization, nor a non-constant
+      // initializer to diagnose, but an invalid one.
+      var->setInvalidDecl();
+      discardImmediateInvocationsIn(*this, Init);
+    } else if (HasConstInit) {
       // Check if a constexpr variable contains consteval-only values.
       // Such variables are silently upgraded to consteval.
       if (var->isConstexpr() && !var->isConsteval()) {
