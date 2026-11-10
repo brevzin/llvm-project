@@ -922,6 +922,11 @@ static bool object_parameter_of(APValue &Result, ASTContext &C,
                                 DiagFn Diagnoser, bool AllowInjection,
                                 QualType ResultTy, SourceRange Range,
                                 ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool is_closure_type(APValue &Result, ASTContext &C, MetaActions &Meta,
+                            EvalFn Evaluator, DiagFn Diagnoser,
+                            bool AllowInjection, QualType ResultTy,
+                            SourceRange Range, ArrayRef<Expr *> Args,
+                            Decl *ContainingDecl);
 
 static bool token_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -1159,6 +1164,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_sizeT, 1, 1, operator_form_of},
     {Metafunction::MFRK_bool, 1, 1, has_parent},
     {Metafunction::MFRK_metaInfo, 1, 1, object_parameter_of},
+    {Metafunction::MFRK_bool, 1, 1, is_closure_type},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -6781,6 +6787,28 @@ bool is_enumerable_type(APValue &Result, ASTContext &C, MetaActions &Meta,
   }
 
   return SetAndSucceed(Result, makeBool(C, result));
+}
+
+// is_closure_type(r): whether r is a closure type ([expr.prim.lambda.closure]),
+// cv-qualified or not and named directly or through an alias. Like the type
+// predicates that the library implements with type traits, it is an error for
+// anything other than a type.
+bool is_closure_type(APValue &Result, ASTContext &C, MetaActions &Meta,
+                     EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                     QualType ResultTy, SourceRange Range,
+                     ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+  assert(ResultTy == C.BoolTy);
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+  if (!RV.isReflectedType())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a type",
+                                  DescriptionOf(RV));
+
+  auto *RD = RV.getReflectedType()->getAsCXXRecordDecl();
+  return SetAndSucceed(Result, makeBool(C, RD && RD->isLambda()));
 }
 
 bool is_template(APValue &Result, ASTContext &C, MetaActions &Meta,

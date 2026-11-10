@@ -192,6 +192,7 @@ consteval auto is_member_function_pointer_type(info) -> bool;
 consteval auto is_enum_type(info) -> bool;
 consteval auto is_union_type(info) -> bool;
 consteval auto is_class_type(info) -> bool;
+consteval auto is_closure_type(info) -> bool;           // P2996 ext
 consteval auto is_function_type(info) -> bool;
 consetval auto is_reflection_type(info) -> bool;
 
@@ -624,6 +625,7 @@ enum : unsigned {
   __metafn_operator_form_of,
   __metafn_has_parent,
   __metafn_object_parameter_of,
+  __metafn_is_closure_type,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1325,6 +1327,12 @@ consteval auto extract(info r) -> Ty {
 
 consteval auto is_class_type(info r) -> bool {
   return extract<bool>(substitute(^^is_class_v, {r}));
+}
+
+// (P2996 ext) Returns whether r is (possibly cv-qualified, possibly through an
+// alias) a closure type: the type of a lambda-expression.
+consteval auto is_closure_type(info r) -> bool {
+  return __metafunction(detail::__metafn_is_closure_type, r);
 }
 
 // Returns true if the reflected entity is a complete type.
