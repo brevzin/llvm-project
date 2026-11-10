@@ -5026,6 +5026,13 @@ void CXXNameMangler::mangleReflection(const APValue &R) {
   }
   case ReflectionKind::Parameter: {
     auto *PVD = R.getReflectedParameter();
+    if (PVD->isImplicitObjectParameter()) {
+      // 'pT' <encoding of the function>: no ordinary parameter is mangled
+      // with a 'T'.
+      Out << "pT";
+      mangle(cast<CXXMethodDecl>(PVD->getDeclContext()));
+      break;
+    }
     if (const FunctionDecl *Func
         = dyn_cast<FunctionDecl>(PVD->getDeclContext())) {
       Out << 'p';

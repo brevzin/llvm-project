@@ -236,6 +236,9 @@ class ASTContext : public RefCountedBase<ASTContext> {
   mutable SmallVector<Type *, 0> Types;
   mutable llvm::FoldingSet<ExtQuals> ExtQualNodes;
   mutable llvm::FoldingSet<OverloadSetData> OverloadSets;
+  /// The implicit object parameters synthesized for reflection, keyed by the
+  /// first declaration of their function.
+  llvm::DenseMap<const CXXMethodDecl *, ParmVarDecl *> ImplicitObjectParams;
   mutable llvm::FoldingSet<ComplexType> ComplexTypes;
   mutable llvm::FoldingSet<PointerType> PointerTypes{GeneralTypesLog2InitSize};
   mutable llvm::FoldingSet<AdjustedType> AdjustedTypes;
@@ -1380,6 +1383,13 @@ public:
   /// be canonical, deduplicated, and in declaration order (see
   /// makeOverloadSetReflection, which is the way to build one).
   const OverloadSetData *getOverloadSet(ArrayRef<NamedDecl *> Decls) const;
+
+  /// The implicit object parameter ([over.match.funcs]) of the implicit
+  /// object member function \p MD, synthesized on first use so that it can be
+  /// reflected. All declarations of a function share one parameter, whose
+  /// declaration context is the function's first declaration.
+  ParmVarDecl *getImplicitObjectParameter(const CXXMethodDecl *MD);
+
   CanQualType DependentTy, OverloadTy, BoundMemberTy, UnresolvedTemplateTy,
       UnknownAnyTy;
   CanQualType BuiltinFnTy;

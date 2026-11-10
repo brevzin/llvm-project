@@ -3984,6 +3984,26 @@ ASTContext::getOverloadSet(ArrayRef<NamedDecl *> Decls) const {
   return New;
 }
 
+ParmVarDecl *ASTContext::getImplicitObjectParameter(const CXXMethodDecl *MD) {
+  assert(MD->isImplicitObjectMemberFunction() &&
+         "only implicit object member functions have an implicit object "
+         "parameter");
+  auto *First =
+      cast<CXXMethodDecl>(const_cast<CXXMethodDecl *>(MD)->getFirstDecl());
+  ParmVarDecl *&PVD = ImplicitObjectParams[First];
+  if (!PVD) {
+    QualType T = First->getFunctionObjectParameterReferenceType();
+    SourceLocation Loc = First->getLocation();
+    PVD = ParmVarDecl::Create(*this, First, Loc, Loc, /*Id=*/nullptr, T,
+                              getTrivialTypeSourceInfo(T, Loc), SC_None,
+                              /*DefArg=*/nullptr);
+    PVD->setScopeInfo(0, 0);
+    PVD->setImplicit();
+    PVD->setImplicitObjectParameter();
+  }
+  return PVD;
+}
+
 QualType ASTContext::getComplexType(QualType T) const {
   // Unique pointers, to guarantee there is only one pointer of a particular
   // structure.

@@ -1057,6 +1057,11 @@ protected:
     /// 'std::meta::token_sequence... args'.
     LLVM_PREFERRED_TYPE(bool)
     unsigned IsMacroRawPack : 1;
+
+    /// Whether this is the implicit object parameter of an implicit object
+    /// member function, synthesized for reflection.
+    LLVM_PREFERRED_TYPE(bool)
+    unsigned IsImplicitObjectParam : 1;
   };
 
   class NonParmVarDeclBitfields {
@@ -1865,6 +1870,7 @@ protected:
     assert(ParmVarDeclBits.IsKNRPromoted == false);
     assert(ParmVarDeclBits.IsObjCMethodParam == false);
     assert(ParmVarDeclBits.IsMacroRawPack == false);
+    assert(ParmVarDeclBits.IsImplicitObjectParam == false);
     setDefaultArg(DefArg);
   }
 
@@ -1945,6 +1951,18 @@ public:
   /// parameter pack, as for 'auto... args'.)
   bool isMacroRawPack() const { return ParmVarDeclBits.IsMacroRawPack; }
   void setMacroRawPack(bool V = true) { ParmVarDeclBits.IsMacroRawPack = V; }
+
+  /// Whether this is the implicit object parameter of an implicit object
+  /// member function ([over.match.funcs]). Such a parameter is not among the
+  /// function's parameters: it is synthesized on demand, once per function
+  /// (see ASTContext::getImplicitObjectParameter), so that it can be
+  /// reflected. Its function scope index is meaningless.
+  bool isImplicitObjectParameter() const {
+    return ParmVarDeclBits.IsImplicitObjectParam;
+  }
+  void setImplicitObjectParameter(bool V = true) {
+    ParmVarDeclBits.IsImplicitObjectParam = V;
+  }
 
   bool isExplicitObjectParameter() const {
     return ExplicitObjectParameterIntroducerLoc.isValid();

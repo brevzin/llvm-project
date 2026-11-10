@@ -917,6 +917,11 @@ static bool has_parent(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                        QualType ResultTy, SourceRange Range,
                        ArrayRef<Expr *> Args, Decl *ContainingDecl);
+static bool object_parameter_of(APValue &Result, ASTContext &C,
+                                MetaActions &Meta, EvalFn Evaluator,
+                                DiagFn Diagnoser, bool AllowInjection,
+                                QualType ResultTy, SourceRange Range,
+                                ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
 static bool token_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -1153,6 +1158,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_bool, 1, 1, is_unique_id},
     {Metafunction::MFRK_sizeT, 1, 1, operator_form_of},
     {Metafunction::MFRK_bool, 1, 1, has_parent},
+    {Metafunction::MFRK_metaInfo, 1, 1, object_parameter_of},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -1326,6 +1332,12 @@ static bool getParameterName(ParmVarDecl *PVD, std::string &Out) {
       STTPT && STTPT->getPackIndex())
     return true;
 
+  // An implicit object parameter is never named.
+  if (PVD->isImplicitObjectParameter()) {
+    Out.clear();
+    return true;
+  }
+
   unsigned ParamIdx = PVD->getFunctionScopeIndex();
 
   // TODO(P2996): This will crash if we're in the trailing requires-clause of
@@ -1362,6 +1374,10 @@ static bool getParameterName(ParmVarDecl *PVD, std::string &Out) {
 }
 
 static ParmVarDecl *getMostRecentParmVarDecl(ParmVarDecl *PVD) {
+  // All declarations of a function share their implicit object parameter.
+  if (PVD->isImplicitObjectParameter())
+    return PVD;
+
   // TODO(P2996): This will crash if we're in the trailing requires-clause of
   // a function declaration, since the DeclContext is not the function but the
   // TranslationUnitDecl.
@@ -8146,6 +8162,38 @@ bool is_explicit_object_parameter(APValue &Result, ASTContext &C,
   return SetAndSucceed(Result, makeBool(C, result));
 }
 
+// object_parameter_of(r): the explicit object parameter of an explicit object
+// member function, or the (synthesized) implicit object parameter of an
+// implicit object member function. Static member functions, constructors, and
+// destructors have no object parameter.
+bool object_parameter_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                         EvalFn Evaluator, DiagFn Diagnoser,
+                         bool AllowInjection, QualType ResultTy,
+                         SourceRange Range, ArrayRef<Expr *> Args,
+                         Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+  assert(ResultTy == C.MetaInfoTy);
+
+  APValue RV;
+  if (!Evaluator(RV, Args[0], true))
+    return true;
+
+  static constexpr StringRef Expected =
+      "a non-static member function other than a constructor or destructor";
+
+  CXXMethodDecl *MD = nullptr;
+  if (RV.isReflectedDecl())
+    MD = dyn_cast<CXXMethodDecl>(RV.getReflectedDecl());
+  if (!MD || MD->isStatic() || isa<CXXConstructorDecl, CXXDestructorDecl>(MD))
+    return DiagnoseReflectionKind(Diagnoser, Range, Expected,
+                                  DescriptionOf(RV));
+
+  if (MD->isExplicitObjectMemberFunction())
+    return SetAndSucceed(Result, makeReflection(MD->getParamDecl(0)));
+  return SetAndSucceed(Result,
+                       makeReflection(C.getImplicitObjectParameter(MD)));
+}
+
 bool is_function_parameter(APValue &Result, ASTContext &C, MetaActions &Meta,
                            EvalFn Evaluator, DiagFn Diagnoser,
                            bool AllowInjection, QualType ResultTy,
@@ -8235,6 +8283,12 @@ bool variable_of(APValue &Result, ASTContext &C, MetaActions &Meta,
                                   DescriptionOf(RV));
 
   ParmVarDecl *PVD = RV.getReflectedParameter();
+  // An implicit object parameter declares no variable: in the function body,
+  // the object is '*this'.
+  if (PVD->isImplicitObjectParameter())
+    return DiagnoseReflectionKind(
+        Diagnoser, Range,
+        "a function parameter other than an implicit object parameter");
   FunctionDecl *FD = cast<FunctionDecl>(PVD->getDeclContext());
 
   // Resolve to the parameter on the function definition (if there's one),

@@ -570,7 +570,9 @@ static void profileReflection(llvm::FoldingSetNodeID &ID, APValue V) {
   }
   case ReflectionKind::Parameter: {
     ParmVarDecl *PVD = dyn_cast<ParmVarDecl>(V.getReflectedParameter());
-    if (auto *FD = dyn_cast<FunctionDecl>(PVD->getDeclContext()))
+    // An implicit object parameter is already unique to its function.
+    if (auto *FD = dyn_cast<FunctionDecl>(PVD->getDeclContext());
+        FD && !PVD->isImplicitObjectParameter())
       PVD = FD->getFirstDecl()->getParamDecl(PVD->getFunctionScopeIndex());
     ID.AddPointer(PVD);
     return;

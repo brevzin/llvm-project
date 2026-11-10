@@ -363,6 +363,7 @@ consteval auto overloads_of(info) -> vector<info>;
 template <reflection_range R = initializer_list<info>>
   consteval auto make_overload_set(R&&) -> info;
 consteval auto is_explicit_object_parameter(info) -> bool;
+consteval auto object_parameter_of(info) -> info;
 consteval auto is_function_parameter(info) -> bool;
 consteval auto return_type_of(info) -> info;
 consteval auto variable_of(info) -> info;
@@ -622,6 +623,7 @@ enum : unsigned {
   __metafn_is_unique_id,
   __metafn_operator_form_of,
   __metafn_has_parent,
+  __metafn_object_parameter_of,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -2451,6 +2453,14 @@ consteval auto default_argument_of(info r) -> info {
 
 consteval auto is_explicit_object_parameter(info r) -> bool {
   return __metafunction(detail::__metafn_is_explicit_object_parameter, r);
+}
+
+// The object parameter of the non-static member function r: its explicit
+// object parameter, if it has one, and otherwise its implicit object parameter
+// ([over.match.funcs]), whose type is "lvalue reference to cv X" or (for a
+// '&&'-qualified function) "rvalue reference to cv X".
+consteval auto object_parameter_of(info r) -> info {
+  return __metafunction(detail::__metafn_object_parameter_of, r);
 }
 
 consteval auto is_function_parameter(info r) -> bool {
