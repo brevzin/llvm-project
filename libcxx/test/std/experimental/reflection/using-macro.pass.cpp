@@ -15,78 +15,53 @@
 // RUN: %{exec} %t.exe
 
 #include <meta>
-#include <algorithm>
 #include <debugging>
-#include <functional>
-#include <ranges>
-#include <vector>
 
 // using_!(std::chrono::{duration, time_point}) is
-//   using std::chrono::duration; using std::chrono::time_point
-// -- grouped using-declarations, nesting (a::{b::{c, d}, e}), at any scope a
-// using-declaration may appear: the invocation's ';' ends the last one.
+//   using std::chrono::duration, std::chrono::time_point
+// -- one using-declaration, its declarators grouped by a common prefix,
+// nesting (a::{b::{c, d}, e}), at any scope a using-declaration may appear:
+// the invocation's ';' ends it.
 namespace using_detail {
+using std::meta::list_builder;
 using std::meta::punctuator;
-using std::meta::token_kind;
-using std::meta::token;
 using std::meta::token_sequence;
 
-consteval bool is(token t, punctuator p) {
-  return token_kind_of(t) == token_kind::punctuator && punctuator_of(t) == p;
-}
+// Adds the declarators 'names' designates, each qualified by 'scope'. 'names'
+// is a comma-separated list of items, each a name or 'prefix::{ names }'.
+consteval void add_declarators(list_builder& out, token_sequence scope,
+                               token_sequence names) {
+  for (std::size_t pos = 0;;) {
+    // The item runs to the next top-level comma, or to the end.
+    std::size_t comma = names.balanced_find(punctuator::comma, pos);
+    token_sequence item = names.subseq(pos, comma - pos);
+    if (item.empty())
+      std::consteval_error_str("using_", "expected a name");
 
-// A range of tokens back into one sequence.
-consteval token_sequence join(auto&& r) {
-  return std::ranges::fold_left(r, ^^{}, std::plus<>());
-}
-
-// Split at top-level commas.
-consteval auto split_commas(auto&& r) -> std::vector<token_sequence> {
-  std::vector<token_sequence> out(1);
-  int depth = 0;
-  for (token t : r) {
-    if (is(t, punctuator::left_paren) || is(t, punctuator::left_square) ||
-        is(t, punctuator::left_brace))
-      ++depth;
-    else if (is(t, punctuator::right_paren) || is(t, punctuator::right_square) ||
-             is(t, punctuator::right_brace))
-      --depth;
-    else if (depth == 0 && is(t, punctuator::comma)) {
-      out.emplace_back();
-      continue;
+    std::size_t open = item.find(punctuator::left_brace);
+    if (open == token_sequence::npos) {
+      out += scope + item;
+    } else {
+      if (open == 0 || item[open - 1] != punctuator::colon_colon)
+        std::consteval_error_str("using_", "a group must follow '::'");
+      std::size_t close = item.balanced_find(punctuator::right_brace, open + 1);
+      if (close != item.size() - 1)
+        std::consteval_error_str("using_", "nothing may follow a group");
+      add_declarators(out, scope + item.subseq(0, open),
+                      item.subseq(open + 1, close - open - 1));
     }
-    out.back() += t;
-  }
-  return out;
-}
 
-consteval void expand(token_sequence item, token_sequence prefix,
-                      std::vector<token_sequence>& out) {
-  auto lb = std::ranges::find_if(item, [](token t) {
-    return is(t, punctuator::left_brace);
-  });
-  if (lb == item.end()) {
-    out.push_back(prefix + item);
-    return;
+    if (comma == token_sequence::npos)
+      return;
+    pos = comma + 1;
   }
-  if (lb == item.begin() || !is(lb[-1], punctuator::colon_colon))
-    std::consteval_error_str("using_", "a group must follow '::'");
-  if (!is(item[item.size() - 1], punctuator::right_brace))
-    std::consteval_error_str("using_", "nothing may follow a group");
-  token_sequence head = prefix + join(std::ranges::subrange(item.begin(), lb));
-  for (token_sequence inner : split_commas(std::ranges::subrange(lb + 1, item.end() - 1)))
-    expand(inner, head, out);
 }
 }  // namespace using_detail
 
 __macro using_(std::meta::token_sequence names) {
-  std::vector<std::meta::token_sequence> declared;
-  for (auto item : using_detail::split_commas(names))
-    using_detail::expand(item, ^^{}, declared);
-  std::meta::token_sequence out = ^^{};
-  for (std::size_t i = 0; i != declared.size(); ++i)
-    out += (i ? ^^{ ; } : ^^{}) + ^^{ using \(declared[i]) };
-  return out;
+  std::meta::list_builder declarators(^^{ , });
+  using_detail::add_declarators(declarators, ^^{}, names);
+  return ^^{ using $declarators };
 }
 
 
