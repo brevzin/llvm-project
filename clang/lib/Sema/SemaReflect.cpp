@@ -1026,6 +1026,18 @@ ExprResult Sema::ConstevalOnlyRecorder::RecordAndReturn(ExprResult Res) {
   return Res;
 }
 
+// A using-declarator whose target scope is a namespace scope is transparent to
+// the reflection operator (P4466, generalized): naming it reflects the
+// declaration it names, so '^^std::int8_t' works even if '<cstdint>' declares
+// it as 'namespace std { using ::int8_t; }'. Class-scope and block-scope
+// using-declarators stay opaque, and reflecting them is ill-formed. Under
+// entity proxy reflection, every using-declarator reflects as an entity proxy.
+static bool isTransparentUsingShadow(const Sema &S,
+                                     const UsingShadowDecl *USD) {
+  return !S.getLangOpts().EntityProxyReflection &&
+         USD->getDeclContext()->getRedeclContext()->isFileContext();
+}
+
 ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
                                      SourceLocation TemplateKWLoc,
                                      CXXScopeSpec &SS, UnqualifiedId &Id) {
@@ -1091,7 +1103,9 @@ ExprResult Sema::ActOnCXXReflectExpr(SourceLocation OpLoc,
   NamedDecl *ND = Found.getRepresentativeDecl();
 
   if (auto *USD = dyn_cast<UsingShadowDecl>(ND)) {
-    if (getLangOpts().EntityProxyReflection)
+    if (isTransparentUsingShadow(*this, USD))
+      ND = USD->getUnderlyingDecl();
+    else if (getLangOpts().EntityProxyReflection)
       return BuildCXXReflectExpr(OpLoc, NameInfo.getBeginLoc(), USD);
     else {
       // (At the name: an unqualified name has no qualifier to point at.)
@@ -2723,7 +2737,9 @@ Sema::getClonedDeclarationSource(const FunctionDecl *FD) const {
 ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
                                      SourceLocation OperandLoc, QualType T) {
   if (auto *UT = dyn_cast<UsingType>(T)) {
-    if (Context.getLangOpts().EntityProxyReflection)
+    if (isTransparentUsingShadow(*this, UT->getDecl()))
+      T = Context.getQualifiedType(UT->desugar(), T.getLocalQualifiers());
+    else if (Context.getLangOpts().EntityProxyReflection)
       return BuildCXXReflectExpr(OperatorLoc, OperandLoc, UT->getDecl());
     else {
       Diag(OperandLoc, diag::err_reflect_using_declarator);
@@ -2768,6 +2784,18 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc,
       return ExprError();
     }
     D = *UD->shadow_begin();
+  }
+
+  if (auto *USD = dyn_cast<UsingShadowDecl>(D);
+      USD && isTransparentUsingShadow(*this, USD)) {
+    NamedDecl *Target = USD->getUnderlyingDecl();
+    if (auto *TD = dyn_cast<TypeDecl>(Target))
+      return BuildCXXReflectExpr(OperatorLoc, OperandLoc,
+                                 Context.getTypeDeclType(TD));
+    if (auto *Template = dyn_cast<TemplateDecl>(Target))
+      return BuildCXXReflectExpr(OperatorLoc, OperandLoc,
+                                 TemplateName(Template));
+    D = Target;
   }
 
   D = D->getCanonicalDecl();
@@ -2822,8 +2850,9 @@ ExprResult Sema::BuildCXXReflectExpr(SourceLocation OperatorLoc, Expr *E) {
   // Check if this is a reference to a declared entity.
   if (auto *DRE = dyn_cast<DeclRefExpr>(E)) {
     Decl *D = DRE->getDecl();
-    if (auto *F = DRE->getFoundDecl(); isa<UsingShadowDecl>(F))
-      D = F;
+    if (auto *USD = dyn_cast<UsingShadowDecl>(DRE->getFoundDecl());
+        USD && !isTransparentUsingShadow(*this, USD))
+      D = USD;
 
     return BuildCXXReflectExpr(OperatorLoc, DRE->getExprLoc(), D);
   }
