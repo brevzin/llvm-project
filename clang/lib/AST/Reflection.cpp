@@ -177,10 +177,12 @@ OverloadedOperatorKind getOverloadedOperatorForMetaIndex(unsigned Index) {
 }
 
 QualType stripDeducedTypeSugar(const ASTContext &C, QualType T) {
-  if (const auto *DT = dyn_cast<DeducedType>(T)) {
+  // Peel deduced placeholders -- repeatedly: a 'decltype(auto)' function
+  // returning a call to an 'auto' one is deduced as the latter's placeholder.
+  while (const auto *DT = dyn_cast<DeducedType>(T)) {
     if (!DT->isDeduced())
       return T;
-    return C.getQualifiedType(DT->getDeducedType(), T.getLocalQualifiers());
+    T = C.getQualifiedType(DT->getDeducedType(), T.getLocalQualifiers());
   }
   // A placeholder buried under a reference or pointer ('auto&&' deduced as
   // 'int&'): only the canonical type is free of it.

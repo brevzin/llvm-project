@@ -6046,6 +6046,16 @@ namespace {
     // Allow to fill pointee's type locations, e.g.,
     //   int __attr * __attr * __attr *p;
     void VisitPointerTypeLoc(PointerTypeLoc TL) { Visit(TL.getNextTypeLoc()); }
+    // An annotated type (an interpolated reflection, say) carries its
+    // qualifier in the type itself, not in a written scope: if the scope we
+    // have doesn't match, make up locations for the type's own qualifier.
+    template <class TLType> bool initializeIfUnwrittenQualifier(TLType TL) {
+      if (DS.getTypeSpecType() != TST_typename ||
+          DS.getTypeSpecScope().getScopeRep() == TL.getTypePtr()->getQualifier())
+        return false;
+      TL.initialize(Context, DS.getTypeSpecTypeNameLoc());
+      return true;
+    }
     void VisitTypedefTypeLoc(TypedefTypeLoc TL) {
       if (DS.getTypeSpecType() == TST_typename) {
         TypeSourceInfo *TInfo = nullptr;
@@ -6055,6 +6065,8 @@ namespace {
           return;
         }
       }
+      if (initializeIfUnwrittenQualifier(TL))
+        return;
       TL.set(TL.getTypePtr()->getKeyword() != ElaboratedTypeKeyword::None
                  ? DS.getTypeSpecTypeLoc()
                  : SourceLocation(),
@@ -6070,6 +6082,8 @@ namespace {
           return;
         }
       }
+      if (initializeIfUnwrittenQualifier(TL))
+        return;
       TL.set(TL.getTypePtr()->getKeyword() != ElaboratedTypeKeyword::None
                  ? DS.getTypeSpecTypeLoc()
                  : SourceLocation(),
@@ -6085,6 +6099,8 @@ namespace {
           return;
         }
       }
+      if (initializeIfUnwrittenQualifier(TL))
+        return;
       TL.set(TL.getTypePtr()->getKeyword() != ElaboratedTypeKeyword::None
                  ? DS.getTypeSpecTypeLoc()
                  : SourceLocation(),
@@ -6141,16 +6157,42 @@ namespace {
       Sema::GetTypeFromParser(DS.getRepAsType(), &TInfo);
       TL.setUnmodifiedTInfo(TInfo);
     }
+    // A type that arrives as an annotated typename (an interpolated or
+    // substituted reflection, say) rather than through its own type
+    // specifier: copy its source info if it has any, else make some up.
+    // Returns false if the type was spelled with its own specifier.
+    bool fillFromTypename(TypeLoc TL) {
+      if (DS.getTypeSpecType() != TST_typename)
+        return false;
+      TypeSourceInfo *TInfo = nullptr;
+      Sema::GetTypeFromParser(DS.getRepAsType(), &TInfo);
+      if (TInfo) {
+        TypeLoc Src = TInfo->getTypeLoc().getUnqualifiedLoc();
+        if (Src.getTypeLocClass() == TL.getTypeLocClass() &&
+            Src.getType() == TL.getType()) {
+          TL.copy(Src);
+          return true;
+        }
+      }
+      TL.initialize(Context, DS.getTypeSpecTypeLoc());
+      return true;
+    }
     void VisitDecltypeTypeLoc(DecltypeTypeLoc TL) {
+      if (fillFromTypename(TL))
+        return;
       assert(DS.getTypeSpecType() == DeclSpec::TST_decltype);
       TL.setDecltypeLoc(DS.getTypeSpecTypeLoc());
       TL.setRParenLoc(DS.getTypeofParensRange().getEnd());
     }
     void VisitPackIndexingTypeLoc(PackIndexingTypeLoc TL) {
+      if (fillFromTypename(TL))
+        return;
       assert(DS.getTypeSpecType() == DeclSpec::TST_typename_pack_indexing);
       TL.setEllipsisLoc(DS.getEllipsisLoc());
     }
     void VisitUnaryTransformTypeLoc(UnaryTransformTypeLoc TL) {
+      if (fillFromTypename(TL))
+        return;
       assert(DS.isTransformTypeTrait(DS.getTypeSpecType()));
       TL.setKWLoc(DS.getTypeSpecTypeLoc());
       TL.setParensRange(DS.getTypeofParensRange());
@@ -6239,6 +6281,8 @@ namespace {
           return;
         }
       }
+      if (initializeIfUnwrittenQualifier(TL))
+        return;
       TL.setElaboratedKeywordLoc(TL.getTypePtr()->getKeyword() !=
                                          ElaboratedTypeKeyword::None
                                      ? DS.getTypeSpecTypeLoc()
