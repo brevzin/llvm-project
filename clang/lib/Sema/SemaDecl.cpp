@@ -17051,6 +17051,9 @@ bool Sema::canSkipFunctionBody(Decl *D) {
     // "undeduced".
     if (FD->getReturnType()->getContainedDeducedType())
       return false;
+    // Nor the body of an 'operator for': each loop using it is made from it.
+    if (isOperatorFor(FD))
+      return false;
   }
   return Consumer.shouldSkipFunctionBody(D);
 }
