@@ -132,6 +132,10 @@ ArrayRef<FormatToken *> FormatTokenLexer::lex() {
       tryParsePythonComment();
     }
     tryMergePreviousTokens();
+    if (Style.isCpp()) {
+      handleMacroInvocation();
+      handleTokenSequenceLiteral();
+    }
     if (Style.isCSharp()) {
       // This needs to come after tokens have been merged so that C#
       // string literals are correctly identified.
@@ -1605,6 +1609,83 @@ void FormatTokenLexer::readRawToken(FormatToken &Tok) {
 
   if (Tok.is(tok::comment) && isClangFormatOff(Tok.TokenText))
     FormattingDisabled = true;
+}
+
+// A token sequence literal, ^^{ ... } (from the reflection proposals), holds
+// tokens to be parsed somewhere else, often not a complete construct: a
+// parameter list, half a declaration, a lone ',', an unbalanced '('. So it is
+// made one token, kept as written -- like a raw string literal -- and the code
+// around it is formatted with it as an operand.
+void FormatTokenLexer::handleTokenSequenceLiteral() {
+  const auto N = Tokens.size();
+  if (N < 2 || Tokens.back()->isNot(tok::l_brace))
+    return;
+
+  // '^^' lexes as one token only when reflection is enabled.
+  unsigned IntroducerTokens;
+  if (Tokens[N - 2]->is(tok::caretcaret)) {
+    IntroducerTokens = 2;
+  } else if (N >= 3 && Tokens[N - 2]->is(tok::caret) &&
+             Tokens[N - 3]->is(tok::caret) &&
+             !Tokens[N - 2]->hasWhitespaceBefore()) {
+    IntroducerTokens = 3;
+  } else {
+    return;
+  }
+
+  // Find the matching '}', lexing (so that braces in string literals and
+  // comments don't count).
+  const char *const AfterBrace = Lex->getBufferLocation();
+  Token Tok;
+  for (unsigned Depth = 1; Depth > 0;) {
+    if (Lex->LexFromRawLexer(Tok) || Tok.is(tok::eof)) {
+      // Unterminated: leave it to be formatted as code.
+      resetLexer(SourceMgr.getFileOffset(Lex->getSourceLocation(AfterBrace)));
+      return;
+    }
+    if (Tok.is(tok::l_brace))
+      ++Depth;
+    else if (Tok.is(tok::r_brace))
+      --Depth;
+  }
+  const char *const End = Lex->getBufferLocation();
+
+  FormatToken *Literal = Tokens[N - IntroducerTokens];
+  Tokens.resize(N - IntroducerTokens + 1);
+  StringRef Text(Literal->TokenText.data(), End - Literal->TokenText.data());
+  Literal->TokenText = Text;
+  Literal->Tok.setKind(tok::string_literal);
+
+  size_t FirstBreak = Text.find('\n');
+  Literal->ColumnWidth = encoding::columnWidthWithTabs(
+      Text.substr(0, FirstBreak), Literal->OriginalColumn, Style.TabWidth,
+      Encoding);
+  if (size_t LastBreak = Text.rfind('\n'); LastBreak != StringRef::npos) {
+    Literal->IsMultiline = true;
+    Literal->LastLineColumnWidth = encoding::columnWidthWithTabs(
+        Text.substr(LastBreak + 1), 0, Style.TabWidth, Encoding);
+  }
+
+  resetLexer(SourceMgr.getFileOffset(Lex->getSourceLocation(End)));
+}
+
+// A macro invocation (from the token sequence proposal), name!(...), name!{...}
+// or name!<...>(...): merge 'name!' into one identifier, so it is formatted
+// like the name of a function being called rather than 'name !(...)'.
+void FormatTokenLexer::handleMacroInvocation() {
+  const auto N = Tokens.size();
+  if (N < 3)
+    return;
+  FormatToken *Open = Tokens.back();
+  const FormatToken &Bang = *Tokens[N - 2];
+  if (!Open->isOneOf(tok::l_paren, tok::l_brace, tok::less) ||
+      Open->hasWhitespaceBefore() || Bang.isNot(tok::exclaim) ||
+      Tokens[N - 3]->isNot(tok::identifier)) {
+    return;
+  }
+  Tokens.pop_back();
+  tryMergeTokens(2, TT_Unknown); // not if there is whitespace before the '!'
+  Tokens.push_back(Open);
 }
 
 void FormatTokenLexer::resetLexer(unsigned Offset) {

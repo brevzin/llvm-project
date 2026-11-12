@@ -137,6 +137,9 @@ private:
   bool FormattingDisabled;
   llvm::Regex FormatOffRegex; // For one line.
 
+  void handleTokenSequenceLiteral();
+  void handleMacroInvocation();
+
   llvm::Regex MacroBlockBeginRegex;
   llvm::Regex MacroBlockEndRegex;
 
