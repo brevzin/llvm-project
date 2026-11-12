@@ -2332,7 +2332,13 @@ private:
       for (FormatToken *Previous = Current.Previous;
            Previous && Previous->isOneOf(tok::star, tok::amp);
            Previous = Previous->Previous) {
-        Previous->setType(TT_PointerOrReference);
+        // With no operand after it, it can only be a declarator operator --
+        // even where the parser finalized '*' and '&' as binary operators (in
+        // a requires-clause: 'requires(!C<char *>)').
+        if (Previous->isTypeFinalized())
+          Previous->setFinalizedType(TT_PointerOrReference);
+        else
+          Previous->setType(TT_PointerOrReference);
       }
       if (Line.MustBeDeclaration &&
           Contexts.front().ContextType != Context::CtorInitializer) {
