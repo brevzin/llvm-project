@@ -14193,8 +14193,9 @@ public:
       bool ForDefaultArgumentSubstitution = false);
 
   /// Determine whether a member template living in \p DC was injected into a
-  /// class template specialization (e.g. by a consteval block) rather than
-  /// instantiated from the corresponding member of the class template pattern.
+  /// class template specialization, or into a class nested in one, (e.g. by a
+  /// consteval block) rather than instantiated from the corresponding member
+  /// of the class's pattern.
   ///
   /// Such a member is parsed directly into the specialization, so its template
   /// parameters start at depth 0 and the enclosing specialization's arguments

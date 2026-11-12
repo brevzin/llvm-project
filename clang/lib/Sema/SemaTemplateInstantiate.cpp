@@ -284,6 +284,14 @@ HandleClassTemplateSpec(const ClassTemplateSpecializationDecl *ClassTemplSpec,
     if (ClassTemplSpec->getSpecializedTemplate()->isMemberSpecialization())
       return Response::Done();
 
+    // If this class template was injected into a class template
+    // specialization (or a class nested in one), its template parameters are
+    // at depth 0 and we should not add the enclosing arguments.
+    if (Sema::isInjectedIntoSpecialization(
+            ClassTemplSpec->getDeclContext(),
+            ClassTemplSpec->getSpecializedTemplate()))
+      return Response::Done();
+
     // If this was instantiated from a partial template specialization, we need
     // to get the next level of declaration context from the partial
     // specialization, as the ClassTemplateSpecializationDecl's
@@ -622,8 +630,8 @@ Response HandleGenericDeclContext(const Decl *CurDecl) {
 
 bool Sema::isInjectedIntoSpecialization(
     const DeclContext *DC, const RedeclarableTemplateDecl *Pattern) {
-  const auto *Spec = dyn_cast_or_null<ClassTemplateSpecializationDecl>(DC);
-  if (!Spec || !Pattern)
+  const auto *RD = dyn_cast_or_null<CXXRecordDecl>(DC);
+  if (!RD || !Pattern)
     return false;
 
   // A member instantiated from the class template pattern keeps a link back to
@@ -638,11 +646,16 @@ bool Sema::isInjectedIntoSpecialization(
   if (!Name)
     return false;
 
-  ClassTemplateDecl *CTD = Spec->getSpecializedTemplate();
-  if (!CTD)
-    return false;
-
-  const CXXRecordDecl *PatternRD = CTD->getTemplatedDecl();
+  // The class's pattern: the class template's, for a specialization; the
+  // member class's, for a class nested in a specialization (whose members are
+  // instantiated with the enclosing specialization's arguments just the same).
+  const CXXRecordDecl *PatternRD = nullptr;
+  if (const auto *Spec = dyn_cast<ClassTemplateSpecializationDecl>(RD)) {
+    if (ClassTemplateDecl *CTD = Spec->getSpecializedTemplate())
+      PatternRD = CTD->getTemplatedDecl();
+  } else {
+    PatternRD = RD->getInstantiatedFromMemberClass();
+  }
   return PatternRD && PatternRD->lookup(Name).empty();
 }
 
