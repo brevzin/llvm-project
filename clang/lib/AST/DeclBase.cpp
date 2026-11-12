@@ -1133,16 +1133,18 @@ bool Decl::AccessDeclContextCheck() const {
   // Suppress this check if any of the following hold:
   // 1. this is the translation unit (and thus has no parent)
   // 2. this is a template parameter (and thus doesn't belong to its context)
-  // 3. this is a non-type template parameter
+  // 3. this is a non-type or template template parameter
   // 4. the context is not a record
   // 5. it's invalid
-  // 6. it's a C++0x static_assert.
+  // 6. it's a C++0x static_assert or a consteval block.
   // 7. it's a block literal declaration
   // 8. it's a temporary with lifetime extended due to being default value.
   if (isa<TranslationUnitDecl>(this) || isa<TemplateTypeParmDecl>(this) ||
-      isa<NonTypeTemplateParmDecl>(this) || !getDeclContext() ||
+      isa<NonTypeTemplateParmDecl>(this) ||
+      isa<TemplateTemplateParmDecl>(this) || !getDeclContext() ||
       !isa<CXXRecordDecl>(getDeclContext()) || isInvalidDecl() ||
-      isa<StaticAssertDecl>(this) || isa<BlockDecl>(this) ||
+      isa<StaticAssertDecl>(this) || isa<ConstevalBlockDecl>(this) ||
+      isa<BlockDecl>(this) ||
       // FIXME: a ParmVarDecl can have ClassTemplateSpecialization
       // as DeclContext (?).
       isa<ParmVarDecl>(this) ||

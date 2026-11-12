@@ -1491,6 +1491,8 @@ bool allowIndex(CodeCompletionContext &CC) {
     return true;
   case NestedNameSpecifier::Kind::MicrosoftSuper:
   case NestedNameSpecifier::Kind::Type:
+  case NestedNameSpecifier::Kind::Splice:
+  case NestedNameSpecifier::Kind::SpliceWithTemplate:
     return false;
   }
   llvm_unreachable("invalid NestedNameSpecifier kind");

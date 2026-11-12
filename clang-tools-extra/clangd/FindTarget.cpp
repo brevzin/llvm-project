@@ -485,6 +485,10 @@ public:
     case NestedNameSpecifier::Kind::MicrosoftSuper:
       add(NNS.getAsMicrosoftSuper(), Flags);
       return;
+    case NestedNameSpecifier::Kind::Splice:
+    case NestedNameSpecifier::Kind::SpliceWithTemplate:
+      // '[: r :]::' -- what it designates is a value, not a name to target.
+      return;
     case NestedNameSpecifier::Kind::Null:
       llvm_unreachable("unexpected null nested name specifier");
     }

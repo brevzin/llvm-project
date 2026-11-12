@@ -28,6 +28,8 @@ static unsigned getNameSpecifierNestingLevel(QualType QType) {
       return NameSpecifierNestingLevel;
     case NestedNameSpecifier::Kind::Global:
     case NestedNameSpecifier::Kind::MicrosoftSuper:
+    case NestedNameSpecifier::Kind::Splice:
+    case NestedNameSpecifier::Kind::SpliceWithTemplate:
       return NameSpecifierNestingLevel + 1;
     case NestedNameSpecifier::Kind::Namespace:
       Qualifier = Qualifier.getAsNamespaceAndPrefix().Prefix;

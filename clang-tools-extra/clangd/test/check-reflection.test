@@ -1,0 +1,40 @@
+// Copyright 2026 Jump Trading LLC
+//
+// clangd on code using reflection (P2996) and consteval blocks: every feature
+// at every token, without crashing.
+//
+// RUN: rm -rf %t && mkdir -p %t
+// RUN: grep -v '^//' %s > %t/test.cpp
+// RUN: echo '-std=c++26' > %t/compile_flags.txt
+// RUN: echo '-freflection' >> %t/compile_flags.txt
+// RUN: clangd -enable-config=0 -check=%t/test.cpp 2>&1 | FileCheck %s
+
+// CHECK: Building AST...
+// CHECK-NOT: Stack dump
+// CHECK: All checks completed
+
+namespace N {
+int x;
+}
+
+// A splice as a nested-name-specifier.
+int y = [:^^N:]::x;
+
+// A consteval block as a class member (it has no access).
+struct S {
+  int a;
+  consteval {}
+};
+
+// A function reflecting itself: the reflection refers to it, and traversing
+// the reflection mustn't traverse the function (again, and again).
+void f() {
+  constexpr auto r = ^^f;
+  (void)r;
+}
+
+// A template template parameter, whose context is the class.
+struct T {
+  template <template <class> class TT>
+  void m(TT<int>*);
+};

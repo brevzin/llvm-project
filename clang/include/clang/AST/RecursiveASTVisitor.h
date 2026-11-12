@@ -3198,22 +3198,18 @@ DEF_TRAVERSE_STMT(CXXReflectExpr, {
       TRY_TO(TraverseType(RV.getReflectedType()));
       break;
     }
-    case ReflectionKind::Declaration: {
-      TRY_TO(TraverseDecl(RV.getReflectedDecl()));
-      break;
-    }
     case ReflectionKind::Template: {
       TRY_TO(TraverseTemplateName(RV.getReflectedTemplate()));
       break;
     }
-    case ReflectionKind::EntityProxy: {
-      TRY_TO(TraverseDecl(RV.getReflectedEntityProxy()));
+    // '^^x' refers to x, as a DeclRefExpr does: its declaration is not part
+    // of the expression, and traversing it from here (say, into a function's
+    // body, which may reflect the function again) visits code that is
+    // elsewhere -- without end, if it reflects back.
+    case ReflectionKind::Declaration:
+    case ReflectionKind::EntityProxy:
+    case ReflectionKind::Parameter:
       break;
-    }
-    case ReflectionKind::Parameter: {
-      TRY_TO(TraverseDecl(RV.getReflectedParameter()));
-      break;
-    }
     case ReflectionKind::Annotation: {
       TRY_TO(TraverseStmt(RV.getReflectedAnnotation()->getArg()));
       break;
