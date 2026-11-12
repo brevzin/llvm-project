@@ -24,6 +24,7 @@
 #include "clang/AST/DependenceFlags.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/Reflection.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
 #include "clang/AST/NestedNameSpecifier.h"
@@ -533,10 +534,58 @@ void ASTStmtReader::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
   assert(NumInterpolationExprs == E->getNumInterpolationExprs() &&
          "wrong number of token sequence interpolation expressions");
   E->setOperatorLoc(Record.readSourceLocation());
-  APValue V = Record.readAPValue();
-  E->setTokenSequence(V.getTokenSequence());
+
+  ASTContext &Ctx = Record.getContext();
+  const SourceManager &SM = Ctx.getSourceManager();
+  unsigned NumTokens = Record.readUInt32();
+  SmallVector<Token, 16> Toks(NumTokens);
+  for (Token &T : Toks) {
+    T.startToken();
+    T.setLocation(Record.readSourceLocation());
+    T.setKind(static_cast<tok::TokenKind>(Record.readInt()));
+    T.setFlag(static_cast<Token::TokenFlags>(Record.readInt()));
+    if (T.isAnnotation()) {
+      T.setAnnotationEndLoc(Record.readSourceLocation());
+      continue;
+    }
+    T.setLength(Record.readInt());
+    IdentifierInfo *II = Record.readIdentifier();
+    if (T.isLiteral()) {
+      // The spelling is wherever the token was spelled (a literal's data is
+      // read from there when it isn't set, but some readers expect it).
+      bool Invalid = false;
+      const char *Data =
+          SM.getCharacterData(SM.getSpellingLoc(T.getLocation()), &Invalid);
+      if (!Invalid)
+        T.setLiteralData(Data);
+    } else if (II) {
+      T.setIdentifierInfo(II);
+    }
+  }
+
+  // Each interpolation annotation stands for the next interpolation
+  // expression.
+  SmallVector<Expr *, 4> Interpolations;
   for (unsigned I = 0; I != NumInterpolationExprs; ++I)
-    E->setInterpolationExpr(I, Record.readSubExpr());
+    Interpolations.push_back(Record.readSubExpr());
+  unsigned NextInterpolation = 0;
+  for (Token &T : Toks)
+    if (T.is(tok::annot_token_seq_expr) &&
+        NextInterpolation != Interpolations.size())
+      T.setAnnotationValue(Interpolations[NextInterpolation++]);
+  E->setTokenSequence(CreateTokenSequenceData(Ctx, Toks));
+
+  unsigned NumBindings = Record.readUInt32();
+  if (NumBindings) {
+    auto *Bindings = Ctx.Allocate<TokenSequenceParamBinding>(NumBindings);
+    for (unsigned I = 0; I != NumBindings; ++I) {
+      Bindings[I].TokenIndex = Record.readUInt32();
+      Bindings[I].Param = Record.readDeclAs<NamedDecl>();
+    }
+    E->ParamBindings = Bindings;
+    E->NumParamBindings = NumBindings;
+  }
+
   E->setOperandRange(Record.readSourceRange());
 }
 
@@ -586,6 +635,7 @@ void ASTStmtReader::VisitCXXBuiltinReportTokensExpr(
 
 void ASTStmtReader::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
   VisitExpr(E);
+  Record.skipInts(1); // NumArgs, read when the expression was created
   E->setKwLoc(Record.readSourceLocation());
   E->setLParenLoc(Record.readSourceLocation());
   E->setRParenLoc(Record.readSourceLocation());
@@ -598,6 +648,7 @@ void ASTStmtReader::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *E) {
 
 void ASTStmtReader::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *E) {
   VisitExpr(E);
+  Record.skipInts(1); // NumArgs, read when the expression was created
   E->setKwLoc(Record.readSourceLocation());
   E->setLParenLoc(Record.readSourceLocation());
   E->setRParenLoc(Record.readSourceLocation());
@@ -610,6 +661,7 @@ void ASTStmtReader::VisitCXXBuiltinStrLiteralExpr(CXXBuiltinStrLiteralExpr *E) {
 
 void ASTStmtReader::VisitCXXBuiltinTokenizeExpr(CXXBuiltinTokenizeExpr *E) {
   VisitExpr(E);
+  Record.skipInts(1); // NumArgs, read when the expression was created
   E->setKwLoc(Record.readSourceLocation());
   E->setLParenLoc(Record.readSourceLocation());
   E->setRParenLoc(Record.readSourceLocation());

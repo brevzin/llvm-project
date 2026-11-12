@@ -512,12 +512,40 @@ void ASTStmtWriter::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
   VisitExpr(E);
   Record.writeUInt32(E->getNumInterpolationExprs());
   Record.AddSourceLocation(E->getOperatorLoc());
-  // FIXME: Token sequences currently round-trip through PCH/modules as an
-  // empty token sequence (see PropertiesBase.td). Implement proper Token array
-  // serialization when this becomes load-bearing.
-  Record.AddAPValue(E->getValue());
+
+  // The tokens, as written. An interpolation's annotation token stands for
+  // one of the interpolation expressions (the children, in token order), so
+  // it is written without its value and refers to them when read.
+  TokenSequenceData Toks = E->getTokenSequence();
+  Record.writeUInt32(Toks.size());
+  for (const Token &T : Toks) {
+    Record.AddSourceLocation(T.getLocation());
+    // FIXME: Other annotation tokens (which a literal written in generated
+    // code could hold) aren't serialized yet; they read as tok::unknown.
+    bool Supported = !T.isAnnotation() || T.is(tok::annot_token_seq_expr);
+    Record.push_back(Supported ? T.getKind() : tok::unknown);
+    Record.push_back(T.getFlags());
+    if (!Supported) {
+      Record.push_back(0);
+      Record.AddIdentifierRef(nullptr);
+    } else if (T.isAnnotation()) {
+      Record.AddSourceLocation(T.getAnnotationEndLoc());
+    } else {
+      Record.push_back(T.getLength());
+      Record.AddIdentifierRef(T.getIdentifierInfo());
+    }
+  }
+
   for (Stmt *S : E->children())
     Record.AddStmt(S);
+
+  ArrayRef<TokenSequenceParamBinding> Bindings = E->getParamBindings();
+  Record.writeUInt32(Bindings.size());
+  for (const TokenSequenceParamBinding &B : Bindings) {
+    Record.writeUInt32(B.TokenIndex);
+    Record.AddDeclRef(B.Param);
+  }
+
   Record.AddSourceRange(E->getOperandRange());
   Code = serialization::EXPR_TOKEN_SEQUENCE;
 }
@@ -708,8 +736,12 @@ void ASTStmtWriter::VisitCXXExpansionStmt(CXXExpansionStmt *S) {
   Record.AddStmt(S->getSizeExpr());
   Record.AddStmt(S->getBody());
 
-  Record.writeUInt32(S->getNumInstantiations());
-  for (size_t k = 0; k < S->getNumInstantiations(); ++k)
+  // A statement whose size is dependent (in a template) has no
+  // instantiations yet.
+  unsigned NumInstantiations =
+      S->hasDependentSize() ? 0 : S->getNumInstantiations();
+  Record.writeUInt32(NumInstantiations);
+  for (size_t k = 0; k < NumInstantiations; ++k)
     Record.AddStmt(S->getInstantiation(k));
 }
 
@@ -722,7 +754,7 @@ void ASTStmtWriter::VisitCXXIndeterminateExpansionStmt(
 
 void ASTStmtWriter::VisitCXXIterableExpansionStmt(CXXIterableExpansionStmt *S) {
   VisitCXXExpansionStmt(S);
-  Record.writeUInt32(S->getNumInstantiations());
+  Record.writeUInt32(S->hasDependentSize() ? 0 : S->getNumInstantiations());
 
   Code = serialization::STMT_ITERABLE_EXPANSION;
 }
@@ -2573,6 +2605,8 @@ void ASTStmtWriter::VisitTypeTraitExpr(TypeTraitExpr *E) {
 
   if (E->TypeTraitExprBits.IsBooleanTypeTrait)
     Record.push_back(E->TypeTraitExprBits.Value);
+  else if (E->isValueDependent()) // no value yet (in a template)
+    Record.AddAPValue(APValue());
   else
     Record.AddAPValue(E->getAPValue());
 

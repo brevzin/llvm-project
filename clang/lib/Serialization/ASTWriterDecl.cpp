@@ -1392,6 +1392,7 @@ void ASTDeclWriter::VisitParmVarDecl(ParmVarDecl *D) {
   ParmVarDeclBits.addBit(D->hasInheritedDefaultArg());
   ParmVarDeclBits.addBit(D->hasUninstantiatedDefaultArg());
   ParmVarDeclBits.addBit(D->getExplicitObjectParamThisLoc().isValid());
+  ParmVarDeclBits.addBit(D->isMacroRawPack());
   Record.push_back(ParmVarDeclBits);
 
   if (D->hasUninstantiatedDefaultArg())
@@ -2726,9 +2727,10 @@ void ASTWriter::WriteDeclAbbrevs() {
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // ScopeIndex
   Abv->Add(BitCodeAbbrevOp(
       BitCodeAbbrevOp::Fixed,
-      19)); // Packed Parm Var Decl bits: IsObjCMethodParameter, ScopeDepth,
+      20)); // Packed Parm Var Decl bits: IsObjCMethodParameter, ScopeDepth,
             // ObjCDeclQualifier, KNRPromoted,
-            // HasInheritedDefaultArg, HasUninstantiatedDefaultArg
+            // HasInheritedDefaultArg, HasUninstantiatedDefaultArg,
+            // HasExplicitObjectParameter, IsMacroRawPack
   // Type Source Info
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Array));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // TypeLoc

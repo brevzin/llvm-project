@@ -1768,6 +1768,8 @@ void ASTDeclReader::VisitParmVarDecl(ParmVarDecl *PD) {
   if (ParmVarDeclBits.getNextBit()) // Valid explicit object parameter
     PD->ExplicitObjectParameterIntroducerLoc = Record.readSourceLocation();
 
+  PD->ParmVarDeclBits.IsMacroRawPack = ParmVarDeclBits.getNextBit();
+
   // FIXME: If this is a redeclaration of a function from another module, handle
   // inheritance of default arguments.
 }
