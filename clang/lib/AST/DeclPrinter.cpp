@@ -78,6 +78,8 @@ namespace {
     void VisitTopLevelStmtDecl(TopLevelStmtDecl *D);
     void VisitImportDecl(ImportDecl *D);
     void VisitStaticAssertDecl(StaticAssertDecl *D);
+    void VisitConstevalBlockDecl(ConstevalBlockDecl *D);
+    void VisitExpansionStmtDecl(ExpansionStmtDecl *D);
     void VisitNamespaceDecl(NamespaceDecl *D);
     void VisitUsingDirectiveDecl(UsingDirectiveDecl *D);
     void VisitNamespaceAliasDecl(NamespaceAliasDecl *D);
@@ -539,8 +541,11 @@ void DeclPrinter::VisitDeclContext(DeclContext *DC, bool Indent) {
         Terminator = ";";
     } else if (isa<NamespaceDecl, LinkageSpecDecl, ObjCImplementationDecl,
                    ObjCInterfaceDecl, ObjCProtocolDecl, ObjCCategoryImplDecl,
-                   ObjCCategoryDecl, HLSLBufferDecl>(*D))
+                   ObjCCategoryDecl, HLSLBufferDecl, ExpansionStmtDecl>(*D))
       Terminator = nullptr;
+    else if (auto *CB = dyn_cast<ConstevalBlockDecl>(*D))
+      // 'consteval { ... }' needs none; 'name!(...);' does.
+      Terminator = CB->getDeclMacroInvocation() ? ";" : nullptr;
     else if (isa<EnumConstantDecl>(*D)) {
       DeclContext::decl_iterator Next = D;
       ++Next;
@@ -555,7 +560,9 @@ void DeclPrinter::VisitDeclContext(DeclContext *DC, bool Indent) {
         ((isa<FunctionDecl>(*D) &&
           cast<FunctionDecl>(*D)->doesThisDeclarationHaveABody()) ||
          (isa<FunctionTemplateDecl>(*D) &&
-          cast<FunctionTemplateDecl>(*D)->getTemplatedDecl()->doesThisDeclarationHaveABody())))
+          cast<FunctionTemplateDecl>(*D)->getTemplatedDecl()->doesThisDeclarationHaveABody()) ||
+         (isa<ConstevalBlockDecl>(*D) &&
+          !cast<ConstevalBlockDecl>(*D)->getDeclMacroInvocation())))
       ; // StmtPrinter already added '\n' after CompoundStmt.
     else
       Out << "\n";
@@ -1058,6 +1065,42 @@ void DeclPrinter::VisitStaticAssertDecl(StaticAssertDecl *D) {
     E->printPretty(Out, nullptr, Policy, Indentation, "\n", &Context);
   }
   Out << ")";
+}
+
+// 'consteval { ... }' -- held as a call to a lambda with that body -- or a
+// declaration macro invocation awaiting instantiation, 'name!(...)'.
+void DeclPrinter::VisitConstevalBlockDecl(ConstevalBlockDecl *D) {
+  if (CXXMacroInvocationExpr *E = D->getDeclMacroInvocation()) {
+    E->printPretty(Out, nullptr, Policy, Indentation, "\n", &Context);
+    return;
+  }
+  const Expr *E = D->getEvaluatingExpr();
+  if (const auto *CE = dyn_cast_or_null<ConstantExpr>(E))
+    E = CE->getSubExpr();
+  // The lambda is the call's callee, or, called through its operator(), the
+  // call's object argument.
+  const Expr *Callee = nullptr;
+  if (const auto *OC = dyn_cast_or_null<CXXOperatorCallExpr>(
+          E ? E->IgnoreImplicit() : nullptr))
+    Callee = OC->getNumArgs() ? OC->getArg(0) : nullptr;
+  else if (const auto *Call =
+               dyn_cast_or_null<CallExpr>(E ? E->IgnoreImplicit() : nullptr))
+    Callee = Call->getCallee();
+  const auto *Lambda =
+      Callee ? dyn_cast<LambdaExpr>(Callee->IgnoreImplicit()) : nullptr;
+  Out << "consteval";
+  if (Lambda)
+    Lambda->getBody()->printPrettyControlled(Out, nullptr, Policy, Indentation,
+                                             "\n", &Context);
+  else
+    Out << " { ... }\n";
+}
+
+// The expansion statement a template holds as a declaration (so that it can be
+// expanded when instantiated): 'template for (...)'.
+void DeclPrinter::VisitExpansionStmtDecl(ExpansionStmtDecl *D) {
+  if (CXXExpansionStmt *S = D->getStmt())
+    S->printPretty(Out, nullptr, Policy, Indentation, "\n", &Context);
 }
 
 //----------------------------------------------------------------------------

@@ -107,6 +107,29 @@ namespace {
       IndentLevel -= (PrefixWidth + 1) / 2;
     }
 
+    // The range of an expansion statement, 'template for (... : range)', as
+    // its expansion variable's initializer selects from it.
+    void PrintExpansionRange(CXXExpansionStmt *Node) {
+      const VarDecl *V = Node->getExpansionVariable();
+      const Expr *Init = V && V->getInit() ? V->getInit()->IgnoreImplicit()
+                                           : nullptr;
+      Expr *Range = nullptr;
+      if (auto *E = dyn_cast_or_null<CXXIndeterminateExpansionSelectExpr>(Init))
+        Range = E->getRangeExpr();
+      else if (auto *E = dyn_cast_or_null<CXXExpansionInitListSelectExpr>(Init))
+        Range = E->getRangeExpr();
+      else if (auto *E = dyn_cast_or_null<CXXIterableExpansionSelectExpr>(Init))
+        Range = E->getRangeVar() ? E->getRangeVar()->getInit() : nullptr;
+      else if (auto *E =
+                   dyn_cast_or_null<CXXDestructurableExpansionSelectExpr>(Init))
+        Range = E->getDecompositionDecl() ? E->getDecompositionDecl()->getInit()
+                                          : nullptr;
+      if (Range)
+        PrintExpr(Range);
+      else
+        OS << "<range>";
+    }
+
     void PrintControlledStmt(Stmt *S) {
       if (auto *CS = dyn_cast<CompoundStmt>(S)) {
         OS << " ";
@@ -259,6 +282,12 @@ void StmtPrinter::VisitNullStmt(NullStmt *Node) {
 }
 
 void StmtPrinter::VisitDeclStmt(DeclStmt *Node) {
+  // An expansion statement in a template is held as a declaration: print the
+  // statement.
+  if (Node->isSingleDecl())
+    if (auto *ESD = dyn_cast<ExpansionStmtDecl>(Node->getSingleDecl()))
+      if (CXXExpansionStmt *S = ESD->getStmt())
+        return Visit(S);
   Indent();
   PrintRawDeclStmt(Node);
   // Certain pragma declarations shouldn't have a semi-colon after them.
@@ -324,7 +353,7 @@ void StmtPrinter::PrintRawIfStmt(IfStmt *If) {
     return;
   }
 
-  OS << "if (";
+  OS << (If->isConstexpr() ? "if constexpr (" : "if (");
   if (If->getInit())
     PrintInitStmt(If->getInit(), 4);
   if (const DeclStmt *DS = If->getConditionVariableDeclStmt())
@@ -1335,6 +1364,13 @@ void StmtPrinter::VisitEmbedExpr(EmbedExpr *Node) {
 }
 
 void StmtPrinter::VisitConstantExpr(ConstantExpr *Node) {
+  // A constant with nothing written for it (an interpolated value, say):
+  // print the value.
+  if (auto *OVE = dyn_cast<OpaqueValueExpr>(Node->getSubExpr());
+      OVE && !OVE->getSourceExpr() && Node->hasAPValueResult()) {
+    Node->getAPValueResult().printPretty(OS, Policy, Node->getType(), Context);
+    return;
+  }
   PrintExpr(Node->getSubExpr());
 }
 
@@ -2896,13 +2932,142 @@ void StmtPrinter::VisitCoyieldExpr(CoyieldExpr *S) {
 }
 
 void StmtPrinter::VisitCXXReflectExpr(CXXReflectExpr *S) {
-  // FIXME: Make this better.
-  OS << "^^(...)";
+  if (S->hasDependentSubExpr()) {
+    OS << "^^";
+    PrintExpr(S->getDependentSubExpr());
+    return;
+  }
+  // The operand as an entity: a type, a declaration, a template, a namespace.
+  APValue R = S->getReflection();
+  auto Name = [&](const Decl *D) {
+    if (const auto *ND = dyn_cast_or_null<NamedDecl>(D)) {
+      ND->printQualifiedName(OS, Policy);
+      return true;
+    }
+    return false;
+  };
+  switch (R.getReflectionKind()) {
+  case ReflectionKind::Null:
+    OS << "std::meta::info{}";
+    return;
+  case ReflectionKind::Type:
+    OS << "^^";
+    R.getReflectedType().print(OS, Policy);
+    return;
+  case ReflectionKind::Declaration:
+    OS << "^^";
+    if (!Name(R.getReflectedDecl()))
+      OS << "(...)";
+    return;
+  case ReflectionKind::Template:
+    OS << "^^";
+    R.getReflectedTemplate().print(OS, Policy);
+    return;
+  case ReflectionKind::Namespace:
+    OS << "^^";
+    if (!Name(R.getReflectedNamespace()))
+      OS << "::";
+    return;
+  case ReflectionKind::Parameter:
+    OS << "^^";
+    if (!Name(R.getReflectedParameter()))
+      OS << "(...)";
+    return;
+  default:
+    OS << "^^(...)";
+    return;
+  }
 }
 
 void StmtPrinter::VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *S) {
-  // FIXME: Make this better — print the actual tokens.
-  OS << "^^{...}";
+  // The tokens as written -- spaced, and broken into lines, as they were in
+  // the source (when we know where that is) -- with each interpolation as
+  // '$name' or '${ e }'.
+  const SourceManager *SM = Context ? &Context->getSourceManager() : nullptr;
+  TokenSequenceData Toks = S->getTokenSequence();
+
+  // A multi-line literal keeps its lines, indented relative to its
+  // least-indented line. (Lines are the source's: an interpolation's token
+  // doesn't record that it started one.)
+  auto Line = [&](const Token &T) {
+    return T.getLocation().isValid() ? SM->getSpellingLineNumber(T.getLocation())
+                                     : 0;
+  };
+  auto Column = [&](const Token &T) {
+    return SM->getSpellingColumnNumber(T.getLocation());
+  };
+  bool MultiLine = false;
+  unsigned BaseColumn = ~0u;
+  if (SM && !Toks.empty()) {
+    unsigned Prev = SM->getSpellingLineNumber(S->getOperatorLoc());
+    for (const Token &T : Toks) {
+      unsigned L = Line(T);
+      if (L && L != Prev) {
+        MultiLine = true;
+        BaseColumn = std::min(BaseColumn, Column(T));
+      }
+      if (L)
+        Prev = L;
+    }
+  }
+
+  OS << "^^{";
+  bool First = true;
+  unsigned PrevLine = SM ? SM->getSpellingLineNumber(S->getOperatorLoc()) : 0;
+  for (const Token &T : Toks) {
+    unsigned L = MultiLine ? Line(T) : 0;
+    if (L && L != PrevLine) {
+      OS << NL;
+      Indent(1);
+      unsigned Col = Column(T);
+      OS.indent(Col > BaseColumn ? Col - BaseColumn : 0);
+    } else if (First || T.hasLeadingSpace()) {
+      OS << ' ';
+    }
+    if (L)
+      PrevLine = L;
+    First = false;
+
+    if (T.is(tok::annot_token_seq_expr)) {
+      auto *E = static_cast<Expr *>(T.getAnnotationValue());
+      auto *DRE = dyn_cast_or_null<DeclRefExpr>(E ? E->IgnoreImplicit() : E);
+      if (DRE && !DRE->hasQualifier() && DRE->getDecl()->getIdentifier()) {
+        OS << '$' << DRE->getDecl()->getName();
+      } else if (isa_and_nonnull<CXXTokenInterpolationListExpr>(E)) {
+        PrintExpr(E);
+      } else {
+        OS << "${ ";
+        if (E)
+          PrintExpr(E);
+        OS << " }";
+      }
+    } else if (T.is(tok::annot_typename)) {
+      OS << "${ ";
+      QualType::getFromOpaquePtr(T.getAnnotationValue()).print(OS, Policy);
+      OS << " }";
+    } else if (T.isAnnotation()) {
+      OS << "${ ... }";
+    } else if (T.isLiteral() && T.getLiteralData()) {
+      OS << StringRef(T.getLiteralData(), T.getLength());
+    } else if (T.isLiteral() && SM && T.getLocation().isValid()) {
+      OS << Lexer::getSpelling(T, *SM, Context->getLangOpts());
+    } else if (const IdentifierInfo *II = T.getIdentifierInfo()) {
+      OS << II->getName();
+    } else if (const char *P = tok::getPunctuatorSpelling(T.getKind())) {
+      OS << P;
+    } else if (const char *K = tok::getKeywordSpelling(T.getKind())) {
+      OS << K;
+    } else {
+      OS << tok::getTokenName(T.getKind());
+    }
+  }
+  if (MultiLine) {
+    OS << NL;
+    Indent();
+  } else {
+    OS << ' ';
+  }
+  OS << '}';
 }
 
 void StmtPrinter::VisitCXXMetafunctionExpr(CXXMetafunctionExpr *S) {
@@ -2936,7 +3101,7 @@ void StmtPrinter::VisitCXXBuiltinReportTokensExpr(
 
 void StmtPrinter::VisitCXXTokenInterpolationListExpr(
     CXXTokenInterpolationListExpr *S) {
-  OS << "\\(";
+  OS << "${ ";
   for (unsigned I = 0; I < S->getNumElements(); ++I) {
     if (I > 0)
       OS << ", ";
@@ -2946,7 +3111,7 @@ void StmtPrinter::VisitCXXTokenInterpolationListExpr(
     OS << "; ";
     PrintExpr(Sep);
   }
-  OS << ")";
+  OS << " }";
 }
 
 void StmtPrinter::VisitCXXBuiltinIdExpr(CXXBuiltinIdExpr *S) {
@@ -3004,7 +3169,10 @@ void StmtPrinter::VisitCXXBuiltinStringizeExpr(CXXBuiltinStringizeExpr *S) {
 }
 
 void StmtPrinter::VisitCXXSpliceExpr(CXXSpliceExpr *S) {
-  OS << "[: ... :]";
+  OS << "[: ";
+  if (Expr *E = S->getSplice() ? S->getSplice()->getOperand() : nullptr)
+    PrintExpr(E);
+  OS << " :]";
 }
 
 void StmtPrinter::VisitCXXDependentMemberSpliceExpr(
@@ -3035,8 +3203,7 @@ void StmtPrinter::VisitCXXIndeterminateExpansionStmt(
   SubPolicy.SuppressInitializers = true;
   Node->getExpansionVariable()->print(OS, SubPolicy, IndentLevel);
   OS << " : ";
-  // TODO(P2996).
-  OS << "<range>"; //PrintExpr(Node->getRange());
+  PrintExpansionRange(Node);
   OS << ")";
   PrintControlledStmt(Node->getBody());
 }
@@ -3050,8 +3217,7 @@ void StmtPrinter::VisitCXXDestructurableExpansionStmt(
   SubPolicy.SuppressInitializers = true;
   Node->getExpansionVariable()->print(OS, SubPolicy, IndentLevel);
   OS << " : ";
-  // TODO(P2996).
-  OS << "<range>"; //PrintExpr(Node->getRange());
+  PrintExpansionRange(Node);
   OS << ")";
   PrintControlledStmt(Node->getBody());
 }
@@ -3065,8 +3231,7 @@ void StmtPrinter::VisitCXXIterableExpansionStmt(
   SubPolicy.SuppressInitializers = true;
   Node->getExpansionVariable()->print(OS, SubPolicy, IndentLevel);
   OS << " : ";
-  // TODO(P2996).
-  OS << "<range>"; //PrintExpr(Node->getRange());
+  PrintExpansionRange(Node);
   OS << ")";
   PrintControlledStmt(Node->getBody());
 }
@@ -3080,8 +3245,7 @@ void StmtPrinter::VisitCXXInitListExpansionStmt(
   SubPolicy.SuppressInitializers = true;
   Node->getExpansionVariable()->print(OS, SubPolicy, IndentLevel);
   OS << " : ";
-  // TODO(P2996).
-  OS << "<range>"; //PrintExpr(Node->getRange());
+  PrintExpansionRange(Node);
   OS << ")";
   PrintControlledStmt(Node->getBody());
 }
