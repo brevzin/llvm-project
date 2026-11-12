@@ -1,0 +1,7 @@
+# Deliberately broken, to demonstrate catalog validation: {naem} is a typo.
+msgid ""
+msgstr ""
+"Plural-Forms: nplurals=2; plural=n!=1;\n"
+
+msgid "Hello, {name}!"
+msgstr "Hallo, {naem}!"

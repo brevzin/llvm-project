@@ -1,0 +1,76 @@
+BasedOnStyle: LLVM
+AccessModifierOffset: -4
+AlignAfterOpenBracket: DontAlign
+AlignConsecutiveAssignments: None
+AlignConsecutiveBitFields: Consecutive
+AlignEscapedNewlines: Right
+AlignOperands: AlignAfterOperator
+AlignTrailingComments: true
+AllowBreakBeforeNoexceptSpecifier: OnlyWithParen
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortLambdasOnASingleLine: All
+AlwaysBreakTemplateDeclarations: true
+AttributeMacros:
+  - JMP_INDETERMINATE
+  - JMP_UNAVAILABLE
+  - JMP_NO_DANGLING
+  - JMP_DEPRECATED_AS_UNDERLYING
+  - JMP_DEPRECATED_CCTYPE_INT
+  - JMP_DEPRECATED_FLOAT_TO_FIXED_DECIMAL
+  - JMP_DEPRECATED_SCOPE_SUCCESS_FAIL
+  - JMP_CORO_AWAIT_ELIDABLE
+  - JMP_NOIPA
+BreakBeforeBraces: Custom
+BraceWrapping:
+   AfterClass: false
+   BeforeElse: true
+   BeforeCatch: true
+BinPackArguments: false
+BinPackParameters: false
+BreakBeforeBinaryOperators: NonAssignment
+BreakConstructorInitializers: BeforeComma
+BreakBeforeConceptDeclarations: true
+BreakInheritanceList: BeforeComma
+EmptyLineAfterAccessModifier: Never
+EmptyLineBeforeAccessModifier: Always
+IndentWidth: 4
+IndentWrappedFunctionNames: false
+IndentRequires: true
+InsertBraces: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+PackConstructorInitializers: NextLine
+PenaltyBreakAssignment: 20
+PenaltyBreakBeforeFirstCallParameter: 175
+ContinuationIndentWidth: 4
+RequiresClausePosition: OwnLine
+IncludeCategories:
+- Priority: 2
+  Regex: ^<jmp/impl/
+- Priority: 3
+  Regex: ^<jmp/
+- Priority: 1
+  Regex: .*
+PointerAlignment: Left
+QualifierAlignment: Custom
+QualifierOrder: ['static', 'inline', 'constexpr', 'type', 'const', 'volatile']
+Standard: c++20
+StatementMacros: [JMP_INVOKE_RET_EX, JMP_INVOKE_RET]
+SpacesInAngles: Never
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterRequiresInClause: true
+SpacesBeforeTrailingComments: 2
+IndentPPDirectives: AfterHash
+PPIndentWidth: 2
+ReflowComments: IndentOnly
+Macros:
+- JMP_LAZY_INIT=[&]()
+- JMP_LIFETIMEBOUND=[[clang::lifetimebound]]
+- JMP_LIFETIME_CAPTURE_BY(X)=[[clang::lifetime_capture_by(X)]]
+WhitespaceSensitiveMacros: [JMP_INCLUDE_STDLIB_INTERNAL, JMP_CHECK_REFERENCE_BIND,
+  JMP_CHECK_REFERENCE_BIND_THEN, JMP_CHECK_STORE_SOURCE, JMP_CHECK_PAYLOAD_SOURCE]
+ColumnLimit: 100

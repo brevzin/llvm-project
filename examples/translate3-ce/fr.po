@@ -1,0 +1,25 @@
+# French catalog for the translate3 demo.
+# Translators work on this file; the program loads it at runtime.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=n>1;\n"
+
+msgid "Hello, {name}!"
+msgstr "Bonjour, {name} !"
+
+# Reordered: the post comes first in French.
+msgid "{name} commented on {post}."
+msgstr "À propos de {post}, {name} a laissé un commentaire."
+
+msgid "Removed {n} files."
+msgstr ""
+"{n, plural,"
+" 0 {# fichier supprimé.}"
+" 1 {# fichiers supprimés.}}"
+
+msgid "Hi, {user}!"
+msgstr "Salut, {user} !"
+
+msgid "Total: {price:.2f}"
+msgstr "Total : {price:.2f} EUR"

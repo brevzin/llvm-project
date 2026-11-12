@@ -1,0 +1,8 @@
+# English catalog: even the source language can use plural selection --
+# the message id is just the fallback pattern.
+msgid ""
+msgstr ""
+"Plural-Forms: nplurals=2; plural=n!=1;\n"
+
+msgid "Removed {n} files."
+msgstr "{n, plural, 0 {Removed # file.} 1 {Removed # files.}}"

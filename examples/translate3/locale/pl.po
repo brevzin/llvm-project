@@ -1,0 +1,13 @@
+# Polish catalog: the classic three-way plural, driven by the real
+# gettext Plural-Forms formula below.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=3; plural=n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<12 || n%100>14) ? 1 : 2;\n"
+
+msgid "Removed {n} files."
+msgstr ""
+"{n, plural,"
+" 0 {Usunięto # plik.}"
+" 1 {Usunięto # pliki.}"
+" 2 {Usunięto # plików.}}"
