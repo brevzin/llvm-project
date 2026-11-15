@@ -133,6 +133,7 @@ ArrayRef<FormatToken *> FormatTokenLexer::lex() {
     }
     tryMergePreviousTokens();
     if (Style.isCpp()) {
+      handleReflectionOperator();
       handleMacroInvocation();
       handleTokenSequenceLiteral();
     }
@@ -1611,6 +1612,20 @@ void FormatTokenLexer::readRawToken(FormatToken &Tok) {
     FormattingDisabled = true;
 }
 
+// The reflection operator, '^^' (P2996), lexes as two '^'s unless reflection
+// is enabled: merge them into the one unary operator it is, so that
+// 'f(^^x, {a, b})' isn't taken for something to do with blocks.
+void FormatTokenLexer::handleReflectionOperator() {
+  const auto N = Tokens.size();
+  if (N < 2 || Tokens[N - 1]->isNot(tok::caret) ||
+      Tokens[N - 2]->isNot(tok::caret) || Tokens[N - 1]->hasWhitespaceBefore()) {
+    return;
+  }
+  tryMergeTokens(2, TT_UnaryOperator);
+  Tokens.back()->Tok.setKind(tok::caretcaret);
+  Tokens.back()->setFinalizedType(TT_UnaryOperator);
+}
+
 // A token sequence literal, ^^{ ... } (from the reflection proposals), holds
 // tokens to be parsed somewhere else, often not a complete construct: a
 // parameter list, half a declaration, a lone ',', an unbalanced '('. So it is
@@ -1621,17 +1636,10 @@ void FormatTokenLexer::handleTokenSequenceLiteral() {
   if (N < 2 || Tokens.back()->isNot(tok::l_brace))
     return;
 
-  // '^^' lexes as one token only when reflection is enabled.
-  unsigned IntroducerTokens;
-  if (Tokens[N - 2]->is(tok::caretcaret)) {
-    IntroducerTokens = 2;
-  } else if (N >= 3 && Tokens[N - 2]->is(tok::caret) &&
-             Tokens[N - 3]->is(tok::caret) &&
-             !Tokens[N - 2]->hasWhitespaceBefore()) {
-    IntroducerTokens = 3;
-  } else {
+  // ('^^' is one token: see handleReflectionOperator.)
+  const unsigned IntroducerTokens = 2;
+  if (Tokens[N - 2]->isNot(tok::caretcaret))
     return;
-  }
 
   // Find the matching '}', lexing (so that braces in string literals and
   // comments don't count).

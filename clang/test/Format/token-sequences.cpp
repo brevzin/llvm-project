@@ -5,6 +5,7 @@
 // A token sequence literal, ^^{ ... }, is kept as written -- its contents are
 // often not a complete construct -- and the code around it is formatted with
 // it as an operand. A macro invocation, name!(...), is formatted as a call.
+// The reflection operator, '^^', is one unary operator.
 
 // CHECK:      {{^}}void f() {{{$}}
 // CHECK-NEXT: {{^}}    x += ^^{ (this auto&& self };{{$}}
@@ -21,6 +22,8 @@
 // CHECK-NEXT: {{^}}    each!(int i : v, { use(i); });{{$}}
 // CHECK-NEXT: {{^}}    lib::declare!<double>(d);{{$}}
 // CHECK-NEXT: {{^}}    return !(a);{{$}}
+// CHECK-NEXT: {{^}}    auto t = substitute(^^impl, {trait, base});{{$}}
+// CHECK-NEXT: {{^}}    auto v = a ^ ^^b;{{$}}
 // CHECK-NEXT: {{^}}}{{$}}
 void f() {
   x   +=   ^^{ (this auto&& self };
@@ -33,4 +36,6 @@ void f() {
   each!(int i : v, {use(i);});
   lib::declare!<double>(d);
   return !(a);
+  auto t = substitute(^^impl, {trait,base});
+  auto v = a^ ^^b;
 }
