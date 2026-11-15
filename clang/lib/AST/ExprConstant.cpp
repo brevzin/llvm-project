@@ -23816,7 +23816,27 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
     // directly from the value. This avoids issues where implicit
     // conversions would later wrap the inner expression and lose
     // the constant value.
-    if (Val.isInt() && ExprType->isIntegralOrEnumerationType()) {
+    if (Val.isInt() && ExprType->isBooleanType()) {
+      // A bool is 'true' or 'false' (an IntegerLiteral can't be a bool).
+      ResultExpr = ConstantExpr::Create(
+          Info.Ctx,
+          CXXBoolLiteralExpr::Create(Info.Ctx, Val.getInt().getBoolValue(),
+                                     ExprType, SubExpr->getExprLoc()),
+          Val);
+    } else if (Val.isInt() && ExprType->isAnyCharacterType()) {
+      // A character is a character literal: 'x', u8'x', L'x', ...
+      CharacterLiteralKind Kind =
+          ExprType->isWideCharType() ? CharacterLiteralKind::Wide
+          : ExprType->isChar8Type()  ? CharacterLiteralKind::UTF8
+          : ExprType->isChar16Type() ? CharacterLiteralKind::UTF16
+          : ExprType->isChar32Type() ? CharacterLiteralKind::UTF32
+                                     : CharacterLiteralKind::Ascii;
+      ResultExpr = ConstantExpr::Create(
+          Info.Ctx,
+          new (Info.Ctx) CharacterLiteral(Val.getInt().getZExtValue(), Kind,
+                                          ExprType, SubExpr->getExprLoc()),
+          Val);
+    } else if (Val.isInt() && ExprType->isIntegralOrEnumerationType()) {
       // For enums, we need to use the underlying integer type for
       // the literal, then cast back to the enum type.
       QualType LiteralType = ExprType;

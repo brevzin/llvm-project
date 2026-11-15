@@ -4,6 +4,9 @@
 // expansion statements: what was written, not placeholders.
 
 #include "../Reflection/Inputs/token-sequence.h"
+namespace std::meta {
+consteval auto queue_injection(token_sequence) -> void;
+}
 
 namespace N { int z; }
 
@@ -68,3 +71,25 @@ consteval auto make(int k, std::meta::token_sequence name) -> std::meta::token_s
 consteval auto one_line() -> std::meta::token_sequence {
   return ^^{ a + b(c) };
 }
+
+// Interpolated values: literals of their types.
+// CHECK: struct Injected {
+// CHECK:     static constexpr auto b = true;
+// CHECK-NEXT:     static constexpr auto c = 'w';
+// CHECK-NEXT:     static constexpr auto c8 = u8'x';
+// CHECK-NEXT:     static constexpr auto n = 3;
+consteval auto values() -> std::meta::token_sequence {
+  bool b = true;
+  char c = 'w';
+  char8_t c8 = u8'x';
+  int n = 3;
+  return ^^{
+    static constexpr auto b = $b;
+    static constexpr auto c = $c;
+    static constexpr auto c8 = $c8;
+    static constexpr auto n = $n;
+  };
+}
+struct Injected {
+  consteval { std::meta::queue_injection(values()); }
+};
