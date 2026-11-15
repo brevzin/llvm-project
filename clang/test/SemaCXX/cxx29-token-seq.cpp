@@ -962,6 +962,32 @@ namespace N34 {
     // An unresolved interpolation in a nested literal prints as written.
     static_assert(__builtin_strcmp(
         stringize(^^{ ^^{ \(a) } }), "^^{ \\(a) }") == 0);
+
+    // Tokens the program made have no spacing of their own (here, each
+    // literal's only token has no space before it). Where running them
+    // together would lex differently, they are separated; otherwise they are
+    // not.
+    constexpr auto A = ^^{Arg}, P = ^^{p0}, Minus = ^^{-}, Greater = ^^{>},
+                   Dot = ^^{.}, One = ^^{1}, Slash = ^^{/}, Star = ^^{*},
+                   LE = ^^{<=}, Quote = ^^{"s"}, Paren = ^^{(};
+    static_assert(__builtin_strcmp(stringize(A + P), "Arg p0") == 0);
+    static_assert(__builtin_strcmp(
+        stringize(^^{Arg\(id("p", 0))}), "Arg p0") == 0);
+    static_assert(__builtin_strcmp(stringize(One + A), "1 Arg") == 0);
+    static_assert(__builtin_strcmp(stringize(Minus + Greater), "- >") == 0);
+    static_assert(__builtin_strcmp(stringize(Minus + Minus), "- -") == 0);
+    static_assert(__builtin_strcmp(stringize(Dot + One), ". 1") == 0);
+    static_assert(__builtin_strcmp(stringize(Slash + Slash), "/ /") == 0);
+    static_assert(__builtin_strcmp(stringize(Slash + Star), "/ *") == 0);
+    static_assert(__builtin_strcmp(stringize(LE + Greater), "<= >") == 0);
+    static_assert(__builtin_strcmp(stringize(Dot + Dot + Dot), ".. .") == 0);
+    static_assert(__builtin_strcmp(stringize(^^{u8} + Quote), "u8 \"s\"") == 0);
+    // No space is needed between these.
+    static_assert(__builtin_strcmp(stringize(A + Paren + P), "Arg(p0") == 0);
+    static_assert(__builtin_strcmp(stringize(Star + A), "*Arg") == 0);
+    static_assert(__builtin_strcmp(stringize(Greater + Minus), ">-") == 0);
+    static_assert(tokenize(stringize(A + P)) == ^^{ Arg p0 });
+    static_assert(tokenize(stringize(Dot + Dot + Dot)) == Dot + Dot + Dot);
 }
 
 // Interpolating a template reflection yields a template-name token: followed

@@ -11701,12 +11701,40 @@ public:
           Ex = Src;
       Ex->printPretty(OS, nullptr, Policy);
     };
-    bool IsFirst = true;
+    // Where each token's text starts in ResultStr. A token made by the
+    // program (std::meta::id, an interpolation) has no leading space to keep,
+    // so text that would lex differently run together gets one anyway.
+    SmallVector<size_t, 64> Starts;
+    auto StillSeparate = [&] {
+      // Lex from a few tokens back (far enough for '...', '<=>' and '%:%:'
+      // to form across the boundaries), and see that each token still starts
+      // where it did.
+      size_t First = Starts.size() > 3 ? Starts.size() - 3 : 0;
+      const char *Begin = ResultStr.data() + Starts[First];
+      Lexer L(SourceLocation(), Info.Ctx.getLangOpts(), Begin, Begin,
+              ResultStr.data() + ResultStr.size());
+      size_t Next = First;
+      Token Lexed;
+      while (Next != Starts.size()) {
+        bool AtEnd = L.LexFromRawLexer(Lexed);
+        if (Lexed.is(tok::eof))
+          break;
+        // (The lexer's locations are offsets from Begin.)
+        size_t Offset = Starts[First] + Lexed.getLocation().getRawEncoding();
+        if (Offset > Starts[Next])
+          return false;
+        if (Offset == Starts[Next])
+          ++Next;
+        if (AtEnd)
+          break;
+      }
+      return Next == Starts.size();
+    };
     for (const Token &Tok : TSD) {
       // Add space if this token had leading space (preserves original spacing).
-      if (!IsFirst && Tok.hasLeadingSpace())
+      if (!Starts.empty() && Tok.hasLeadingSpace())
         ResultStr += ' ';
-      IsFirst = false;
+      size_t Start = ResultStr.size();
 
       // Get the token's text representation. Annotation tokens (interpolated
       // types, expressions, templates, declaration descriptions) render as
@@ -11753,6 +11781,13 @@ public:
         // a single-character unknown token; spell it from the source.
         ResultStr += *Info.Ctx.getSourceManager().getCharacterData(
             Tok.getLocation());
+      }
+      if (ResultStr.size() == Start)
+        continue;
+      Starts.push_back(Start);
+      if (Starts.size() > 1 && !Tok.hasLeadingSpace() && !StillSeparate()) {
+        ResultStr.insert(Start, 1, ' ');
+        ++Starts.back();
       }
     }
 
