@@ -72,8 +72,11 @@
 // requirements), and __assoc_default_N (associated type defaults).
 #pragma once
 
+#include <algorithm>
 #include <debugging>
 #include <meta>
+#include <optional>
+#include <span>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -134,22 +137,18 @@ struct param {
 
 struct item {
     enum kind_t { assoc, req, fn } kind;
-    token_sequence name;   // assoc: its name; fn: the function name ('f', 'operator()')
-    std::string logical;   // fn: its name for generated entities ("call" for operator())
-    bool is_call = false;  // fn: is operator()
-    token_sequence decl;   // fn: declaration without body; req: the expression
-    token_sequence body;   // fn: the body (with braces), if any
-    token_sequence dflt;   // assoc: default, if any
+    token_sequence name;       // assoc: its name; fn: the function name ('f', 'operator()')
+    std::string_view logical;  // its name for generated entities ("call" for operator())
+    bool is_call = false;      // fn: is operator()
+    token_sequence decl;       // fn: declaration without body; req: the expression
+    token_sequence body;       // fn: the body (with braces), if any
+    token_sequence dflt;       // assoc: default, if any
 
     // fn: the declaration's parts, 'auto name(params) quals -> ret'
     std::vector<param> params;
-    token_sequence quals;  // 'const', '&&', 'const &', ...
+    bool is_const = false, is_volatile = false, is_rvalue = false;  // the quals
     token_sequence ret;
 };
-
-consteval auto is_tok(std::meta::token t, token_sequence s) -> bool {
-    return t == s;
-}
 
 consteval auto is_opener(std::meta::token t) -> bool {
     return t == punctuator::left_paren || t == punctuator::left_square
@@ -236,7 +235,7 @@ consteval auto is_named(token_sequence d) -> bool {
 
 consteval auto parse_params(token_sequence ts) -> std::vector<param> {
     std::vector<param> params;
-    if (ts.empty() || (ts.size() == 1 && is_tok(ts[0], ^^{ void }))) {
+    if (ts.empty() || (ts.size() == 1 && ts[0] == ^^{ void })) {
         return params;
     }
     for (int k = 0; token_sequence t : split_top_level(ts, punctuator::comma)) {
@@ -248,7 +247,7 @@ consteval auto parse_params(token_sequence ts) -> std::vector<param> {
             p.decl = d;
         }
         else {
-            p.name = ^^{ ${ std::meta::id("p", k) } };
+            p.name = token_sequence{std::meta::id("p", k)};
             p.decl = d + p.name;
         }
         ++k;
@@ -272,10 +271,11 @@ consteval auto parse(token_sequence ts) -> std::vector<item> {
             std::consteval_error_str("trait", "missing ';' in trait body");
         }
 
-        if (is_tok(ts[i], ^^{ typename })) {
+        if (ts[i] == ^^{ typename }) {
             auto toks = ts.subseq(i + 1, semi - i - 1);
             item it{.kind = item::assoc};
             it.name = toks.subseq(0, 1);
+            it.logical = identifier_of(toks[0]);
             if (toks.size() > 1) {
                 if (toks[1] != punctuator::equals) {
                     std::consteval_error_str("trait", "expected 'typename name [= default];'");
@@ -285,7 +285,7 @@ consteval auto parse(token_sequence ts) -> std::vector<item> {
             items.push_back(it);
             i = semi + 1;
         }
-        else if (is_tok(ts[i], ^^{ requires })) {
+        else if (ts[i] == ^^{ requires }) {
             items.push_back({.kind = item::req, .decl = ts.subseq(i + 1, semi - i - 1)});
             i = semi + 1;
         }
@@ -308,7 +308,7 @@ consteval auto parse(token_sequence ts) -> std::vector<item> {
 
             auto const& d = it.decl;
             size_t lp = d.balanced_find(punctuator::left_paren);
-            if (lp != d.npos && lp > 0 && is_tok(d[lp - 1], ^^{ operator }) && lp + 1 < d.size()
+            if (lp != d.npos && lp > 0 && d[lp - 1] == ^^{ operator }&&lp + 1 < d.size()
                 && d[lp + 1] == punctuator::right_paren) {
                 it.is_call = true;
                 it.logical = "call";
@@ -334,7 +334,10 @@ consteval auto parse(token_sequence ts) -> std::vector<item> {
                     "trait", "a trait function is declared 'auto name(params) -> return-type'");
             }
             it.params = parse_params(d.subseq(open + 1, close - open - 1));
-            it.quals = d.subseq(close + 1, arrow - close - 1);
+            token_sequence quals = d.subseq(close + 1, arrow - close - 1);
+            it.is_const = quals.find(^^{ const }) != quals.npos;
+            it.is_volatile = quals.find(^^{ volatile }) != quals.npos;
+            it.is_rvalue = quals.find(punctuator::ampersand_ampersand) != quals.npos;
             it.ret = d.subseq(arrow + 1);
             items.push_back(it);
             i = end + 1;
@@ -345,23 +348,17 @@ consteval auto parse(token_sequence ts) -> std::vector<item> {
 
 // ----------------------------------------------------------- reflection ---
 
-consteval auto member_named(info cls, std::string_view name) -> info {
-    for (info m : members_of(cls, std::meta::access_context::unchecked())) {
-        if (has_identifier(m) && identifier_of(m) == name) {
-            return m;
-        }
-    }
-    return info{};
+// The member of a generated trait struct named by the pieces of an identifier:
+// member(trait, "__result_", "begin") is Trait::__result_begin.
+template <class... Ts>
+consteval auto member(info cls, Ts const&... parts) -> std::optional<info> {
+    return lookup(
+        cls, identifier_of(std::meta::id(parts...)), std::meta::access_context::unchecked());
 }
 
+// The functions declared in a trait (in an instantiation of its __spec).
 consteval auto functions_of(info spec) -> std::vector<info> {
-    std::vector<info> v;
-    for (info m : members_of(spec, std::meta::access_context::unchecked())) {
-        if (is_function(m) && !is_special_member_function(m)) {
-            v.push_back(m);
-        }
-    }
-    return v;
+    return interface_of(spec, std::meta::access_context::unchecked());
 }
 
 // The object expression's type for a member declared in the trait with the
@@ -380,29 +377,30 @@ consteval auto object_type(info self, info m) -> info {
 
 // The name used for a trait function's generated entities: its identifier,
 // or "call" for operator().
-consteval auto logical_name(info m) -> std::string {
+consteval auto logical_name(info m) -> std::string_view {
     if (is_operator_function(m)) {
         if (operator_of(m) != std::meta::operators::op_parentheses) {
             std::consteval_error_str("trait", "the only operator supported is operator()");
         }
         return "call";
     }
-    return std::string(identifier_of(m));
+    return identifier_of(m);
 }
 
-consteval auto placeholder_index(info t) -> int {
-    t = dealias(t);
-    if (has_template_arguments(t) && template_of(t) == ^^_assoc) {
-        return extract<int>(template_arguments_of(t)[0]);
+// The types a trait function is called with on Self: the object (Self, with
+// the function's qualifiers added), then its parameters.
+consteval auto call_types(info self, info m) -> std::vector<info> {
+    std::vector<info> types = {object_type(self, m)};
+    for (info p : parameters_of(m)) {
+        types.push_back(type_of(p));
     }
-    return -1;
+    return types;
 }
 
 // Is `name(args...)` dispatchable? (can_substitute on the __result_ alias is
 // not SFINAE-friendly, so ask a requires-expression first.)
-consteval auto viable(info trait, std::string_view name, std::vector<info> const& args) -> bool {
-    info v = member_named(trait, std::string("__viable_") + std::string(name));
-    return extract<bool>(substitute(v, args));
+consteval auto viable(info trait, std::string_view name, std::span<info const> args) -> bool {
+    return extract<bool>(substitute(*member(trait, "__viable_", name), args));
 }
 
 // What the generated code tells the library about a trait: the names of its
@@ -418,47 +416,41 @@ struct resolution {
     std::string error;        // empty if satisfied
 };
 
-consteval auto decimal(size_t k) -> std::string {
-    std::string r;
-    do {
-        r.insert(r.begin(), char('0' + k % 10));
-        k /= 10;
-    } while (k);
-    return r;
-}
-
-consteval auto quote(info t) -> std::string {
-    return std::string(display_string_of(t));
+// The pieces of a diagnostic, run together.
+template <class... Ts>
+consteval auto cat(Ts const&... parts) -> std::string {
+    std::string s;
+    ((s += std::string_view(parts)), ...);
+    return s;
 }
 
 consteval auto resolve(info trait, info self, desc const& d) -> resolution {
     auto const& names = d.assoc;
     resolution res;
     auto fail = [&](std::string msg) {
-        res.error = quote(trait) + "<" + quote(self) + ">: " + msg;
+        res.error = cat(display_string_of(trait), "<", display_string_of(self), ">: ", msg);
         return res;
     };
 
     size_t const N = names.size();
     std::vector<info> placeholders, assoc(N);
     for (size_t i = 0; i < N; ++i) {
-        placeholders.push_back(substitute(^^_assoc,
-            {
-                std::meta::reflect_constant(int(i))}));
+        placeholders.push_back(substitute(^^_assoc, {std::meta::reflect_constant(int(i))}));
     }
+    // Which associated type a placeholder is (N if t isn't one).
+    auto placeholder_index = [&](info t) -> size_t {
+        return std::ranges::find(placeholders, dealias(t)) - placeholders.begin();
+    };
 
-    info spec_tmpl = member_named(trait, "__spec");
-    info base = remove_cv(self);
-    info impl_t = substitute(^^impl,
-        {
-            trait, base});
-    bool explicit_impl = is_complete_type(impl_t);
+    info spec_tmpl = *member(trait, "__spec");
+    info impl_t = substitute(^^impl, {trait, remove_cv(self)});
 
     // 1. Associated types named explicitly by an impl.
-    if (explicit_impl) {
+    if (is_complete_type(impl_t)) {
         for (size_t i = 0; i < N; ++i) {
-            if (info m = member_named(impl_t, names[i]); m != info{} && is_type(m)) {
-                assoc[i] = dealias(m);
+            auto m = lookup(impl_t, names[i], std::meta::access_context::unchecked());
+            if (m && is_type(*m)) {
+                assoc[i] = dealias(*m);
             }
         }
     }
@@ -466,26 +458,26 @@ consteval auto resolve(info trait, info self, desc const& d) -> resolution {
     // 2. Deduced from the return types of the required functions.
     info shape = substitute(spec_tmpl, placeholders);
     for (info m : functions_of(shape)) {
-        int idx = placeholder_index(return_type_of(m));
-        if (idx < 0 || assoc[idx] != info{}) {
+        size_t idx = placeholder_index(return_type_of(m));
+        if (idx == N || assoc[idx] != info{}) {
             continue;
         }
 
-        std::vector<info> args = {object_type(self, m)};
+        auto name = logical_name(m);
         for (info p : parameters_of(m)) {
-            if (placeholder_index(remove_cvref(type_of(p))) >= 0) {
-                return fail(std::string("cannot deduce '") + std::string(names[idx]) + "' from '"
-                            + std::string(logical_name(m))
-                            + "' since its parameters use associated types");
+            if (placeholder_index(remove_cvref(type_of(p))) != N) {
+                return fail(cat("cannot deduce '",
+                    names[idx],
+                    "' from '",
+                    name,
+                    "' since its parameters use associated types"));
             }
-            args.push_back(type_of(p));
         }
-        info result = member_named(trait, std::string("__result_") + std::string(logical_name(m)));
-        if (!viable(trait, logical_name(m), args)) {
-            return fail(std::string("no viable '") + std::string(logical_name(m))
-                        + "' (needed to deduce '" + std::string(names[idx]) + "')");
+        auto args = call_types(self, m);
+        if (!viable(trait, name, args)) {
+            return fail(cat("no viable '", name, "' (needed to deduce '", names[idx], "')"));
         }
-        assoc[idx] = dealias(substitute(result, args));
+        assoc[idx] = dealias(substitute(*member(trait, "__result_", name), args));
     }
 
     // 3. Defaults, in declaration order.
@@ -493,22 +485,20 @@ consteval auto resolve(info trait, info self, desc const& d) -> resolution {
         if (assoc[i] != info{}) {
             continue;
         }
-        info d = member_named(trait, std::string("__assoc_default_") + std::string(names[i]));
+        auto dflt = member(trait, "__assoc_default_", names[i]);
         std::vector<info> prev(assoc.begin(), assoc.begin() + i);
-        if (d == info{} || !can_substitute(d, prev)) {
-            return fail(
-                std::string("cannot determine associated type '") + std::string(names[i]) + "'");
+        if (!dflt || !can_substitute(*dflt, prev)) {
+            return fail(cat("cannot determine associated type '", names[i], "'"));
         }
-        assoc[i] = dealias(substitute(d, prev));
+        assoc[i] = dealias(substitute(*dflt, prev));
     }
 
     // 4. Requirements on the associated types.
     for (size_t k = 0; k < d.reqs.size(); ++k) {
-        info req = member_named(trait, std::string("__requires_") + decimal(k));
-        if (!extract<bool>(substitute(req, assoc))) {
-            std::string msg = "requirement '" + std::string(d.reqs[k]) + "' not satisfied with";
+        if (!extract<bool>(substitute(*member(trait, "__requires_", k), assoc))) {
+            std::string msg = cat("requirement '", d.reqs[k], "' not satisfied with");
             for (size_t i = 0; i < N; ++i) {
-                msg += std::string(" ") + std::string(names[i]) + "=" + quote(assoc[i]);
+                msg += cat(" ", names[i], "=", display_string_of(assoc[i]));
             }
             return fail(msg);
         }
@@ -518,25 +508,23 @@ consteval auto resolve(info trait, info self, desc const& d) -> resolution {
     //    its result convertible to the declared return type.
     res.spec = substitute(spec_tmpl, assoc);
     for (info m : functions_of(res.spec)) {
-        std::vector<info> args = {object_type(self, m)};
-        for (info p : parameters_of(m)) {
-            args.push_back(type_of(p));
+        auto name = logical_name(m);
+        auto args = call_types(self, m);
+        if (!viable(trait, name, args)) {
+            if (extract<bool>(*member(trait, "__has_default_", name))) {
+                continue;  // the default body will be used
+            }
+            return fail(cat("no viable '", name, "' for ", display_string_of(args[0])));
         }
-        info result = member_named(trait, std::string("__result_") + std::string(logical_name(m)));
-        bool has_default = extract<bool>(
-            member_named(trait, std::string("__has_default_") + std::string(logical_name(m))));
-        if (has_default && !viable(trait, logical_name(m), args)) {
-            continue;  // the default body will be used
-        }
-        if (!viable(trait, logical_name(m), args)) {
-            return fail(std::string("no viable '") + std::string(logical_name(m)) + "' for "
-                        + quote(args[0]));
-        }
-        info r = substitute(result, args);
+        info r = dealias(substitute(*member(trait, "__result_", name), args));
         info ret = return_type_of(m);
         if (!is_void_type(ret) && !is_convertible_type(r, ret)) {
-            return fail(std::string("'") + std::string(logical_name(m)) + "' returns " + quote(r)
-                        + ", which is not convertible to " + quote(ret));
+            return fail(cat("'",
+                name,
+                "' returns ",
+                display_string_of(r),
+                ", which is not convertible to ",
+                display_string_of(ret)));
         }
     }
 
@@ -597,25 +585,25 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
     int nreqs = 0;
     size_t nassoc = 0;
     token_sequence prev_params;  // "class a, class b" for assoc declared so far
-    std::vector<std::string> seen_fns;
+    std::vector<std::string_view> seen_fns;
 
     for (item const& it : items) {
         if (it.kind == item::assoc) {
             if (!it.dflt.empty()) {
                 defaults += ^^{
                     template <$prev_params>
-                    using ${ std::meta::id("__assoc_default_", identifier_of(it.name[0])) } =
+                    using ${ std::meta::id("__assoc_default_", it.logical) } =
                         ${ it.dflt };
                 };
             }
-            auto index = std::meta::reflect_constant(nassoc++);
+            size_t index = nassoc++;
             ref_assoc += ^^{
                 using ${ it.name } = typename [: ::traits::detail::assoc(
                     dealias(^^__self), ^^S, __desc(), $index) :];
             };
             assoc_params += ^^{ class ${ it.name } };
             prev_params = assoc_params;
-            assoc_names += ^^{ ${ std::meta::str_lit(identifier_of(it.name[0])) } };
+            assoc_names += std::meta::str_lit(it.logical);
             aliases += ^^{
                 template <class R>
                 using ${ it.name } = typename ref<std::remove_reference_t<R>>::${ it.name };
@@ -633,16 +621,13 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
             template <${ spec_head_of(assoc_params) }>
             static constexpr bool ${ std::meta::id("__requires_", nreqs++) } = ${ it.decl };
         };
-        req_texts += ^^{ ${ std::meta::str_lit(std::meta::stringize(it.decl)) } };
+        req_texts += std::meta::str_lit(std::meta::stringize(it.decl));
     }
 
     // How many functions share each name (a dyn's slots need distinct names).
     auto count = [&](std::string_view logical) {
-        int n = 0;
-        for (item const& it : items) {
-            n += it.kind == item::fn && it.logical == logical;
-        }
-        return n;
+        return std::ranges::count_if(
+            items, [&](item const& it) { return it.kind == item::fn && it.logical == logical; });
     };
 
     for (int k = 0; item const& it : items) {
@@ -655,21 +640,13 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
         std::meta::list_builder params(^^{ , }), args(^^{ , });
         for (param const& p : it.params) {
             params += p.decl;
-            args += ^^{ static_cast<decltype(${ p.name })&&>(${ p.name }) }
-                  + (p.pack ? ^^{ ... } : ^^{});
+            args += ^^{ static_cast<decltype(${ p.name })&&>(${ p.name }) }+(
+                p.pack ? ^^{ ... } : ^^{});
         }
         // The object's type: Self, with the function's qualifiers added.
         auto object = [&](token_sequence self) {
-            token_sequence t = self;
-            if (it.quals.find(^^{ const }) != it.quals.npos) {
-                t += ^^{ const };
-            }
-            if (it.quals.find(^^{ volatile }) != it.quals.npos) {
-                t += ^^{ volatile };
-            }
-            return t
-                 + (it.quals.find(punctuator::ampersand_ampersand) != it.quals.npos ? ^^{ && }
-                                                                                    : ^^{ & });
+            return self + (it.is_const ? ^^{ const } : ^^{})
+                 + (it.is_volatile ? ^^{ volatile } : ^^{}) + (it.is_rvalue ? ^^{ && } : ^^{ & });
         };
         auto dispatch = std::meta::id("__dispatch_", it.logical);
         auto f = it.name;
@@ -697,9 +674,8 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
         // dyn: a slot per function, filled per type with a call to its dispatch.
         auto slot = count(it.logical) == 1 ? std::meta::id(it.logical)
                                            : std::meta::id(it.logical, "_", k);
-        bool is_const = it.quals.find(^^{ const }) != it.quals.npos;
-        token_sequence erased = is_const ? ^^{ void const* } : ^^{ void* };
-        token_sequence cast = is_const ? ^^{ T const* } : ^^{ T* };
+        token_sequence erased = it.is_const ? ^^{ void const* } : ^^{ void* };
+        token_sequence cast = it.is_const ? ^^{ T const* } : ^^{ T* };
         std::meta::list_builder slot_params(^^{ , }), slot_args(^^{ , }), vt_args(^^{ , });
         slot_params += erased + ^^{ __obj };
         slot_params += params;
@@ -716,11 +692,8 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
         };
         ++k;
 
-        bool dup = false;
-        for (auto const& s : seen_fns) {
-            dup = dup || s == it.logical;
-        }
-        if (dup) {
+        // The rest is per name (it serves every overload).
+        if (std::ranges::contains(seen_fns, it.logical)) {
             continue;
         }
         seen_fns.push_back(it.logical);
@@ -757,8 +730,7 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
             template <class O, class... A>
             static constexpr bool ${ n("__viable_") } =
                 requires { ${ n("__custom_") }(std::declval<O>(), std::declval<A>()...); };
-            static constexpr bool ${ n("__has_default_") } =
-                ${ it.body.empty() ? ^^{ false } : ^^{ true } };
+            static constexpr bool ${ n("__has_default_") } = ${ !it.body.empty() };
         };
         if (it.body.empty()) {
             dispatchers += ^^{
@@ -874,9 +846,9 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
 // templated, so possibly comma-containing) name.
 __macro trait(std::meta::token_sequence first, std::meta::token_sequence... rest) {
     std::vector<std::meta::token_sequence> args = {first, rest...};
-    std::meta::token_sequence name = args[0];
-    for (size_t i = 1; i + 1 < args.size(); ++i) {
-        name += ^^{ , } + args[i];
+    std::meta::list_builder name(^^{ , });
+    for (auto const& a : std::span(args).first(args.size() - 1)) {
+        name += a;
     }
     return ::traits::detail::generate(name, args.back());
 }
