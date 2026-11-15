@@ -22,6 +22,7 @@
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Template.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/Support/TimeProfiler.h"
 using namespace clang;
 
 ExprResult Parser::ParseCXXReflectExpression(SourceLocation OpLoc) {
@@ -777,6 +778,7 @@ Parser::DeclGroupPtrTy Parser::ParseDeclMacroInvocation(AccessSpecifier AS,
 
   SmallVector<Decl *, 4> Decls;
   Sema::MacroExpansionDepthRAII Depth(Actions);
+  llvm::TimeTraceScope ExpansionTimeScope("MacroParseExpansion");
   Actions.runWithSufficientStackSpace(NameLoc, [&] {
     if (Actions.CurContext->isRecord()) {
       // Members of the class being parsed, under the current access specifier
@@ -1087,6 +1089,7 @@ StmtResult Parser::ParseStmtMacroInvocation(ParsedStmtContext StmtCtx) {
   StmtVector Stmts;
   {
     Sema::MacroExpansionDepthRAII Depth(Actions);
+    llvm::TimeTraceScope ExpansionTimeScope("MacroParseExpansion");
     Actions.runWithSufficientStackSpace(NameLoc, [&] {
       while (Tok.isNot(tok::eof)) {
         SourceLocation Before = Tok.getLocation();
@@ -1504,6 +1507,7 @@ ExprResult Parser::ParseExpressionMacroExpansion(TokenSequenceData TSD,
 
   MacroExpansionLookupScope LookupScope(*this);
   Sema::MacroExpansionDepthRAII Depth(Actions);
+  llvm::TimeTraceScope ExpansionTimeScope("MacroParseExpansion");
 
   // The expansion is delimited by its own eof, so it is parsed free of the
   // enclosing context's bracket rules. It may itself invoke macros, so this
@@ -1715,6 +1719,7 @@ bool Parser::ParseMemInitMacroExpansion(
   {
     MacroExpansionLookupScope LookupScope(*this);
     Sema::MacroExpansionDepthRAII Depth(Actions);
+    llvm::TimeTraceScope ExpansionTimeScope("MacroParseExpansion");
     GreaterThanIsOperatorScope G(GreaterThanIsOperator, true);
     ColonProtectionRAIIObject ColonProtection(*this, false);
     PoisonSEHIdentifiersRAIIObject PoisonSEHIdentifiers(*this, true);

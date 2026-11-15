@@ -8454,8 +8454,15 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
   CurrentMacroInvocationLoc = Fn->getBeginLoc();
   auto RestoreInvocationLoc = llvm::make_scope_exit(
       [&] { CurrentMacroInvocationLoc = SavedInvocationLoc; });
-  if (!Expr::EvaluateMacroBody(Macro, ParamValues, Result, Context, Notes,
-                               InvocationContext, ParamInits) ||
+  bool Evaluated;
+  {
+    llvm::TimeTraceScope TimeScope("MacroEvaluate", [&] {
+      return Macro->getQualifiedNameAsString();
+    });
+    Evaluated = Expr::EvaluateMacroBody(Macro, ParamValues, Result, Context,
+                                        Notes, InvocationContext, ParamInits);
+  }
+  if (!Evaluated ||
       !Result.isTokenSequence()) {
     // std::meta::expand_at_instantiation() in a templated context: the
     // expansion waits for instantiation, where the macro is evaluated again.

@@ -2565,6 +2565,7 @@ void Sema::InstantiateDeclMacroInvocation(
   size_t FirstInjected = PendingInjectedStmts.size();
   {
     MacroExpansionDepthRAII Depth(*this);
+    llvm::TimeTraceScope ExpansionTimeScope("MacroParseExpansion");
     ProcessPendingTokenInjections();
   }
   // A statement macro's arguments are run-time expressions, each evaluated

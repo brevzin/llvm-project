@@ -10692,6 +10692,12 @@ bool ExprEvaluatorBase<Derived>::VisitCXXMetafunctionExpr(
   // Evaluate the metafunction.
   APValue Result;
   const CXXMetafunctionExpr::ImplFn &Implementation = E->getImpl();
+  llvm::TimeTraceScope MetafnTimeScope("Metafunction", [&] {
+    if (const auto *FD = dyn_cast_if_present<FunctionDecl>(
+            Info.CurrentCall ? Info.CurrentCall->getCallee() : nullptr))
+      return FD->getNameAsString();
+    return std::string();
+  });
   if (Implementation(Result, Evaluator, Diagnoser, AllowInjection,
                      E->getResultType(), Info.CurrentCall->CallRange, Args,
                      ContextDecl)) {
