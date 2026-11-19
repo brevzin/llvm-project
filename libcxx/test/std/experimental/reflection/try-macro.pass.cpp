@@ -110,7 +110,7 @@ __macro try_(T&& e) {
       if (not \(CT)::should_continue(__r)) [[unlikely]] {
         return \(RT)::from_break(\(CT)::extract_break(static_cast<decltype(__r)&&>(__r)));
       }
-      do_return \(CT)::extract_continue(static_cast<decltype(__r)&&>(__r));
+      do return \(CT)::extract_continue(static_cast<decltype(__r)&&>(__r));
     }
   };
 }

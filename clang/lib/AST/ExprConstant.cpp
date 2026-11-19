@@ -945,7 +945,7 @@ namespace {
     /// result directly.)
     std::optional<APValue> PendingDoExprReturnValue;
 
-    /// The do-expressions being evaluated, innermost last: where `do_return`
+    /// The do-expressions being evaluated, innermost last: where `do return`
     /// puts its value, and the result object it constructs in place when the
     /// evaluator knows it (a class-type result). Evaluating a class value
     /// anywhere else -- a frame temporary -- would leave the yielded value
@@ -6067,7 +6067,7 @@ enum EvalStmtResult {
   ESR_Break,
   /// Still scanning for 'case' or 'default' statement.
   ESR_CaseNotFound,
-  /// Hit a 'do_return' statement, yielding a value to the enclosing
+  /// Hit a 'do return' statement, yielding a value to the enclosing
   /// do-expression.
   ESR_DoReturn
 };
@@ -6613,7 +6613,7 @@ static EvalStmtResult EvaluateStmtImpl(StmtResult &Result, EvalInfo &Info,
     // The value goes to the innermost do-expression's result -- in place
     // when its result object is known -- not to `Result`, which is the
     // enclosing function's (for a `return` in the body).
-    assert(!Info.DoExprTargets.empty() && "do_return outside a do-expression");
+    assert(!Info.DoExprTargets.empty() && "do return outside a do-expression");
     EvalInfo::DoExprTarget Target = Info.DoExprTargets.back();
     if (RetExpr &&
         !(Target.Slot ? EvaluateInPlace(*Target.Value, Info, *Target.Slot,
@@ -9965,7 +9965,7 @@ public:
     llvm::SaveAndRestore NotCheckingForUB(Info.CheckingForUndefinedBehavior,
                                           false);
 
-    // `do_return` yields into this do-expression's result (see the
+    // `do return` yields into this do-expression's result (see the
     // DoReturnStmt case).
     Info.DoExprTargets.push_back({&Result, ResultSlot});
     auto PopTarget =
@@ -10074,7 +10074,7 @@ public:
       // default member initializer is where this shows: the evaluator sets
       // `This` on the current frame for the duration of the initializer (see
       // ThisOverrideRAII), and a do-expression in that initializer would
-      // otherwise lose it and reject `do { do_return a + 10; }` for naming a
+      // otherwise lose it and reject `do { do return a + 10; }` for naming a
       // non-static member.
       SyntheticFrame.emplace(Info, E->getSourceRange(),
                              /*Callee=*/nullptr,
@@ -10088,7 +10088,7 @@ public:
       // Sema builds for the body -- which Sema only builds when the
       // do-expression is *not* already inside a function. In
       //
-      //   void f() { constexpr B b = do { B x{6}; x &= B{3}; do_return x; }; }
+      //   void f() { constexpr B b = do { B x{6}; x &= B{3}; do return x; }; }
       //
       // `x` belongs to `f`, the synthetic frame has no callee to match it
       // against, and the lookup gave up: no frame, so `x` looked like an
@@ -10141,7 +10141,7 @@ public:
       // Void do-expression: falling off the end is a valid termination.
       return Scope.destroy();
     }
-    // ESR_Succeeded with a non-void result type (no do_return reached) and
+    // ESR_Succeeded with a non-void result type (no do return reached) and
     // any other statement-evaluation result are not supported in constant
     // evaluation through a do-expression.
     Info.FFDiag(E->getBeginLoc(), diag::note_constexpr_stmt_expr_unsupported);

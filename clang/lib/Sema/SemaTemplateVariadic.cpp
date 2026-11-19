@@ -471,7 +471,7 @@ bool Sema::isUnexpandedParameterPackPermitted() {
 ///
 /// P2806 specifies a do-expression as an immediately-invoked lambda, so a pack
 /// named in its body belongs to whatever expansion encloses the do-expression,
-/// not to the body — `f(do { do_return pack * 2; }...)` expands the body once
+/// not to the body — `f(do { do return pack * 2; }...)` expands the body once
 /// per element the same way `f([&] { return pack * 2; }()...)` does.
 ///
 /// \p CSI is the innermost enclosing lambda or block, if any. A do-expression

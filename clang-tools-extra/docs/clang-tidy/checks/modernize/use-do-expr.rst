@@ -28,9 +28,9 @@ them:
 .. code-block:: c++
 
   const int limit = do {
-    if (opts.explicit_limit) do_return *opts.explicit_limit;
-    if (opts.profile == Profile::Small) do_return 16;
-    do_return 256;
+    if (opts.explicit_limit) do return *opts.explicit_limit;
+    if (opts.profile == Profile::Small) do return 16;
+    do return 256;
   };
 
 Diagnosing does not require a compiler that implements ``do`` expressions;
@@ -114,7 +114,7 @@ Fixes
 The three rewritable categories come with a fixit: the introducer, parameter
 list and trailing ``()`` are replaced by ``do``, an explicit trailing return
 type is carried over, and each of the body's own ``return`` statements becomes
-``do_return``. Returns belonging to a nested lambda or a nested function are
+``do return``. Returns belonging to a nested lambda or a nested function are
 left alone.
 
 Two rewrites are not a straight substitution:
@@ -123,7 +123,7 @@ Two rewrites are not a straight substitution:
   so the expression is parenthesized.
 - A discarded non-``void`` value newly trips ``-Wunused-value``, which a
   discarded *call* never did, so it is cast to ``void``:
-  ``(void)(do { do_return f(); });``
+  ``(void)(do { do return f(); });``
 
 The rewrite is checked against a differential harness that compiles both forms
 at ``-O0``/``-O1``/``-O2``/``-Os``, under ASan and UBSan, and compares their

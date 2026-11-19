@@ -7649,9 +7649,20 @@ public:
   /// and trailing return type are optional.
   ExprResult ParseDoExpression();
 
-  /// ParseDoReturnStatement - Parse a `do_return [expr] ;` statement, which
+  /// Whether the current tokens begin a `do return [expr] ;` statement. They
+  /// do only directly inside the body of a do-expression (not in a lambda or
+  /// local function nested in one); elsewhere `do return` begins a do/while
+  /// loop whose body is a return statement, as it always has.
+  bool isDoReturnStatement();
+
+  /// ParseDoReturnStatement - Parse a `do return [expr] ;` statement, which
   /// yields the value of the enclosing do-expression.
+  /// Note: this lets the caller parse the end ';'.
   StmtResult ParseDoReturnStatement();
+
+  /// The location of the body of the do/while loop being parsed, so that a
+  /// `do return` that is that body is not taken for the head of one.
+  SourceLocation DoWhileBodyLoc;
 
   /// ParseForStatement
   /// \verbatim

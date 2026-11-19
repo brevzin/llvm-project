@@ -653,7 +653,7 @@ With `check` and its helpers in a library namespace:
 +            auto res = std::vector<T>();
 +            res.reserve(sizeof...(Args));
              \(emplace_back_loop);
-             do_return res;
+             do return res;
          }
      };
 ```

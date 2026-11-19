@@ -1281,7 +1281,7 @@ public:
     bool PruneTriviallyFalseEdges = true;
     /// When true, the statement being analyzed is a do-expression body rather
     /// than a function body: `break`/`continue` transfer to an enclosing loop
-    /// outside the body (modeled as edges to the exit block), `do_return`
+    /// outside the body (modeled as edges to the exit block), `do return`
     /// transfers to the do-expression's end (also the exit block), and a nested
     /// do-expression is treated as an opaque value-producing expression.
     bool DoExpressionBody = false;

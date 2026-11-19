@@ -4718,7 +4718,7 @@ public:
 ///
 /// The init statements and trailing return type are optional. A do-expression
 /// evaluates its optional init statements followed by a compound statement
-/// body and yields a value via `do_return` statements within the body. Unlike a
+/// body and yields a value via `do return` statements within the body. Unlike a
 /// GNU statement-expression (`({ ... })`), the body does not introduce a
 /// function scope; `return`, `break`, `continue`, and `goto` operate on the
 /// enclosing function/loop.
@@ -4732,7 +4732,7 @@ class DoExpr : public Expr {
   SourceLocation LBraceLoc;
   SourceLocation RBraceLoc;
   unsigned TemplateDepth;
-  /// The body local, if any, that every value-yielding `do_return` in the
+  /// The body local, if any, that every value-yielding `do return` in the
   /// body names and that can therefore be constructed directly into the
   /// do-expression's result slot.
   const VarDecl *NRVOCandidate = nullptr;

@@ -2965,7 +2965,7 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
 
   case DoExprClass: {
     // Discarded-value do-expression: only warn if the result type is
-    // non-void (since `do_return value;` paths produce an unused value).
+    // non-void (since `do return value;` paths produce an unused value).
     if (getType()->isVoidType())
       return false;
     WarnE = this;

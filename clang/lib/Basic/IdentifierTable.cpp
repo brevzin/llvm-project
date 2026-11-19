@@ -171,13 +171,6 @@ static KeywordStatus getKeywordStatusHelper(const LangOptions &LangOpts,
     return LangOpts.Reflection ? KS_Extension : KS_Unknown;
   case KEYDEFERTS:
     return LangOpts.DeferTS ? KS_Enabled : KS_Disabled;
-  case KEYDOEXPR:
-    if (LangOpts.DoExpressions)
-      return KS_Enabled;
-    // 'do_return' is an ordinary identifier before C++29, but it will stop
-    // being one, so let earlier C++ modes diagnose the uses that a migration
-    // to C++29 would break. Same treatment as the C++20 keywords.
-    return LangOpts.CPlusPlus ? KS_Future : KS_Unknown;
   case KEYNTA:
     return LangOpts.CPlusPlus29 ? KS_Enabled : KS_Unknown;
   default:
@@ -865,12 +858,6 @@ IdentifierTable::getFutureCompatDiagKind(const IdentifierInfo &II,
     if (((Flags & KEYCXX20) == KEYCXX20) ||
         ((Flags & CHAR8SUPPORT) == CHAR8SUPPORT))
       return diag::warn_cxx20_keyword;
-
-    // do-expressions are not modeled as a KEYCXX29 keyword class because
-    // 'do_return' is the only one, and it is gated on the feature's own
-    // LangOpt.
-    if ((Flags & KEYDOEXPR) == KEYDOEXPR)
-      return diag::warn_cxx29_keyword;
   } else {
     if ((Flags & KEYC99) == KEYC99)
       return diag::warn_c99_keyword;

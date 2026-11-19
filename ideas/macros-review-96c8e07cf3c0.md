@@ -134,7 +134,7 @@ disables ADL and still isn't fully robust.
    in the macro's definition context first. This is Rust's `$crate` / Scheme
    hygiene. The token already knows it came from the macro (its location is in
    the macro's body), so this is feasible, but it changes semantics: `fwd!` for
-   `std::forward`-less code, `do_return`, and so on. Do it with an opt-out
+   `std::forward`-less code, `do return`, and so on. Do it with an opt-out
    (`\unhygienic(…)`, or `__macro [[unhygienic]]`).
 
 ## 4. P1: macros calling their own helper macros
@@ -293,7 +293,7 @@ There's no `__COUNTER__` equivalent and no `std::meta::unique_id()`.
 
   ```cpp
   __macro twice_raw(token_sequence e) {
-    return ^^{ do -> int { int tmp = 100; do_return (\(e)) + tmp; } };
+    return ^^{ do -> int { int tmp = 100; do return (\(e)) + tmp; } };
   }
   int tmp = 1; twice_raw!(tmp);   // 200, not 101
   ```

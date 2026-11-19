@@ -5,7 +5,7 @@
 namespace function_template_deduced {
   template <class T>
   constexpr T identity(T x) {
-    return do { do_return x; };
+    return do { do return x; };
   }
   static_assert(identity(42) == 42);
   static_assert(identity(3.14) == 3.14);
@@ -15,7 +15,7 @@ namespace function_template_deduced {
 namespace function_template_explicit {
   template <class T>
   constexpr long as_long() {
-    return do -> long { do_return T{42}; };
+    return do -> long { do return T{42}; };
   }
   static_assert(as_long<int>() == 42L);
   static_assert(as_long<short>() == 42L);
@@ -28,7 +28,7 @@ namespace nontype_template {
     return do {
       int total = 0;
       for (int i = 1; i <= N; ++i) total += i;
-      do_return total;
+      do return total;
     };
   }
   static_assert(triangular<0>() == 0);
@@ -37,12 +37,12 @@ namespace nontype_template {
 }
 
 namespace dependent_operands {
-  // Multiple do_return statements with type-dependent operands.
+  // Multiple do return statements with type-dependent operands.
   template <class T, class U>
   constexpr auto pick(bool b, T t, U u) {
     return do {
-      if (b) do_return t;
-      do_return u;
+      if (b) do return t;
+      do return u;
     };
   }
   // Both branches must agree once instantiated.
@@ -56,7 +56,7 @@ namespace class_template_member {
     T value;
     constexpr Wrapper(T v) : value(v) {}
     constexpr T compute() const {
-      return do { do_return value * value; };
+      return do { do return value * value; };
     }
   };
   static_assert(Wrapper<int>(7).compute() == 49);
@@ -67,7 +67,7 @@ namespace member_template {
   struct S {
     template <class T>
     constexpr T as(int v) const {
-      return do { do_return T(v); };
+      return do { do return T(v); };
     }
   };
   static_assert(S{}.as<int>(5) == 5);
@@ -78,8 +78,8 @@ namespace multiple_instantiations {
   template <class T>
   constexpr T scale(T x, T k) {
     return do {
-      if (k == T{}) do_return T{};
-      do_return x * k;
+      if (k == T{}) do return T{};
+      do return x * k;
     };
   }
   static_assert(scale(3, 4) == 12);
@@ -96,7 +96,7 @@ namespace outer_break_in_template {
     for (int i = 0; i < n; ++i) {
       int v = do {
         if (p[i] == T{}) break;
-        do_return 1;
+        do return 1;
       };
       count += v;
     }
@@ -111,9 +111,9 @@ namespace recursive_template {
   constexpr int fact() {
     return do {
       if constexpr (N <= 1)
-        do_return 1;
+        do return 1;
       else
-        do_return N * fact<N - 1>();
+        do return N * fact<N - 1>();
     };
   }
   static_assert(fact<0>() == 1);
@@ -123,7 +123,7 @@ namespace recursive_template {
 namespace dependent_explicit_type {
   template <class T>
   constexpr T compute(int x) {
-    return do -> T { do_return x + 1; };
+    return do -> T { do return x + 1; };
   }
   static_assert(compute<int>(5) == 6);
   static_assert(compute<double>(5) == 6.0);
@@ -132,11 +132,11 @@ namespace dependent_explicit_type {
 
 namespace dependent_explicit_void {
   // A dependent explicit result type might instantiate as void, so a bare
-  // do_return must be checked at instantiation rather than rejected at template
+  // do return must be checked at instantiation rather than rejected at template
   // definition time.
   template <class T>
   constexpr int f() {
-    (void)(do -> T { do_return; });
+    (void)(do -> T { do return; });
     return 0;
   }
   static_assert(f<void>() == 0);
@@ -146,8 +146,8 @@ namespace nested_in_template {
   template <class T>
   constexpr T compute(T base) {
     return do {
-      T inner = do { do_return base * 2; };
-      do_return inner + 1;
+      T inner = do { do return base * 2; };
+      do return inner + 1;
     };
   }
   static_assert(compute(5) == 11);

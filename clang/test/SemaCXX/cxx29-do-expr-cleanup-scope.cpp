@@ -37,7 +37,7 @@ void fn_sibling_argument() {
   int v = sink(T{1}, do {
     if (false)
       throw 7;
-    do_return 3;
+    do return 3;
   });
   next();
 }
@@ -54,7 +54,7 @@ void fn_body_has_a_loop() {
   int v = sink(T{1}, do {
     while (false) {
     }
-    do_return 3;
+    do return 3;
   });
   next();
 }
@@ -71,12 +71,12 @@ void fn_body_has_a_loop() {
 void fn_body_statement_temporary() {
   int v = sink(T{1}, do {
     val(T{2});
-    do_return 3;
+    do return 3;
   });
   next();
 }
 
-// A `do_return` operand is not finished as a full-expression of its own, so
+// A `do return` operand is not finished as a full-expression of its own, so
 // its temporaries belong to the enclosing full-expression. Resetting the
 // cleanup state for the body must therefore *merge* on the way out rather than
 // restore: this needs an ExprWithCleanups even though nothing outside the
@@ -86,7 +86,7 @@ void fn_body_statement_temporary() {
 // CHECK-NEXT:   ExprWithCleanups {{.*}} 'int'
 // CHECK-NEXT:     DoExpr
 void fn_do_return_operand_temporary() {
-  int v = do { do_return val(T{1}) + 10; };
+  int v = do { do return val(T{1}) + 10; };
   next();
 }
 
@@ -97,7 +97,7 @@ void fn_in_a_template() {
   int v = sink(T{1}, do {
     if (false)
       throw U{};
-    do_return 3;
+    do return 3;
   });
   next();
 }

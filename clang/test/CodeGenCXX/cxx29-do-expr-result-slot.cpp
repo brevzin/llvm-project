@@ -13,8 +13,8 @@ extern int a, b;
 // CHECK:       ret
 int direct() {
   int x = do {
-    if (a > b) do_return a;
-    do_return b;
+    if (a > b) do return a;
+    do return b;
   };
   return x;
 }
@@ -25,7 +25,7 @@ int direct() {
 // CHECK-LABEL: define {{.*}} @_Z9converted
 // CHECK:         %doexpr.result = alloca i32
 long converted() {
-  long x = do -> int { do_return a; };
+  long x = do -> int { do return a; };
   return x;
 }
 
@@ -37,8 +37,8 @@ long converted() {
 // CHECK:         store volatile i32
 int volatile_dst() {
   volatile int x = do {
-    if (a > b) do_return a;
-    do_return b;
+    if (a > b) do return a;
+    do return b;
   };
   return x;
 }
@@ -48,7 +48,7 @@ int volatile_dst() {
 // CHECK-LABEL: define {{.*}} @_Z10atomic_dst
 // CHECK:         %doexpr.result = alloca i32
 int atomic_dst() {
-  _Atomic int x = do { do_return a; };
+  _Atomic int x = do { do return a; };
   return x;
 }
 
@@ -58,8 +58,8 @@ int atomic_dst() {
 // CHECK:         %doexpr.result = alloca i32
 int not_a_init() {
   return (do {
-    if (a > b) do_return a;
-    do_return b;
+    if (a > b) do return a;
+    do return b;
   }) + 1;
 }
 
@@ -71,8 +71,8 @@ int not_a_init() {
 // CHECK:       ret
 int nested() {
   int outer = do {
-    int inner = do { do_return a; };
-    do_return inner + 1;
+    int inner = do { do return a; };
+    do return inner + 1;
   };
   return outer;
 }

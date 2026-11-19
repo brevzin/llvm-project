@@ -65,7 +65,7 @@ statement of the proposal, not CWG wording.
   - an `escape-statement` (use this spelling everywhere),
   - an expression statement whose expression diverges,
   - a declaration statement where some declarator's initializer diverges,
-  - a `return` or `do_return` whose operand diverges,
+  - a `return` or `do return` whose operand diverges,
   - an `if` with an `else` where both substatements diverge,
   - an `if constexpr` whose taken substatement diverges.
 - Deliberately not covered, so a false negative means writing `-> T`:
@@ -78,18 +78,18 @@ statement of the proposal, not CWG wording.
 ## Type of a `do` expression
 
 - If there is a non-placeholder trailing return type, that type.
-- Otherwise, deduce from the `do_return` statements, ignoring those whose
+- Otherwise, deduce from the `do return` statements, ignoring those whose
   operand diverges. If the remaining ones disagree, the program is
   ill-formed.
-- Otherwise (no `do_return` statements, or only diverging ones), if the
-  *compound-statement* diverges, `noreturn_t`. A `do_return` whose operand
+- Otherwise (no `do return` statements, or only diverging ones), if the
+  *compound-statement* diverges, `noreturn_t`. A `do return` whose operand
   diverges counts as a diverging statement here.
 - Otherwise, `void`.
-- Changed from the first draft, which said "if every `do_return` operand
+- Changed from the first draft, which said "if every `do return` operand
   diverges, the type is `noreturn_t`". That turned
-  `do { if (c) do_return fatal(); }` from a valid `void` expression into an
+  `do { if (c) do return fatal(); }` from a valid `void` expression into an
   error, because a `noreturn_t` do-expression must not fall off the end.
-  Diverging `do_return`s now simply take no part, as if they were absent.
+  Diverging `do return`s now simply take no part, as if they were absent.
 
 ## Return type deduction for functions and lambdas
 
@@ -263,8 +263,8 @@ feature-test macro is `__cpp_diverging_expressions` (1) and
 - **Statements and `do` expressions.**
   - `isDivergingStmt` covers the statements listed above plus declaration
     statements with a diverging initializer.
-  - In a `do` expression, `do_return` statements with diverging operands take
-    no part in deduction. If no other `do_return` remains, the type is
+  - In a `do` expression, `do return` statements with diverging operands take
+    no part in deduction. If no other `do return` remains, the type is
     `noreturn_t` when the body diverges and `void` otherwise.
 - **Return type deduction for functions and lambdas** uses the same rule.
   - `void f() { return fail(); }` is allowed.

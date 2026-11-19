@@ -20,7 +20,7 @@
 // CodeGen gave the second copy.
 
 struct D {
-  int x = do { int j = 10; do_return j; };
+  int x = do { int j = 10; do return j; };
 };
 
 // Two separate allocas for the one `j`, and two separate stores.
@@ -32,7 +32,7 @@ struct D {
 int dmi_two_uses() { return D{}.x + D{}.x; }
 
 // A default argument is the other shared-AST shape.
-int f(int v = do { int j = 20; do_return j; }) { return v; }
+int f(int v = do { int j = 20; do return j; }) { return v; }
 
 // CHECK-LABEL: define {{.*}} @_Z21default_arg_two_callsv
 // CHECK: %[[K1:j[0-9]*]] = alloca i32
@@ -44,7 +44,7 @@ int default_arg_two_calls() { return f() + f(); }
 // An init-capture is declared before the body is entered, so it has to be
 // tracked from the same point.
 struct C {
-  int x = do [k = 30] { do_return k; };
+  int x = do [k = 30] { do return k; };
 };
 
 // CHECK-LABEL: define {{.*}} @_Z21init_capture_two_usesv
@@ -56,7 +56,7 @@ int init_capture_two_uses() { return C{}.x + C{}.x; }
 
 // A local class declared in the body: two objects, one type, one constant.
 struct L {
-  int x = do { struct Inner { int a; }; Inner i{40}; do_return i.a; };
+  int x = do { struct Inner { int a; }; Inner i{40}; do return i.a; };
 };
 
 // CHECK-LABEL: define {{.*}} @_Z20local_class_two_usesv
@@ -69,7 +69,7 @@ int local_class_two_uses() { return L{}.x + L{}.x; }
 // A static local is one object no matter how many times the body is emitted:
 // forgetting the mapping must not make a second copy of it.
 struct SL {
-  int x = do { static int counter = 50; do_return ++counter; };
+  int x = do { static int counter = 50; do return ++counter; };
 };
 
 // CHECK-LABEL: define {{.*}} @_Z21static_local_two_usesv
@@ -89,7 +89,7 @@ struct Guard {
 };
 
 struct G {
-  int x = do { Guard g(60); do_return g.get(); };
+  int x = do { Guard g(60); do return g.get(); };
 };
 
 // CHECK-LABEL: define {{.*}} @_Z14guard_two_usesv

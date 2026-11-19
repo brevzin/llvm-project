@@ -12,12 +12,12 @@ namespace move_eligible_named_local {
     constexpr T(T &&o) noexcept : copies(o.copies), moves(o.moves + 1) {}
   };
 
-  // do_return on a named local triggers implicit move (C++20
+  // do return on a named local triggers implicit move (C++20
   // [class.copy.elision]p3), the same as `return r;`.
   constexpr T via_do_return() {
     return do {
       T r;
-      do_return r;
+      do return r;
     };
   }
   // The do-expression's prvalue result is materialized directly into `s`
@@ -31,7 +31,7 @@ namespace move_eligible_named_local {
   constexpr T via_const_local() {
     return do {
       const T r;
-      do_return r;
+      do return r;
     };
   }
   static_assert(via_const_local().copies == 1);
@@ -41,7 +41,7 @@ namespace move_eligible_named_local {
 namespace materialized_inplace {
   // Variable initialized from a do-expression: the do-expression body
   // constructs directly into the variable's storage (mandatory elision
-  // for prvalues). do_return of a named local is an implicit-move.
+  // for prvalues). do return of a named local is an implicit-move.
   struct T {
     int moves = 0;
     constexpr T() = default;
@@ -52,7 +52,7 @@ namespace materialized_inplace {
   constexpr int test() {
     T s = do {
       T r;
-      do_return r;
+      do return r;
     };
     return s.moves;
   }
@@ -74,7 +74,7 @@ namespace deduced_type_does_not_force_copy {
   constexpr int test() {
     auto v = do {
       T r;
-      do_return r;
+      do return r;
     };
     return v.copies;
   }
@@ -93,7 +93,7 @@ namespace explicit_type_still_move_eligible {
   constexpr int test() {
     T s = do -> T {
       T r;
-      do_return r;
+      do return r;
     };
     return s.moves;
   }
@@ -101,7 +101,7 @@ namespace explicit_type_still_move_eligible {
 }
 
 namespace prvalue_operand_no_extra_move {
-  // A prvalue do_return operand: the temporary materializes directly in
+  // A prvalue do return operand: the temporary materializes directly in
   // the result slot. No copy or move involved.
   struct T {
     int copies = 0, moves = 0;
@@ -113,13 +113,13 @@ namespace prvalue_operand_no_extra_move {
   constexpr T make_prvalue() { return T{}; }
 
   constexpr int test() {
-    T s = do { do_return T{}; };       // prvalue
+    T s = do { do return T{}; };       // prvalue
     return s.copies + s.moves;
   }
   static_assert(test() == 0);
 
   constexpr int test2() {
-    T s = do { do_return make_prvalue(); };  // prvalue from function
+    T s = do { do return make_prvalue(); };  // prvalue from function
     return s.copies + s.moves;
   }
   static_assert(test2() == 0);

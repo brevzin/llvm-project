@@ -522,7 +522,7 @@ public:
   }
 };
 
-/// Represents a 'do_return' statement: the value-yielding statement of a
+/// Represents a 'do return' statement: the value-yielding statement of a
 /// do-expression. Lexically nested inside a do-expression body.
 class DoReturnStmt : public Stmt {
   SourceLocation DoReturnLoc;
@@ -540,7 +540,7 @@ public:
   SourceLocation getKeywordLoc() const { return DoReturnLoc; }
   void setKeywordLoc(SourceLocation L) { DoReturnLoc = L; }
 
-  /// The yielded expression. May be null for `do_return;`.
+  /// The yielded expression. May be null for `do return;`.
   Expr *getOperand() const { return static_cast<Expr *>(Operand); }
   void setOperand(Expr *E) { Operand = E; }
 

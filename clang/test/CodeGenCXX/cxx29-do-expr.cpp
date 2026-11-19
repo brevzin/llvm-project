@@ -8,22 +8,22 @@
 // CHECK: doexpr.end:
 // CHECK: load i32, ptr %doexpr.result
 int basic() {
-  return do { do_return 42; };
+  return do { do return 42; };
 }
 
-// Two `do_return` paths converge at the join block.
+// Two `do return` paths converge at the join block.
 // CHECK-LABEL: define {{.*}} @_Z11two_returnsi
 // CHECK: doexpr.end:
 int two_returns(int n) {
   return do {
-    if (n) do_return 1;
-    do_return 2;
+    if (n) do return 1;
+    do return 2;
   };
 }
 
 // 'return' inside do-expression returns from the enclosing function:
 // the -1 path stores into %retval and branches to %return, while the
-// do_return path stores into the result slot -- here the variable being
+// do return path stores into the result slot -- here the variable being
 // initialized, since the do-expression is the whole initializer (see
 // cxx29-do-expr-result-slot.cpp).
 // CHECK-LABEL: define {{.*}} @_Z12outer_returnb
@@ -32,7 +32,7 @@ int two_returns(int n) {
 int outer_return(bool b) {
   int x = do {
     if (!b) return -1;
-    do_return 1;
+    do return 1;
   };
   return x + 100;
 }
@@ -44,7 +44,7 @@ int outer_break(const int *p, int n) {
   for (int i = 0; i < n; ++i) {
     int v = do {
       if (p[i] < 0) break;
-      do_return p[i];
+      do return p[i];
     };
     total += v;
   }
@@ -55,7 +55,7 @@ int outer_break(const int *p, int n) {
 // CHECK-LABEL: define {{.*}} @_Z13explicit_typev
 // CHECK: store double 1.000000e+00
 double explicit_type() {
-  return do -> double { do_return 1; };
+  return do -> double { do return 1; };
 }
 
 // 'continue' inside do-expression jumps to the enclosing loop's continue
@@ -67,7 +67,7 @@ int outer_continue(const int *p, int n) {
   for (int i = 0; i < n; ++i) {
     int v = do {
       if (p[i] < 0) continue;
-      do_return p[i];
+      do return p[i];
     };
     total += v;
   }
@@ -85,7 +85,7 @@ struct Pair { int a, b; };
 // CHECK: store i32 2
 // CHECK: br label %doexpr.end
 Pair make_pair() {
-  return do { do_return Pair{1, 2}; };
+  return do { do return Pair{1, 2}; };
 }
 
 // RAII destructor for a body-local variable runs before the do-expression's
@@ -103,7 +103,7 @@ struct Counter {
 int raii_return(int *live) {
   return do {
     Counter c(live);
-    do_return *live;
+    do return *live;
   };
 }
 
@@ -114,11 +114,11 @@ int raii_return(int *live) {
 void void_expr(int *p) {
   (void)(do -> void {
     *p = 7;
-    do_return;
+    do return;
   });
 }
 
-// `do_return` of a named local lvalue is move-eligible: the IR contains a
+// `do return` of a named local lvalue is move-eligible: the IR contains a
 // call to the move constructor (taking T &&), not the copy constructor.
 //
 // Both bodies below name a second local on the other path, which is what
@@ -140,8 +140,8 @@ Movable move_name(bool b) {
     Movable r;
     Movable other;
     if (b)
-      do_return other;
-    do_return r;  // implicit move from named local
+      do return other;
+    do return r;  // implicit move from named local
   };
 }
 
@@ -153,13 +153,13 @@ Movable const_name(bool b) {
     const Movable r;
     const Movable other;
     if (b)
-      do_return other;
-    do_return r;
+      do return other;
+    do return r;
   };
 }
 
 // Reference-typed do-expression with an lvalue operand: the slot is a
-// pointer (`T*`); `do_return` stores the operand's address, and the
+// pointer (`T*`); `do return` stores the operand's address, and the
 // surrounding load yields the bound lvalue.
 extern int &lvalue();
 // CHECK-LABEL: define {{.*}} @_Z6ref_okv
@@ -170,7 +170,7 @@ extern int &lvalue();
 // CHECK: doexpr.end:
 // CHECK: load ptr, ptr %doexpr.refresult
 int &ref_ok() {
-  return do -> int & { do_return lvalue(); };
+  return do -> int & { do return lvalue(); };
 }
 
 // Reference-typed do-expression used in a prvalue (scalar) context: the slot
@@ -186,7 +186,7 @@ int consume(int x);
 // CHECK: %[[VAL:.*]] = load i32, ptr %[[PTR]]
 // CHECK: call {{.*}} @_Z7consumei(i32 {{.*}} %[[VAL]])
 int ref_as_value() {
-  return consume(do -> int & { do_return lvalue(); });
+  return consume(do -> int & { do return lvalue(); });
 }
 
 // Basic do-expression init: declare a variable and return its value.
@@ -250,7 +250,7 @@ int init_lifetime_extension() {
 // CHECK: ret i32
 int init_nested(int *live) {
   return do [outer = Counter(live)] {
-    do_return do [inner = Counter(live)] { *live };
+    do return do [inner = Counter(live)] { *live };
   };
 }
 

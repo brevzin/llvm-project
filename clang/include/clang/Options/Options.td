@@ -1728,8 +1728,7 @@ defm coroutines : BoolFOption<"coroutines",
 
 // P2806 do expressions. On by default in C++2d and available as an extension
 // before it, the way -fcoroutines makes co_await/co_return usable in C++17.
-// Turning it on makes 'do_return' a keyword, which -Wc++2d-compat has been
-// warning about in earlier modes all along.
+// No new keyword is involved: a do-expression yields with `do return`.
 defm do_expressions : BoolFOption<"do-expressions",
   LangOpts<"DoExpressions">, Default<cpp29.KeyPath>,
   PosFlag<SetTrue, [], [ClangOption], "Enable">,

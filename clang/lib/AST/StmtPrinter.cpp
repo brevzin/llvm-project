@@ -2907,7 +2907,7 @@ void StmtPrinter::VisitCoreturnStmt(CoreturnStmt *S) {
 }
 
 void StmtPrinter::VisitDoReturnStmt(DoReturnStmt *S) {
-  Indent() << "do_return";
+  Indent() << "do return";
   if (S->getOperand()) {
     OS << " ";
     PrintExpr(S->getOperand());

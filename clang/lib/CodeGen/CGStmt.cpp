@@ -1972,7 +1972,7 @@ void CodeGenFunction::EmitContinueStmt(const ContinueStmt &S) {
 }
 
 void CodeGenFunction::EmitDoReturnStmt(const DoReturnStmt &S) {
-  assert(!DoExprStack.empty() && "do_return stmt not in a do-expression!");
+  assert(!DoExprStack.empty() && "do return stmt not in a do-expression!");
 
   if (HaveInsertPoint())
     EmitStopPoint(&S);
@@ -2025,7 +2025,7 @@ Address CodeGenFunction::EmitDoExpr(const DoExpr &E, AggValueSlot AVS) {
 
   Address Slot = Address::invalid();
   if (IsReference) {
-    // Allocate a pointer slot; do_return stores the referent's address into
+    // Allocate a pointer slot; do return stores the referent's address into
     // it, and EmitDoExprLValue loads it back as the result lvalue.
     QualType PtrTy = getContext().getPointerType(Ty);
     Slot = CreateMemTemp(PtrTy, "doexpr.refresult");
@@ -2081,13 +2081,13 @@ Address CodeGenFunction::EmitDoExpr(const DoExpr &E, AggValueSlot AVS) {
        getLangOpts().ElideConstructors ? E.getNRVOCandidate() : nullptr});
 
   // Emit the body inside its own lexical scope so locals declared in the body
-  // get proper destruction on `do_return`.
+  // get proper destruction on `do return`.
   {
     LexicalScope BodyScope(*this, E.getBody()->getSourceRange());
     EmitCompoundStmtWithoutScope(*E.getBody(), /*GetLast=*/false);
 
-    // If control flowed off the end of the body without a do_return, this
-    // is UB at runtime (Sema rejects do-expressions with no do_return for
+    // If control flowed off the end of the body without a do return, this
+    // is UB at runtime (Sema rejects do-expressions with no do return for
     // non-void result types). Insert an unreachable so the verifier is
     // happy.
     if (HaveInsertPoint() && !IsVoid) {

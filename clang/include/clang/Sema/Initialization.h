@@ -133,7 +133,7 @@ public:
     EK_ParenAggInitMember,
 
     /// The entity being initialized is the result of a do-expression
-    /// ('do_return' operand). Like EK_Result, but the lifetime boundary is
+    /// ('do return' operand). Like EK_Result, but the lifetime boundary is
     /// the do-expression, not the enclosing function: references to
     /// declarations outside the do-expression are checked when the completed
     /// do-expression is consumed, not here.
@@ -212,7 +212,7 @@ private:
   };
 
   struct DE {
-    /// The location of the 'do_return'.
+    /// The location of the 'do return'.
     SourceLocation Location;
 
     /// The scope immediately outside the do-expression, used to distinguish
@@ -239,7 +239,7 @@ private:
 
     struct LN LocAndNRVO;
 
-    /// When Kind == EK_DoExprResult, the 'do_return' location and the scope
+    /// When Kind == EK_DoExprResult, the 'do return' location and the scope
     /// outside the do-expression.
     struct DE DoExprResult;
 

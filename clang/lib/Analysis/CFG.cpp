@@ -3151,7 +3151,7 @@ CFGBlock *CFGBuilder::VisitDeclSubExpr(DeclStmt *DS) {
 
   // An expansion statement (`template for`) is represented as a DeclStmt
   // wrapping an ExpansionStmtDecl. When analyzing a do-expression body, model
-  // its instantiations so control flow within them (e.g. do_return) is visible.
+  // its instantiations so control flow within them (e.g. do return) is visible.
   if (const auto *ESD = dyn_cast<ExpansionStmtDecl>(DS->getSingleDecl())) {
     if (BuildOpts.DoExpressionBody)
       if (CXXExpansionStmt *Exp = ESD->getStmt())
@@ -4405,7 +4405,7 @@ CFGBlock *CFGBuilder::VisitCXXTypeidExpr(CXXTypeidExpr *S, AddStmtChoice asc) {
 CFGBlock *CFGBuilder::VisitDoExpr(DoExpr *E, AddStmtChoice asc) {
   // A nested do-expression is opaque to the reachability of the enclosing
   // do-expression body: for fall-off-the-end analysis it is a value-producing
-  // expression that completes normally. Its own do_return/return/break/continue
+  // expression that completes normally. Its own do return/return/break/continue
   // and init statements belong to it, so we do not descend into its body.
   // Outside do-expression-body analysis we keep the default behavior of walking
   // the children.
@@ -4420,12 +4420,12 @@ CFGBlock *CFGBuilder::VisitDoExpr(DoExpr *E, AddStmtChoice asc) {
 }
 
 CFGBlock *CFGBuilder::VisitDoReturnStmt(DoReturnStmt *S) {
-  // Outside do-expression-body analysis, do_return is treated as an ordinary
+  // Outside do-expression-body analysis, do return is treated as an ordinary
   // statement (its transfer to the do-expression's end is not modeled here).
   if (!BuildOpts.DoExpressionBody)
     return VisitStmt(S, AddStmtChoice::AlwaysAdd);
 
-  // Within a do-expression body, `do_return` yields the do-expression's value
+  // Within a do-expression body, `do return` yields the do-expression's value
   // and leaves the body, transferring control to the do-expression's end.
   // Model it like a return: the current block ends here and flows to the exit
   // block.
@@ -4447,7 +4447,7 @@ CFGBlock *CFGBuilder::VisitCXXExpansionStmt(CXXExpansionStmt *E) {
   // An expansion statement (`template for`) is a compile-time-unrolled sequence
   // of its instantiations. Model it like a compound statement of those
   // instantiation bodies, in order, so control flow within them (e.g.
-  // do_return, or falling off the end) is visible. A dependent (not-yet
+  // do return, or falling off the end) is visible. A dependent (not-yet
   // expanded) expansion has no instantiations to model; treat it as opaque.
   if (E->hasDependentSize())
     return Block;

@@ -61,7 +61,7 @@ __macro vec(Ts&&... xs) {                       // vec![a, b, c]
   return ^^{ do -> std::vector<...> { std::vector<...> __v;
              __v.reserve(\(sizeof...(xs)));
              \(^^{ __v.__emplace_back_assume_capacity(\(xs)); }...; ^^{})
-             do_return __v; } };
+             do return __v; } };
 }
 ```
 
@@ -524,7 +524,7 @@ trym.cxx:62:19: warning: temporary bound to local reference 'data' will be
     auto&& data = try_!(get_data<int>());
                   ^~~~~~~~~~~~~~~~~~~~~~
 trym.cxx:52:52: note: expanded from macro 'try_'
-            do_return \(CT)::extract_continue(fwd!(__r));
+            do return \(CT)::extract_continue(fwd!(__r));
                                                    ^~~
 ```
 
@@ -824,7 +824,7 @@ __macro try_(T&& e) {
         return \(RT)::from_break(
             \(CT)::extract_break(static_cast<decltype(__r)&&>(__r)));
       }
-      do_return \(CT)::extract_continue(static_cast<decltype(__r)&&>(__r));
+      do return \(CT)::extract_continue(static_cast<decltype(__r)&&>(__r));
     }
   };
 }
@@ -837,7 +837,7 @@ own local, and `\(e)` is an already-bound expression that cannot see it.
 Two properties worth naming, both verified:
 
 - A plain `return` inside a `do`-expression body returns from the *enclosing
-  function*, which is exactly the control flow `try_` needs; `do_return`
+  function*, which is exactly the control flow `try_` needs; `do return`
   yields the do-expression's value. This is what replaces the C macro's
   `match`/`case`.
 - The context tracks the invocation, not the definition: one macro definition

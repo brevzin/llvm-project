@@ -23,7 +23,7 @@ struct B {
 constexpr B at_namespace_scope = do {
   B x{6};
   x &= B{3};
-  do_return x;
+  do return x;
 };
 static_assert(at_namespace_scope.v == 2);
 
@@ -31,7 +31,7 @@ constexpr B from_a_constexpr_function() {
   return do {
     B x{6};
     x &= B{3};
-    do_return x;
+    do return x;
   };
 }
 static_assert(from_a_constexpr_function().v == 2);
@@ -41,7 +41,7 @@ void at_block_scope() {
   constexpr B one_candidate = do {
     B x{6};
     x &= B{3};
-    do_return x;
+    do return x;
   };
   static_assert(one_candidate.v == 2);
 
@@ -51,15 +51,15 @@ void at_block_scope() {
     B b{7};
     a &= B{3};
     if (a.v)
-      do_return a;
-    do_return b;
+      do return a;
+    do return b;
   };
   static_assert(two_candidates.v == 2);
 
   // A local of a nested lambda is the lambda's, not the body's; mutating it is
   // allowed for its own reasons, and it must not be confused with ours.
   constexpr B through_a_lambda = do {
-    do_return [] {
+    do return [] {
       B y{6};
       y &= B{3};
       return y;
@@ -70,7 +70,7 @@ void at_block_scope() {
   // Reading one still works.
   constexpr int read_only = do {
     int k = 5;
-    do_return k;
+    do return k;
   };
   static_assert(read_only == 5);
 }

@@ -19,7 +19,7 @@ __macro vec(Args&&... args) {
             auto vec = ::std::vector<\(^^T)>();
             vec.reserve(\(sizeof...(Args)));
             \(emplace_back_loop);
-            do_return vec;
+            do return vec;
         }
     };
 }

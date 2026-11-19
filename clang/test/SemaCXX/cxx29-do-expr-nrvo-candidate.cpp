@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -std=c++2d -ast-dump -ast-dump-filter=fn %s | FileCheck %s
 //
 // Which do-expressions get a copy-elision candidate, as Sema decides it.
-// The candidate is the body local that every value-yielding `do_return`
+// The candidate is the body local that every value-yielding `do return`
 // names; CodeGen then builds it in the do-expression's result slot. See
 // CodeGenCXX/cxx29-do-expr-nrvo.cpp for the emission itself.
 
@@ -17,19 +17,19 @@ struct T {
 T fn_one_candidate() {
   return do {
     T r;
-    do_return r;
+    do return r;
   };
 }
 
-// Several `do_return`s naming the same variable keep it.
+// Several `do return`s naming the same variable keep it.
 // CHECK-LABEL: FunctionDecl {{.*}} fn_same_candidate_twice
 // CHECK: DoExpr {{.*}} nrvo_candidate(Var {{.*}} 'r' 'T')
 T fn_same_candidate_twice(bool b) {
   return do {
     T r;
     if (b)
-      do_return r;
-    do_return r;
+      do return r;
+    do return r;
   };
 }
 
@@ -39,7 +39,7 @@ T fn_same_candidate_twice(bool b) {
 T fn_const_candidate() {
   return do {
     const T r;
-    do_return r;
+    do return r;
   };
 }
 
@@ -51,8 +51,8 @@ T fn_two_candidates(bool b) {
     T a;
     T b2;
     if (b)
-      do_return a;
-    do_return b2;
+      do return a;
+    do return b2;
   };
 }
 
@@ -63,8 +63,8 @@ T fn_mixed_with_prvalue(bool b) {
   return do {
     T r;
     if (b)
-      do_return T();
-    do_return r;
+      do return T();
+    do return r;
   };
 }
 
@@ -74,7 +74,7 @@ T fn_mixed_with_prvalue(bool b) {
 // CHECK-NOT: DoExpr {{.*}} nrvo_candidate
 T fn_enclosing_local() {
   T outer;
-  return do { do_return outer; };
+  return do { do return outer; };
 }
 
 // An outer-scope `return` claims the variable for the function's return slot
@@ -86,7 +86,7 @@ T fn_outer_return_wins(bool b) {
     T r;
     if (b)
       return r;
-    do_return r;
+    do return r;
   };
   return t;
 }
@@ -95,7 +95,7 @@ T fn_outer_return_wins(bool b) {
 // CHECK-LABEL: FunctionDecl {{.*}} fn_reference_result
 // CHECK-NOT: DoExpr {{.*}} nrvo_candidate
 T &fn_reference_result(T &g) {
-  return do -> T & { do_return g; };
+  return do -> T & { do return g; };
 }
 
 // A candidate whose type differs from the result type is at most
@@ -108,7 +108,7 @@ struct U {
 U fn_converted() {
   return do -> U {
     T r;
-    do_return r;
+    do return r;
   };
 }
 
@@ -116,7 +116,7 @@ U fn_converted() {
 template <class X> X fn_template() {
   return do {
     X r;
-    do_return r;
+    do return r;
   };
 }
 template T fn_template<T>();

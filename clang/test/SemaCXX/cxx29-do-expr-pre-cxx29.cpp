@@ -4,19 +4,20 @@
 // cxx29-no-diagnostics
 
 // P2806 ext: do-expressions require C++29. Below that, 'do' in expression
-// position gets a targeted diagnostic pointing at the language mode, and
-// 'do_return' remains an ordinary identifier.
+// position gets a targeted diagnostic pointing at the language mode.
 
 int f() {
 #if __cplusplus > 202400L
-  return do { do_return 42; };
+  return do { do return 42; };
 #else
-  int x = do { do_return 42; }; // precxx29-error {{do-expressions are only available in C++29; use '-std=c++2d', or '-fdo-expressions' to enable them as an extension}}
+  int x = do { do return 42; }; // precxx29-error {{do-expressions are only available in C++29; use '-std=c++2d', or '-fdo-expressions' to enable them as an extension}}
   return x;
 #endif
 }
 
-#if __cplusplus <= 202400L
-// 'do_return' is not a keyword below C++29.
+// There is no new keyword, so 'do_return' is an ordinary identifier in every
+// mode, and 'do return' outside a do-expression is a do/while loop as ever.
 int do_return = 1;
-#endif
+int g() {
+  do return do_return; while (0);
+}

@@ -1582,10 +1582,10 @@ private:
   SmallVector<BreakContinue, 8> BreakContinueStack;
 
   /// Per-do-expression CodeGen state. When emitting a do-expression body,
-  /// `do_return` writes its operand into `Slot` and branches to `EndBlock`.
+  /// `do return` writes its operand into `Slot` and branches to `EndBlock`.
   /// When `Slot` is invalid (void result), the operand is emitted for side
   /// effects only. When `IsReference` is true, the do-expression yields a
-  /// glvalue: `Slot` holds a pointer to the referent, and `do_return` stores
+  /// glvalue: `Slot` holds a pointer to the referent, and `do return` stores
   /// the address of its operand instead of constructing into the slot.
   struct DoExprEmitInfo {
     Address Slot;

@@ -16,7 +16,7 @@
 namespace implicit_member_access {
   struct S {
     int a = 1;
-    int x = do { int j = a + 10; do_return j; };
+    int x = do { int j = a + 10; do return j; };
   };
   int use() { return S{}.x; }
 }
@@ -24,7 +24,7 @@ namespace implicit_member_access {
 namespace explicit_this {
   struct S {
     int a = 2;
-    int x = do { do_return this->a + 10; };
+    int x = do { do return this->a + 10; };
   };
   int use() { return S{}.x; }
 }
@@ -32,7 +32,7 @@ namespace explicit_this {
 namespace member_function_call {
   struct S {
     constexpr int a() const { return 3; }
-    int x = do { do_return a() + 10; };
+    int x = do { do return a() + 10; };
   };
   int use() { return S{}.x; }
 }
@@ -46,8 +46,8 @@ namespace private_member {
     constexpr int hidden() const { return 4; }
 
   public:
-    int x = do { int j = secret; do_return j; };
-    int y = do { do_return hidden(); };
+    int x = do { int j = secret; do return j; };
+    int y = do { do return hidden(); };
   };
   int use() { return S{}.x + S{}.y; }
 }
@@ -55,7 +55,7 @@ namespace private_member {
 namespace static_member {
   struct S {
     static constexpr int k = 5;
-    int x = do { do_return k; };
+    int x = do { do return k; };
   };
   static_assert(S{}.x == 5);
 }
@@ -63,7 +63,7 @@ namespace static_member {
 namespace member_in_default_argument {
   struct S {
     static constexpr int k = 6;
-    static constexpr int f(int v = do { do_return k; }) { return v; }
+    static constexpr int f(int v = do { do return k; }) { return v; }
   };
   static_assert(S::f() == 6);
 }
@@ -71,7 +71,7 @@ namespace member_in_default_argument {
 namespace member_through_nested_do {
   struct S {
     int a = 7;
-    int x = do { do_return do { do_return a; }; };
+    int x = do { do return do { do return a; }; };
   };
   int use() { return S{}.x; }
 }
@@ -81,7 +81,7 @@ namespace lambda_inside_a_body_in_a_dmi {
   // one from inside a do-expression body has to keep working.
   struct S {
     int a = 8;
-    int x = do { do_return [this] { return a; }(); };
+    int x = do { do return [this] { return a; }(); };
   };
   int use() { return S{}.x; }
 }
@@ -93,7 +93,7 @@ namespace constant_evaluation_of_this {
   // where the initializer's object lives.
   struct S {
     int a = 1;
-    int x = do { do_return a + 10; };
+    int x = do { do return a + 10; };
   };
   static_assert(S{}.x == 11);
 
@@ -101,7 +101,7 @@ namespace constant_evaluation_of_this {
   struct Nested {
     int a = 2;
     int b = 3;
-    int x = do { do_return a + do { do_return b * a; }; };
+    int x = do { do return a + do { do return b * a; }; };
   };
   static_assert(Nested{}.x == 8);
 
@@ -109,15 +109,15 @@ namespace constant_evaluation_of_this {
   // itself initialized from another member's value.
   struct Chained {
     int a = 4;
-    int b = do { do_return a + 1; };
-    int c = do { do_return b + 1; };
+    int b = do { do return a + 1; };
+    int c = do { do return b + 1; };
   };
   static_assert(Chained{}.c == 6);
 
   // The controls, which all work.
   struct InConstexprMemberFn {
     int a = 1;
-    constexpr int f() const { return do { do_return a + 10; }; }
+    constexpr int f() const { return do { do return a + 10; }; }
   };
   static_assert(InConstexprMemberFn{}.f() == 11);
 

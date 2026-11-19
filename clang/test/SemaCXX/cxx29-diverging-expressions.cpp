@@ -165,18 +165,18 @@ void f(bool c, int i) {
   static_assert(same<decltype(do { int x = fail("q"); }), noreturn_t>);
   static_assert(same<decltype(do { fatal(); ; }), noreturn_t>);
   // Diverging do_returns take no part in the deduction.
-  static_assert(same<decltype(do { do_return fail("x"); }), noreturn_t>);
-  static_assert(same<decltype(do { if (c) do_return 1; do_return fail("x"); }), int>);
-  static_assert(same<decltype(do { if (c) do_return fail("x"); do_return 1; }), int>);
-  static_assert(same<decltype(do { if (c) do_return fatal(); do_return 1; }), int>);
-  static_assert(same<decltype(do { if (c) do_return fatal(); }), void>);
+  static_assert(same<decltype(do { do return fail("x"); }), noreturn_t>);
+  static_assert(same<decltype(do { if (c) do return 1; do return fail("x"); }), int>);
+  static_assert(same<decltype(do { if (c) do return fail("x"); do return 1; }), int>);
+  static_assert(same<decltype(do { if (c) do return fatal(); do return 1; }), int>);
+  static_assert(same<decltype(do { if (c) do return fatal(); }), void>);
   static_assert(same<decltype(do -> auto { fatal(); }), noreturn_t>);
   static_assert(same<decltype(do { fatal_int() }), noreturn_t>);
 
   int j = c ? 1 : do { log("bye"); fatal(); };
   int k = do -> int { fatal(); };
-  int &l = do -> int & { do_return fail("l"); };
-  int m = do { if (c) do_return 1; else do_return fail("x"); };
+  int &l = do -> int & { do return fail("l"); };
+  int m = do { if (c) do return 1; else do return fail("x"); };
   for (;;) {
     int n = i == 0 ? 0 : do { log("x"); continue; };
     (void)n;

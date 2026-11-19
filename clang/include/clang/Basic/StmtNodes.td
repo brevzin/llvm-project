@@ -61,7 +61,7 @@ def CXXForExpansionStmt : StmtNode<Stmt>;
 def CoroutineBodyStmt : StmtNode<Stmt>;
 def CoreturnStmt : StmtNode<Stmt>;
 
-// do-expressions (block-expression with explicit do_return)
+// do-expressions (block-expression with explicit do return)
 def DoReturnStmt : StmtNode<Stmt>;
 
 // C++ expansion statements (P1306)

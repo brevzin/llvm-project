@@ -19,15 +19,20 @@
 int use(int a) {
   return do { // off-error {{do-expressions are only available in C++29; use '-std=c++2d', or '-fdo-expressions' to enable them as an extension}}
     if (a)
-      do_return 1;
-    do_return 2;
+      do return 1;
+    do return 2;
   };
 }
 
-// Enabling the feature makes 'do_return' a keyword, in whatever mode. That is
-// the cost of the flag, and -Wc++2d-compat has been warning about it in
-// earlier modes all along; see cxx29-do-expr-pre-cxx29.cpp for the identifier
-// side.
+// Enabling the feature reserves no identifier: 'do return' is two existing
+// keywords, so the flag cannot change the meaning of a valid program.
+int do_return(int a) {
+  do return a; while (0);
+}
+int use_both(int a) {
+  return do { do return do_return(a); }; // off-error {{do-expressions are only available in C++29}}
+}
+
 // __has_extension answers wherever the feature is available; __has_feature
 // tracks the same LangOpt, so the two must agree in every mode above.
 #if __has_feature(do_expressions)

@@ -3,13 +3,13 @@
 // expected-no-diagnostics
 
 namespace basic {
-  constexpr int basic_value() { return do { do_return 1; }; }
+  constexpr int basic_value() { return do { do return 1; }; }
   static_assert(basic_value() == 1);
 
-  constexpr int basic_arith() { return do { do_return 2 + 3; }; }
+  constexpr int basic_arith() { return do { do return 2 + 3; }; }
   static_assert(basic_arith() == 5);
 
-  // Implicit do_return: trailing expression without semicolon
+  // Implicit do return: trailing expression without semicolon
   constexpr int implicit_simple() { return do { 1 }; }
   static_assert(implicit_simple() == 1);
 
@@ -23,21 +23,21 @@ namespace basic {
 }
 
 namespace explicit_type {
-  constexpr auto y() { return do -> long { do_return 1; }; }
+  constexpr auto y() { return do -> long { do return 1; }; }
   static_assert(__is_same(decltype(y()), long));
 
   // Explicit type drives conversion of operand.
-  constexpr auto dval() { return do -> double { do_return 1; }; }
+  constexpr auto dval() { return do -> double { do return 1; }; }
   static_assert(dval() == 1.0);
 
   // Narrowing conversions are allowed via copy-init.
-  constexpr auto ival() { return do -> int { do_return 1.5; }; }
+  constexpr auto ival() { return do -> int { do return 1.5; }; }
   static_assert(ival() == 1);
 }
 
 namespace explicit_decltype_auto {
   constexpr decltype(auto) explicit_prvalue() {
-    return do -> decltype(auto) { do_return 1; };
+    return do -> decltype(auto) { do return 1; };
   }
   static_assert(__is_same(decltype(explicit_prvalue()), int));
   static_assert(explicit_prvalue() == 1);
@@ -51,7 +51,7 @@ namespace explicit_decltype_auto {
   int value;
 
   decltype(auto) explicit_lvalue() {
-    return do -> decltype(auto) { do_return (value); };
+    return do -> decltype(auto) { do return (value); };
   }
   static_assert(__is_same(decltype(explicit_lvalue()), int &));
 
@@ -64,9 +64,9 @@ namespace explicit_decltype_auto {
   constexpr decltype(auto) explicit_with_discard() {
     return do -> decltype(auto) {
       if constexpr (__is_same(T, int)) {
-        do_return 1;
+        do return 1;
       } else {
-        do_return 'x';
+        do return 'x';
       }
     };
   }
@@ -77,9 +77,9 @@ namespace explicit_decltype_auto {
 namespace multiple_do_return {
   constexpr int pick(int n) {
     return do {
-      if (n < 0) do_return -1;
-      if (n == 0) do_return 0;
-      do_return 1;
+      if (n < 0) do return -1;
+      if (n == 0) do return 0;
+      do return 1;
     };
   }
   static_assert(pick(-5) == -1);
@@ -88,13 +88,13 @@ namespace multiple_do_return {
 }
 
 namespace deduce_strips_reference {
-  // Deduction across `do_return x` where x is an lvalue must yield the
-  // value type, not a reference. Otherwise the second do_return below
+  // Deduction across `do return x` where x is an lvalue must yield the
+  // value type, not a reference. Otherwise the second do return below
   // (with a different lvalue) would see a deduction conflict.
   constexpr int test(int a, int b) {
     return do {
-      if (a > b) do_return a;
-      do_return b;
+      if (a > b) do return a;
+      do return b;
     };
   }
   static_assert(test(1, 2) == 2);
@@ -108,7 +108,7 @@ namespace outer_return {
   int f(bool b) {
     int x = do {
       if (!b) return -1;
-      do_return 1;
+      do return 1;
     };
     return x + 100;
   }
@@ -116,7 +116,7 @@ namespace outer_return {
   constexpr int constexpr_f(bool b) {
     int x = do -> int {
       if (b) return -1;
-      do_return 1;
+      do return 1;
     };
     return x + 100;
   }
@@ -131,7 +131,7 @@ namespace outer_break {
     for (int i = 0; i < n; ++i) {
       int v = do {
         if (p[i] < 0) break;
-        do_return p[i];
+        do return p[i];
       };
       total += v;
     }
@@ -149,7 +149,7 @@ namespace outer_continue {
     for (int i = 0; i < n; ++i) {
       int v = do {
         if (p[i] < 0) continue;
-        do_return p[i];
+        do return p[i];
       };
       total += v;
     }
@@ -169,7 +169,7 @@ namespace outer_flow_subexpression {
   constexpr int break_before_side_effect() {
     int se = 0;
     for (;;) {
-      bool b = (do -> bool { break; do_return true; }) && (se = 7);
+      bool b = (do -> bool { break; do return true; }) && (se = 7);
       (void)b;
     }
     return se;  // break fires before 'se = 7'
@@ -181,7 +181,7 @@ namespace outer_flow_subexpression {
     int iters = 0;
     for (int i = 0; i < n; ++i) {
       ++iters;
-      bool b = (do -> bool { continue; do_return true; }) && (se += 10);
+      bool b = (do -> bool { continue; do return true; }) && (se += 10);
       (void)b;
     }
     return se * 1000 + iters;  // 'se += 10' never runs; se stays 0
@@ -190,7 +190,7 @@ namespace outer_flow_subexpression {
 
   constexpr int return_before_side_effect(int x) {
     int se = 0;
-    bool b = (do -> bool { return x * 2; do_return true; }) && (se = 7);
+    bool b = (do -> bool { return x * 2; do return true; }) && (se = 7);
     (void)b;
     return se;  // the do-expression's 'return' exits the function with x*2
   }
@@ -204,11 +204,11 @@ namespace switch_break_inside {
   constexpr int classify(int x) {
     return do {
       switch (x) {
-        case 1: do_return 100;
-        case 2: break;  // breaks switch only; do_return 0 below runs
-        default: do_return 999;
+        case 1: do return 100;
+        case 2: break;  // breaks switch only; do return 0 below runs
+        default: do return 999;
       }
-      do_return 0;
+      do return 0;
     };
   }
   static_assert(classify(1) == 100);
@@ -218,14 +218,14 @@ namespace switch_break_inside {
 
 namespace switch_covers_all_paths {
   // A switch whose every arm terminates (with a 'default' so the switch is
-  // exhaustive) does NOT fall off the end, so no trailing do_return is needed.
+  // exhaustive) does NOT fall off the end, so no trailing do return is needed.
   // The reachability analysis is CFG-based, so it models switch coverage
   // accurately (a purely syntactic walk would reject this).
   constexpr int classify(int x) {
     return do -> int {
       switch (x) {
-        case 1: do_return 1;
-        default: do_return 2;
+        case 1: do return 1;
+        default: do return 2;
       }
     };
   }
@@ -239,7 +239,7 @@ namespace switch_covers_all_paths {
         case 1:
           [[fallthrough]];
         default:
-          do_return 9;
+          do return 9;
       }
     };
   }
@@ -250,22 +250,22 @@ namespace switch_covers_all_paths {
 namespace nested {
   constexpr int compute() {
     return do {
-      int inner = do { do_return 5; };
-      do_return inner * 2;
+      int inner = do { do return 5; };
+      do return inner * 2;
     };
   }
   static_assert(compute() == 10);
 
-  // Three levels of nesting; each do_return yields to its lexically
+  // Three levels of nesting; each do return yields to its lexically
   // immediate enclosing do-expression.
   constexpr int triple() {
     return do {
-      int x = do { do_return 7; };
+      int x = do { do return 7; };
       int y = do {
-        int z = do { do_return 3; };
-        do_return z * x;
+        int z = do { do return 3; };
+        do return z * x;
       };
-      do_return y;
+      do return y;
     };
   }
   static_assert(triple() == 21);
@@ -274,8 +274,8 @@ namespace nested {
 namespace recursive {
   constexpr int fact(int n) {
     return do {
-      if (n <= 1) do_return 1;
-      do_return n * fact(n - 1);
+      if (n <= 1) do return 1;
+      do return n * fact(n - 1);
     };
   }
   static_assert(fact(0) == 1);
@@ -287,7 +287,7 @@ namespace loop_termination {
   constexpr int while_true() {
     return do -> int {
       while (true)
-        do_return 42;
+        do return 42;
     };
   }
   static_assert(while_true() == 42);
@@ -295,7 +295,7 @@ namespace loop_termination {
   constexpr int for_ever() {
     return do -> int {
       for (;;)
-        do_return 17;
+        do return 17;
     };
   }
   static_assert(for_ever() == 17);
@@ -325,7 +325,7 @@ namespace loop_termination {
       while (true) {
         while (true)
           break; // exits the inner loop only
-        do_return 42;
+        do return 42;
       }
     };
   }
@@ -333,7 +333,7 @@ namespace loop_termination {
   int do_while_body_always_yields(bool b) {
     return do -> int {
       do {
-        do_return 42;
+        do return 42;
       } while (b);
     };
   }
@@ -341,18 +341,18 @@ namespace loop_termination {
 
 namespace as_subexpression {
   constexpr int f(int x) { return x * 2; }
-  constexpr int test_arg() { return f(do { do_return 21; }); }
+  constexpr int test_arg() { return f(do { do return 21; }); }
   static_assert(test_arg() == 42);
 
   constexpr int test_arith() {
-    return (do { do_return 5; }) + (do { do_return 3; }) * 2;
+    return (do { do return 5; }) + (do { do return 3; }) * 2;
   }
   static_assert(test_arith() == 11);
 
   constexpr int test_compound_assign() {
     int n = 10;
-    n += do { do_return 5; };
-    n *= do { do_return 3; };
+    n += do { do return 5; };
+    n *= do { do return 3; };
     return n;
   }
   static_assert(test_compound_assign() == 45);
@@ -361,16 +361,16 @@ namespace as_subexpression {
 namespace aggregates {
   struct Pair { int a, b; };
   constexpr Pair make() {
-    return do { do_return Pair{1, 2}; };
+    return do { do return Pair{1, 2}; };
   }
   static_assert(make().a == 1);
   static_assert(make().b == 2);
 
-  // Multiple do_return paths with aggregate type.
+  // Multiple do return paths with aggregate type.
   constexpr Pair pick(bool b) {
     return do {
-      if (b) do_return Pair{10, 20};
-      do_return Pair{30, 40};
+      if (b) do return Pair{10, 20};
+      do return Pair{30, 40};
     };
   }
   static_assert(pick(true).a == 10);
@@ -384,14 +384,14 @@ namespace raii_destruction {
     constexpr ~Counter() { --*p; }
   };
 
-  // Body-local RAII object is destroyed when do_return fires.
+  // Body-local RAII object is destroyed when do return fires.
   constexpr int test_do_return() {
     int live = 0;
     int v = do {
       Counter c(live);  // live becomes 1
-      do_return live;   // observed value is 1
+      do return live;   // observed value is 1
     };
-    // After do_return, c is destroyed; live is back to 0.
+    // After do return, c is destroyed; live is back to 0.
     return v + live * 1000;
   }
   static_assert(test_do_return() == 1);
@@ -403,7 +403,7 @@ namespace raii_destruction {
       int v = do {
         Counter c(live);
         if (i == 1) break;
-        do_return live;
+        do return live;
       };
       (void)v;
     }
@@ -413,25 +413,25 @@ namespace raii_destruction {
 }
 
 namespace void_do_expr {
-  // Void do-expression: falling off the end with no do_return deduces void.
+  // Void do-expression: falling off the end with no do return deduces void.
   static_assert(__is_same(decltype(do {
     int x = 0;
     (void)x;
   }), void));
 
   // 'auto' and 'decltype(auto)' (possibly cv-qualified) deduce void the same
-  // way, with or without a bare do_return.
+  // way, with or without a bare do return.
   static_assert(__is_same(decltype(do -> auto { }), void));
   static_assert(__is_same(decltype(do -> const auto { }), void));
   static_assert(__is_same(decltype(do -> decltype(auto) { }), void));
-  static_assert(__is_same(decltype(do -> auto { do_return; }), void));
-  static_assert(__is_same(decltype(do -> decltype(auto) { do_return; }), void));
+  static_assert(__is_same(decltype(do -> auto { do return; }), void));
+  static_assert(__is_same(decltype(do -> decltype(auto) { do return; }), void));
 
   constexpr int test_deduced_void_falloff() {
     int x = 0;
     (void)(do {
       x = 5;
-      // No do_return; deduces void.
+      // No do return; deduces void.
     });
     return x;
   }
@@ -442,7 +442,7 @@ namespace void_do_expr {
     int x = 0;
     (void)(do -> void {
       x = 5;
-      // No do_return; OK because explicit void.
+      // No do return; OK because explicit void.
     });
     return x;
   }
@@ -452,7 +452,7 @@ namespace void_do_expr {
     int x = 0;
     (void)(do -> void {
       x = 7;
-      do_return;
+      do return;
     });
     return x;
   }
@@ -464,7 +464,7 @@ namespace lambda_inside {
   constexpr int test() {
     return do {
       auto f = [](int x) { return x * 2; };
-      do_return f(7);
+      do return f(7);
     };
   }
   static_assert(test() == 14);
@@ -472,7 +472,7 @@ namespace lambda_inside {
 
 namespace namespace_scope {
   // A do-expression as a constexpr namespace-scope variable initializer.
-  constexpr int x = do { do_return 42; };
+  constexpr int x = do { do return 42; };
   static_assert(x == 42);
 
   // Locals declared inside the body are expression-local, even when the
@@ -480,18 +480,18 @@ namespace namespace_scope {
   constexpr int local = do {
     int y = 1;
     y += 2;
-    do_return y;
+    do return y;
   };
   static_assert(local == 3);
 
   // Reading another namespace-scope constexpr from inside the body works.
-  constexpr int y = do { do_return x + 1; };
+  constexpr int y = do { do return x + 1; };
   static_assert(y == 43);
 
-  // Multiple do_return paths and explicit type at namespace scope.
+  // Multiple do return paths and explicit type at namespace scope.
   constexpr long z = do -> long {
-    if (x > 0) do_return x;
-    do_return 0;
+    if (x > 0) do return x;
+    do return 0;
   };
   static_assert(z == 42L);
 }
@@ -500,15 +500,15 @@ namespace exception_spec {
   void may_throw();
   void no_throw() noexcept;
 
-  static_assert(!noexcept(do { do_return (may_throw(), 1); }));
-  static_assert(noexcept(do { do_return (no_throw(), 1); }));
+  static_assert(!noexcept(do { do return (may_throw(), 1); }));
+  static_assert(noexcept(do { do return (no_throw(), 1); }));
 }
 
 namespace consteval_reachability {
   int runtime_if_not_consteval() {
     return do -> int {
       if ! consteval {
-        do_return 1;
+        do return 1;
       }
     };
   }
@@ -600,7 +600,7 @@ namespace init_statements {
 
   constexpr int nested_init() {
     return do [a = 1] {
-      do_return do [b = 2] { a + b };
+      do return do [b = 2] { a + b };
     };
   }
   static_assert(nested_init() == 3);

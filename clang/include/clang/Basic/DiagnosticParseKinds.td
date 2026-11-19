@@ -292,6 +292,12 @@ def err_expected_less_after : Error<"expected '<' after '%0'">;
 def err_expected_lbrace_in_compound_literal : Error<
   "expected '{' in compound literal">;
 def err_expected_while : Error<"expected 'while' in do/while loop">;
+def warn_do_return_followed_by_while : Warning<
+  "'do return' in a do-expression yields from it rather than beginning a "
+  "do/while loop; this 'while' is a separate statement">,
+  InGroup<DiagGroup<"do-return-while">>;
+def note_do_return_while_braces : Note<
+  "add braces to write a do/while loop whose body is a return statement">;
 
 def err_expected_semi_after_stmt : Error<"expected ';' after %0 statement">;
 def err_expected_semi_after_expr : Error<"expected ';' after expression">;

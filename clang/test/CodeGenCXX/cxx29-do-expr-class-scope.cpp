@@ -19,7 +19,7 @@
 // CHECK: @__const._ZN14WithLocalClass14__do_expr_bodyEv.l = {{.*}} %struct.L { i32 9 }
 
 struct S {
-  static int f(int v = do { int j = 8; do_return j; }) { return v; }
+  static int f(int v = do { int j = 8; do return j; }) { return v; }
 };
 
 // CHECK-LABEL: define {{.*}} @_Z18call_default_arg_1v
@@ -44,7 +44,7 @@ int call_default_arg_2() { return S::f(3); }
 // A local class in a default argument's body: the enclosing-function type of
 // the local class has to be manglable.
 struct WithLocalClass {
-  static int f(int v = do { struct L { int a; }; L l{9}; do_return l.a; }) {
+  static int f(int v = do { struct L { int a; }; L l{9}; do return l.a; }) {
     return v;
   }
 };
@@ -57,7 +57,7 @@ int call_with_local_class() { return WithLocalClass::f(); }
 // A default member initializer goes through a different marking path (the
 // implicit default constructor), and must emit too.
 struct D {
-  int x = do { int j = 10; do_return j; };
+  int x = do { int j = 10; do return j; };
 };
 // CHECK-LABEL: define {{.*}} @_Z13call_dmi_oncev
 // CHECK: %[[DRES:.*]] = alloca i32

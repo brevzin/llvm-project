@@ -9,7 +9,7 @@
 //===----------------------------------------------------------------------===//
 //
 //  Implements semantic analysis for do-expressions:
-//  `do [init-capture-seq[opt]] -> Type { ... }`, with `do_return` yielding
+//  `do [init-capture-seq[opt]] -> Type { ... }`, with `do return` yielding
 //  the value. Each `[name = init]` capture introduces a `decltype((init))`
 //  local (the value category of the initializer is preserved).
 //
@@ -37,7 +37,7 @@ static bool doExprHasDeducedResultType(const Sema::DoExprStackEntry &Entry) {
 /// described by \p Entry (or to a block scope nested inside it)?
 ///
 /// [expr.prim.id.unqual]p15.4, as added by P2806, makes that the condition for
-/// a `do_return` operand to be move-eligible. A variable of the *enclosing*
+/// a `do return` operand to be move-eligible. A variable of the *enclosing*
 /// function fails it: the do-expression ends but the variable does not, so it
 /// can still be read afterwards and must be copied.
 ///
@@ -126,12 +126,12 @@ toConstevalConditionKind(ConstevalIfKind Kind) {
 }
 
 /// Return true if control may fall off the end of a do-expression body \p Body
-/// (rather than always exiting via `do_return`, an outer-scope
+/// (rather than always exiting via `do return`, an outer-scope
 /// `return`/`break`/`continue`/`goto`, a `throw`, or a call to a `[[noreturn]]`
 /// function).
 ///
 /// Reachability is computed from a CFG built in do-expression-body mode (so
-/// escaping `break`/`continue` and `do_return` are modeled as edges to the
+/// escaping `break`/`continue` and `do return` are modeled as edges to the
 /// exit block, and nested do-expressions are opaque). This reuses the same
 /// graph construction that powers -Wreturn-type, so `&&`/`||`, `?:`, constant
 /// loop conditions, and `if constexpr`/`if consteval` pruning are all handled
@@ -152,8 +152,8 @@ static bool doExprBodyMayFallThrough(Sema &S, CompoundStmt *Body,
   //
   //   enum Color : int { Red, Green, Blue };
   //   const char *name = do {
-  //     switch (c) { case Red: do_return "Red"; case Green: do_return "Green";
-  //                  case Blue: do_return "Blue"; }
+  //     switch (c) { case Red: do return "Red"; case Green: do return "Green";
+  //                  case Blue: do return "Blue"; }
   //   };
   //
   // is diagnosed instead of yielding an indeterminate value for any other `c`.
@@ -177,7 +177,7 @@ static bool doExprBodyMayFallThrough(Sema &S, CompoundStmt *Body,
   reachable_code::ScanReachableFromBlock(&Cfg->getEntry(), Live);
 
   // A do-expression "falls off the end" if a live predecessor of the exit block
-  // reaches it via a plain edge — i.e. not through `do_return`, an outer
+  // reaches it via a plain edge — i.e. not through `do return`, an outer
   // `return`/`break`/`continue`, a `throw`, or a [[noreturn]] call. Edges from
   // pruned (unreachable) branches appear as null predecessors and are dropped
   // by IgnoreNullPredecessors.
@@ -220,7 +220,7 @@ static bool doExprBodyMayFallThrough(Sema &S, CompoundStmt *Body,
       return true;
 
     const Stmt *Last = RI->castAs<CFGStmt>().getStmt();
-    // `do_return`/`return` leave via the do-expression value or the enclosing
+    // `do return`/`return` leave via the do-expression value or the enclosing
     // function; `throw` leaves via an exception.
     if (isa<DoReturnStmt, ReturnStmt, CoreturnStmt>(Last))
       continue;
@@ -286,8 +286,8 @@ bool Sema::isDivergingStmt(const Stmt *S, bool InDoExpr) {
 }
 
 namespace {
-/// Finds the `return` or `do_return` statements of one body: not those of a
-/// nested lambda, block, local class, or (for `do_return`) do-expression.
+/// Finds the `return` or `do return` statements of one body: not those of a
+/// nested lambda, block, local class, or (for `do return`) do-expression.
 class DivergingReturnFinder
     : public RecursiveASTVisitor<DivergingReturnFinder> {
 public:
@@ -304,7 +304,7 @@ public:
     return RecursiveASTVisitor::TraverseDecl(D);
   }
   bool TraverseDoExpr(DoExpr *E) {
-    // A nested do-expression's `do_return`s are its own; its `return`s are
+    // A nested do-expression's `do return`s are its own; its `return`s are
     // still the enclosing function's.
     return IsDoReturn ? true : RecursiveASTVisitor::TraverseDoExpr(E);
   }
@@ -525,8 +525,8 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
 
   auto *Compound = cast<CompoundStmt>(Body);
 
-  // A do_return already produced an unrecoverable deduction error; don't
-  // pile on with a misleading "no do_return statements" diagnostic.
+  // A do return already produced an unrecoverable deduction error; don't
+  // pile on with a misleading "no do return statements" diagnostic.
   if (Entry.DeductionFailed)
     return ExprError();
 
@@ -537,12 +537,12 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
   } else if (!Entry.DeducedType.isNull()) {
     ResultType = Entry.DeducedType;
   } else if (TemplateDepth > 0 || Entry.HasDependentDoReturn) {
-    // Inside a template, defer: no do_return yet seen with a non-dependent
+    // Inside a template, defer: no do return yet seen with a non-dependent
     // operand. Use a dependent placeholder.
     ResultType = Context.DependentTy;
   } else if (getLangOpts().DivergingExpressions &&
              isDivergingStmt(Compound, /*InDoExpr=*/true)) {
-    // P3549: no `do_return` yields a value (any there are diverge), and the
+    // P3549: no `do return` yields a value (any there are diverge), and the
     // body diverges: the do-expression diverges, with type std::noreturn_t.
     // With a placeholder type as written, deduce it from a std::noreturn_t.
     ResultType = Context.NoReturnTy;
@@ -560,8 +560,8 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
     }
   } else if (Entry.TypeIsExplicit &&
              Entry.ExplicitType->getContainedAutoType()) {
-    // No do_return statements: deduce against void, as if the body ended in
-    // `do_return;` (mirrors the no-operand case in BuildDoReturnStmt). As
+    // No do return statements: deduce against void, as if the body ended in
+    // `do return;` (mirrors the no-operand case in BuildDoReturnStmt). As
     // with functions, the type as written must be 'auto' or
     // 'decltype(auto)', possibly cv-qualified or constrained: 'auto*' and
     // the like cannot deduce from void.
@@ -579,14 +579,14 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
       return ExprError();
     ResultType = Entry.DeducedType;
   } else {
-    // No do_return statements and no explicit type: the result is void, like
+    // No do return statements and no explicit type: the result is void, like
     // a function with a deduced return type and no return statements.
     ResultType = Context.VoidTy;
   }
 
   // Reachability: a do-expression with a non-void result type is ill-formed
   // if control can fall off the end of the body without exiting via
-  // `do_return`, an outer-scope return/break/continue, a throw, or a
+  // `do return`, an outer-scope return/break/continue, a throw, or a
   // [[noreturn]] call. (Void do-expressions are like void functions:
   // falling off the end is fine.) Skip the check for dependent types so the
   // analysis runs on each instantiation rather than on the template.
@@ -606,7 +606,7 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
     ResultType = Ref->getPointeeType();
   } else {
     // A prvalue of non-class, non-array type never has cv-qualified type
-    // ([expr.type]p2) — e.g. `do -> const auto { do_return 42; }` is a
+    // ([expr.type]p2) — e.g. `do -> const auto { do return 42; }` is a
     // prvalue of type 'int', just like calling a function returning
     // 'const int'.
     ResultType = ResultType.getNonLValueExprType(Context);
@@ -615,7 +615,7 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
   if (InitStmt)
     Cleanup.setExprNeedsCleanups(true);
 
-  // The diverging `do_return`s took no part in deducing the type; convert
+  // The diverging `do return`s took no part in deducing the type; convert
   // their operands to it now.
   if (Entry.HasDivergingDoReturn && !ResultType->isDependentType())
     convertDivergingReturnOperands(
@@ -630,7 +630,7 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
              RBraceLoc, TemplateDepth, Entry.ContainsUnexpandedParameterPack);
 
   // Apply the named return value optimization if every value-yielding
-  // `do_return` in the body agreed on one candidate -- unless an outer-scope
+  // `do return` in the body agreed on one candidate -- unless an outer-scope
   // `return` in the body already claimed that variable for the enclosing
   // function's return slot, which it cannot share with ours.
   if (const VarDecl *NRVOCandidate = Entry.NRVOCandidate.value_or(nullptr))
@@ -640,7 +640,7 @@ ExprResult Sema::BuildDoExpr(SourceLocation DoLoc, SourceLocation LBraceLoc,
   // A do-expression yielding a class prvalue produces a temporary that nobody
   // else owns, exactly like a function call does, so it needs the same
   // CXXBindTemporaryExpr to get it destroyed at the end of the full-expression.
-  // Without it a discarded `(void)(do { do_return T{}; });` never runs ~T.
+  // Without it a discarded `(void)(do { do return T{}; });` never runs ~T.
   // MaybeBindToTemporary is a no-op for the glvalue, void, dependent and
   // trivially-destructible cases.
   return MaybeBindToTemporary(Result);
@@ -651,19 +651,21 @@ StmtResult Sema::ActOnDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand,
   return BuildDoReturnStmt(DoReturnLoc, Operand);
 }
 
+void Sema::DiagnoseMisplacedDoReturn(SourceLocation DoLoc) {
+  assert(!isInDoExprBody() && "do-return statement is not misplaced");
+  Diag(DoLoc, DoExprStack.empty() ? diag::err_do_return_outside_do_expr
+                                  : diag::err_do_return_crosses_function_scope);
+}
+
 StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
-  if (DoExprStack.empty()) {
-    Diag(DoReturnLoc, diag::err_do_return_outside_do_expr);
+  // The parser only forms a do-return statement in a do-expression body, and
+  // anything else parses as a do/while loop, but check again here.
+  if (!isInDoExprBody()) {
+    DiagnoseMisplacedDoReturn(DoReturnLoc);
     return StmtError();
   }
 
   DoExprStackEntry &Entry = DoExprStack.back();
-
-  // Reject `do_return` that crossed a lambda / nested function-scope boundary.
-  if (FunctionScopes.size() != Entry.FunctionScopeDepth) {
-    Diag(DoReturnLoc, diag::err_do_return_crosses_function_scope);
-    return StmtError();
-  }
 
   // A pack named by the operand is either expanded by an expansion enclosing
   // the do-expression -- in which case this records the fact on the
@@ -673,7 +675,7 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   if (Operand && DiagnoseUnexpandedParameterPack(Operand, UPPC_Expression))
     return StmtError();
 
-  // C++17: do_return statements in discarded statements are not considered when
+  // C++17: do return statements in discarded statements are not considered when
   // deducing a do-expression's result type.
   if (ExprEvalContexts.back().isDiscardedStatementContext()) {
     if (Operand) {
@@ -688,7 +690,7 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
 
   // Match function return type deduction: in a dependent context, do not
   // deduce the result type yet, even from non-dependent operands. Instantiation
-  // will rebuild the live do_return statements and deduce from those.
+  // will rebuild the live do return statements and deduce from those.
   if ((Entry.TemplateDepth > 0 || isParsingExpansionStmtPattern(*this)) &&
       doExprHasDeducedResultType(Entry)) {
     Entry.HasDependentDoReturn = true;
@@ -696,7 +698,7 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   }
 
   if (!Operand) {
-    // `do_return;` with no expression: only valid for void result.
+    // `do return;` with no expression: only valid for void result.
     QualType ResultType =
         Entry.TypeIsExplicit && !Entry.ExplicitType->getContainedAutoType()
             ? Entry.ExplicitType
@@ -760,7 +762,7 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
   }
 
   // Determine move-eligibility BEFORE applying any conversions, so that a
-  // named local variable in `do_return r;` gets the same implicit-move
+  // named local variable in `do return r;` gets the same implicit-move
   // treatment as in `return r;` (C++20 [class.copy.elision]p3) -- but only for
   // a variable of the do-expression body itself
   // ([expr.prim.id.unqual]p15.4). Anything declared outside the body outlives
@@ -809,8 +811,8 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
       // Strip its top-level cv-qualification, though: [expr.prim.do] deduces
       // by the rules in [dcl.spec.auto.general], i.e. as if by `auto x = e;`,
       // and a by-value `auto` never deduces a cv-qualified type. Keeping it
-      // made `do_return *p;` for a `const S *p` deduce `const S`, which then
-      // conflicts with a later `do_return S{};` that a lambda unifies.
+      // made `do return *p;` for a `const S *p` deduce `const S`, which then
+      // conflicts with a later `do return S{};` that a lambda unifies.
       // Deducing the type is a separate question from how the operand is
       // converted, so this costs the elision nothing.
       OperandType =
@@ -836,7 +838,7 @@ StmtResult Sema::BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
 
   // Initialize the do-expression's result from the operand. For reference
   // result types, this triggers the same lifetime checks as a function
-  // returning a reference (so e.g. `do_return prvalue();` for a
+  // returning a reference (so e.g. `do return prvalue();` for a
   // reference-typed do-expression diagnoses the same dangling reference
   // that the equivalent IIFE would) — except that declarations OUTSIDE the
   // do-expression are not "stack memory being returned": they outlive the

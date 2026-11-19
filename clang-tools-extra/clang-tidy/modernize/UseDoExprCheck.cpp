@@ -310,7 +310,7 @@ void UseDoExprCheck::report(const CallExpr *Call, ASTContext &Ctx,
   // the pattern be the one that reports, rather than whichever is matched
   // first: an instantiation's body is missing the discarded branch of every
   // `if constexpr` in it, so the returns collected there can be a subset of
-  // the ones the rewrite has to turn into `do_return`. Leaving one behind is
+  // the ones the rewrite has to turn into `do return`. Leaving one behind is
   // not a missed rewrite -- a `return` inside a do-expression body returns
   // from the *enclosing function*.
   if (isInTemplateInstantiation(Lambda))
@@ -587,9 +587,7 @@ bool UseDoExprCheck::buildRewrite(const CallExpr *Call,
       CharSourceRange::getTokenRange(CallStart, Call->getEndLoc()),
       NeedParens || NeedVoidCast ? ")" : "");
   for (const ReturnStmt *R : Returns)
-    Diag << FixItHint::CreateReplacement(
-        CharSourceRange::getTokenRange(R->getReturnLoc(), R->getReturnLoc()),
-        "do_return");
+    Diag << FixItHint::CreateInsertion(R->getReturnLoc(), "do ");
   return true;
 }
 

@@ -204,7 +204,7 @@ ExprDependence clang::computeDependence(DoExpr *E, unsigned TemplateDepth,
   auto D = toExprDependenceForImpliedType(E->getType()->getDependence());
   // Like a statement-expression, treat a do-expression in a dependent context
   // as always value- and instantiation-dependent: the body may contain
-  // do_return statements whose operand depends on enclosing template params.
+  // do return statements whose operand depends on enclosing template params.
   if (TemplateDepth)
     D |= ExprDependence::ValueInstantiation;
   // Unlike a statement-expression, a pack *can* be expanded over a

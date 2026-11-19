@@ -37,7 +37,7 @@ void sibling_is_a_do_expr() {
   int v = sink(T{1}, do {
     if (false)
       throw 7;
-    do_return 3;
+    do return 3;
   });
   next();
 }
@@ -56,7 +56,7 @@ void body_calls_something_that() {
   int v = sink(T{1}, do {
     if (val(T{2}))
       next();
-    do_return 3;
+    do return 3;
   });
   next();
 }
@@ -76,7 +76,7 @@ void two_siblings() {
   int v = two(T{1}, T{2}, do {
     if (false)
       throw 7;
-    do_return 3;
+    do return 3;
   });
   next();
 }
@@ -97,7 +97,7 @@ void do_expr_is_first() {
   int v = rev(do {
     if (false)
       throw 7;
-    do_return 3;
+    do return 3;
   }, T{1});
   next();
 }
@@ -117,12 +117,12 @@ void do_expr_is_first() {
 void body_statement_temp_() {
   int v = sink(T{1}, do {
     val(T{2});
-    do_return 3;
+    do return 3;
   });
   next();
 }
 
-// A `do_return` operand is not a full-expression of its own, so its temporaries
+// A `do return` operand is not a full-expression of its own, so its temporaries
 // belong to the enclosing full-expression -- they must survive the body's
 // reset, which is why the body's context merges out rather than restoring.
 // The temporary dies at the end of the initialization, before next().
@@ -133,7 +133,7 @@ void body_statement_temp_() {
 // CHECK: call void @_Z4nextv()
 // CHECK: ret void
 void do_return_operand_temp_() {
-  int v = do { do_return val(T{1}) + 10; };
+  int v = do { do return val(T{1}) + 10; };
   next();
 }
 
@@ -150,7 +150,7 @@ template <typename U> void in_a_template() {
   int v = sink(T{1}, do {
     if (false)
       throw U{};
-    do_return 3;
+    do return 3;
   });
   next();
 }

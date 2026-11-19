@@ -1,42 +1,43 @@
 // RUN: %clang_cc1 -std=c++2d -fcxx-exceptions -fexceptions -verify -fsyntax-only %s
 
 namespace outside_use {
-  // 'do_return' is a Sema error outside any do-expression.
+  // Outside any do-expression, 'do return' begins a do/while loop; when the
+  // 'while' is missing, a misplaced do-return statement was meant.
   int bad() {
-    do_return 1; // expected-error {{'do_return' can only appear inside a do-expression}}
+    do return 1; // expected-error {{'do return' can only appear inside a do-expression}}
     return 0;
   }
 }
 
 namespace inside_lambda {
-  // A lambda introduces a function-scope barrier that 'do_return' must not
+  // A lambda introduces a function-scope barrier that 'do return' must not
   // cross to reach an enclosing do-expression.
   int test() {
     return do {
       auto inner = []() {
-        do_return 1; // expected-error {{'do_return' cannot appear inside a nested function or lambda body of an enclosing do-expression}}
+        do return 1; // expected-error {{'do return' cannot appear inside a nested function or lambda body of an enclosing do-expression}}
       };
       inner();
-      do_return 2;
+      do return 2;
     };
   }
 }
 
 namespace empty_body_no_explicit_type {
-  // No do_return reachable and no explicit type deduces void.
+  // No do return reachable and no explicit type deduces void.
   int bad() {
     return do { }; // expected-error {{cannot initialize return object of type 'int' with an rvalue of type 'void'}}
   }
 }
 
 namespace empty_body_constrained_placeholder {
-  // With no do_return, the result type deduces to void; as with functions,
+  // With no do return, the result type deduces to void; as with functions,
   // the type as written must then be 'auto' or 'decltype(auto)' (possibly
   // cv-qualified or constrained), not 'auto&'/'auto*'/etc.
   void bad() {
-    (void)do -> auto & { }; // expected-error {{cannot deduce result type 'auto &' for do-expression with no 'do_return' statements}}
-    (void)do -> auto * { }; // expected-error {{cannot deduce result type 'auto *' for do-expression with no 'do_return' statements}}
-    (void)do -> auto * { do_return; }; // expected-error {{cannot deduce result type 'auto *' from 'do_return' with omitted expression}}
+    (void)do -> auto & { }; // expected-error {{cannot deduce result type 'auto &' for do-expression with no 'do return' statements}}
+    (void)do -> auto * { }; // expected-error {{cannot deduce result type 'auto *' for do-expression with no 'do return' statements}}
+    (void)do -> auto * { do return; }; // expected-error {{cannot deduce result type 'auto *' from 'do return' with omitted expression}}
   }
 
   template <class T> concept NotVoid = !__is_same(T, void); // expected-note {{because '!__is_same(void, void)' evaluated to false}}
@@ -47,7 +48,7 @@ namespace empty_body_constrained_placeholder {
   // In a template, deduction is deferred; the error fires at instantiation.
   template <class T>
   void bad_template() {
-    (void)do -> auto * { }; // expected-error {{cannot deduce result type 'auto *' for do-expression with no 'do_return' statements}}
+    (void)do -> auto * { }; // expected-error {{cannot deduce result type 'auto *' for do-expression with no 'do return' statements}}
   }
   template void bad_template<int>(); // expected-note {{in instantiation of function template specialization 'empty_body_constrained_placeholder::bad_template<int>' requested here}}
 }
@@ -55,34 +56,34 @@ namespace empty_body_constrained_placeholder {
 namespace deduction_conflict {
   int bad() {
     return do {
-      do_return 1;     // deduces int
-      do_return 2.0;   // expected-error {{'do_return' yields type 'double', conflicting with previously deduced type 'int'}}
+      do return 1;     // deduces int
+      do return 2.0;   // expected-error {{'do return' yields type 'double', conflicting with previously deduced type 'int'}}
     };
   }
 
   int bad2() {
     return do {
-      do_return 1;
-      do_return "x";  // expected-error {{'do_return' yields type 'const char *', conflicting with previously deduced type 'int'}}
+      do return 1;
+      do return "x";  // expected-error {{'do return' yields type 'const char *', conflicting with previously deduced type 'int'}}
     };
   }
 }
 
 namespace explicit_type_void_with_value {
-  // 'do_return value;' is rejected when the explicit type is void.
+  // 'do return value;' is rejected when the explicit type is void.
   void bad() {
     (void)(do -> void {
-      do_return 1; // expected-error {{cannot initialize do-expression result of type 'void' with an rvalue of type 'int'}}
+      do return 1; // expected-error {{cannot initialize do-expression result of type 'void' with an rvalue of type 'int'}}
     });
   }
 }
 
 namespace explicit_type_nonvoid_no_value {
-  // 'do_return;' (no value) is rejected when the explicit type isn't void.
+  // 'do return;' (no value) is rejected when the explicit type isn't void.
   int bad() {
     return do -> int {
-      do_return; // expected-error {{'do_return' without a value requires the enclosing do-expression to have type 'void'}}
-      do_return 0; // suppress fall-off-end
+      do return; // expected-error {{'do return' without a value requires the enclosing do-expression to have type 'void'}}
+      do return 0; // suppress fall-off-end
     };
   }
 }
@@ -91,22 +92,22 @@ namespace deduced_type_nonvoid_no_value {
   // The same rule applies after a non-void type has been deduced.
   int bad(bool b) {
     return do {
-      if (b) do_return 1;
-      do_return; // expected-error {{'do_return' without a value requires the enclosing do-expression to have type 'void'}}
-      do_return 0; // suppress fall-off-end
+      if (b) do return 1;
+      do return; // expected-error {{'do return' without a value requires the enclosing do-expression to have type 'void'}}
+      do return 0; // suppress fall-off-end
     };
   }
 }
 
 namespace nested_do_returns_match_inner {
-  // An inner do-expression's `do_return` yields to the inner one. After the
-  // inner yields, the outer must still see a `do_return`. Here, the outer
+  // An inner do-expression's `do return` yields to the inner one. After the
+  // inner yields, the outer must still see a `do return`. Here, the outer
   // has none reachable in the dependent-on-bool branch — but Sema only
-  // requires at least one do_return statically.
+  // requires at least one do return statically.
   constexpr int outer(bool) {
     return do {
-      int x = do { do_return 5; };  // inner do_return → x
-      do_return x;                   // outer do_return → outer
+      int x = do { do return 5; };  // inner do return → x
+      do return x;                   // outer do return → outer
     };
   }
   static_assert(outer(true) == 5);
@@ -117,8 +118,8 @@ namespace incompat_with_explicit_type {
   struct S {};
   int bad() {
     return do -> int {
-      do_return S{}; // expected-error {{no viable conversion from 'S' to 'int'}}
-      do_return 0;   // suppress fall-off-end
+      do return S{}; // expected-error {{no viable conversion from 'S' to 'int'}}
+      do return 0;   // suppress fall-off-end
     };
   }
 }
@@ -130,7 +131,7 @@ namespace does_not_introduce_function_scope {
     int x = 7;
     constexpr int get() const {
       return do {
-        do_return this->x;
+        do return this->x;
       };
     }
   };
@@ -145,7 +146,7 @@ namespace fall_off_end {
   // UB rather than ill-formed).
   int bad_no_else() {
     return do -> int {
-      if (cond) do_return 1;
+      if (cond) do return 1;
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
     };
   }
@@ -153,7 +154,7 @@ namespace fall_off_end {
   // An if without else where both reachable continuations terminate is fine.
   int ok_throw() {
     return do {
-      if (cond) do_return 1;
+      if (cond) do return 1;
       throw 2;  // terminates → no fall-through
     };
   }
@@ -161,7 +162,7 @@ namespace fall_off_end {
   [[noreturn]] void fatal();
   int ok_noreturn() {
     return do {
-      if (cond) do_return 1;
+      if (cond) do return 1;
       fatal();  // [[noreturn]] → no fall-through
     };
   }
@@ -169,7 +170,7 @@ namespace fall_off_end {
   // 'return' from the enclosing function counts as exiting the do-expression.
   int ok_outer_return(bool b) {
     return do {
-      if (b) do_return 1;
+      if (b) do return 1;
       return -1;  // exits the function (and hence the do-expression)
     };
   }
@@ -179,7 +180,7 @@ namespace fall_off_end {
     int total = 0;
     while (true) {
       total += do {
-        if (cond) do_return 1;
+        if (cond) do return 1;
         break;  // exits the loop
       };
     }
@@ -189,20 +190,20 @@ namespace fall_off_end {
   // Both branches of an if-with-else terminate → OK.
   int ok_both_branches() {
     return do {
-      if (cond) do_return 1;
-      else do_return 2;
+      if (cond) do return 1;
+      else do return 2;
     };
   }
 
   // Void result: falling off the end is allowed.
   void ok_void() {
     (void)(do -> void {
-      if (cond) do_return;
+      if (cond) do return;
     });
   }
 
   // Empty body with a non-void deduced type is rejected by the
-  // no-do_return check first; with explicit non-void type, fall-through fires.
+  // no-do return check first; with explicit non-void type, fall-through fires.
   int bad_empty() {
     return do -> int {
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
@@ -235,7 +236,7 @@ namespace fall_off_end {
       do {
         if (b)
           continue;
-        do_return 1;
+        do return 1;
       } while (false);
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
     };
@@ -244,7 +245,7 @@ namespace fall_off_end {
   int bad_if_consteval_in_runtime_context() {
     return do -> int {
       if consteval {
-        do_return 1;
+        do return 1;
       }
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
     };
@@ -255,8 +256,8 @@ namespace fall_off_end {
   int bad_switch_no_default(int x) {
     return do -> int {
       switch (x) {
-        case 1: do_return 1;
-        case 2: do_return 2;
+        case 1: do return 1;
+        case 2: do return 2;
       }
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
     };
@@ -267,7 +268,7 @@ namespace fall_off_end {
   int bad_switch_arm_breaks(int x) {
     return do -> int {
       switch (x) {
-        case 1: do_return 1;
+        case 1: do return 1;
         default: break;  // breaks the switch, then falls off the end
       }
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
@@ -283,9 +284,9 @@ namespace fall_off_end {
   const char *bad_covered_enum(Color c) {
     return do -> const char * {
       switch (c) {
-        case Red:   do_return "Red";
-        case Green: do_return "Green";
-        case Blue:  do_return "Blue";
+        case Red:   do return "Red";
+        case Green: do return "Green";
+        case Blue:  do return "Blue";
       }
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'const char *'}}
     };
@@ -296,8 +297,8 @@ namespace fall_off_end {
   int bad_covered_scoped_enum(Scoped s) {
     return do -> int {
       switch (s) {
-        case Scoped::A: do_return 1;
-        case Scoped::B: do_return 2;
+        case Scoped::A: do return 1;
+        case Scoped::B: do return 2;
       }
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
     };
@@ -310,8 +311,8 @@ namespace fall_off_end {
   int bad_covered_fixed_enum(Fixed f) {
     return do -> int {
       switch (f) {
-        case F0: do_return 1;
-        case F1: do_return 2;
+        case F0: do return 1;
+        case F1: do return 2;
       }
       // expected-error@+1 {{control may fall off the end of do-expression with non-void result type 'int'}}
     };
@@ -323,9 +324,9 @@ namespace fall_off_end {
   const char *ok_covered_enum_noreturn(Color c) {
     return do -> const char * {
       switch (c) {
-        case Red:   do_return "Red";
-        case Green: do_return "Green";
-        case Blue:  do_return "Blue";
+        case Red:   do return "Red";
+        case Green: do return "Green";
+        case Blue:  do return "Blue";
       }
       unreachable_hook();
     };
@@ -334,10 +335,10 @@ namespace fall_off_end {
   const char *ok_covered_enum_default(Color c) {
     return do -> const char * {
       switch (c) {
-        case Red:   do_return "Red";
-        case Green: do_return "Green";
-        case Blue:  do_return "Blue";
-        default:    do_return "?";
+        case Red:   do return "Red";
+        case Green: do return "Green";
+        case Blue:  do return "Blue";
+        default:    do return "?";
       }
     };
   }
@@ -366,7 +367,7 @@ namespace jump_out_of_do_expr_initializer {
   void to_label_at_function_scope() {
     int i = do { // expected-note {{jump bypasses variable initialization}}
       if (cond) { goto after; } // expected-error {{cannot jump from this goto statement to its label}}
-      do_return 1;
+      do return 1;
     };
     (void)i;
   after:;
@@ -376,7 +377,7 @@ namespace jump_out_of_do_expr_initializer {
     {
       int i = do { // expected-note {{jump bypasses variable initialization}}
         if (cond) { goto later; } // expected-error {{cannot jump from this goto statement to its label}}
-        do_return 1;
+        do return 1;
       };
       (void)i;
     later:;
@@ -390,7 +391,7 @@ namespace jump_out_of_do_expr_initializer {
   void nontrivial_destructor() {
     T t = do { // expected-note {{jump bypasses variable initialization}}
       if (cond) { goto after; } // expected-error {{cannot jump from this goto statement to its label}}
-      do_return T(7);
+      do return T(7);
     };
     (void)t;
   after:;
@@ -403,7 +404,7 @@ namespace jump_out_of_do_expr_initializer {
     if (cond) {
       int i = do {
         if (cond) { goto before; }
-        do_return 1;
+        do return 1;
       };
       (void)i;
     }
@@ -414,7 +415,7 @@ namespace jump_out_of_do_expr_initializer {
     int i = do {
       if (cond) goto inner;
     inner:
-      do_return 1;
+      do return 1;
     };
     (void)i;
   }
@@ -423,7 +424,7 @@ namespace jump_out_of_do_expr_initializer {
   void discarded_result() {
     (void)do -> int {
       if (cond) { goto after; }
-      do_return 1;
+      do return 1;
     };
   after:;
   }
@@ -435,7 +436,7 @@ namespace jump_into_do_expr {
     goto L; // expected-error {{cannot jump from this goto statement to its label}}
     x = do -> int { // expected-note {{jump enters a do-expression}}
     L:
-      do_return 1;
+      do return 1;
     };
     return x;
   }
@@ -445,8 +446,8 @@ namespace jump_into_do_expr {
     switch (n) {
       x = do -> int { // expected-note {{jump enters a do-expression}}
       case 1: // expected-error {{cannot jump from switch statement to this case label}}
-        do_return 1;
-        do_return 2;
+        do return 1;
+        do return 2;
       };
       return x;
     }
@@ -457,27 +458,27 @@ namespace jump_into_do_expr {
 namespace namespace_scope_control_flow {
   int bad_return = do -> int {
     return; // expected-error {{'return' cannot be used outside a function}}
-    do_return 1;
+    do return 1;
   };
 
   int bad_return_value = do -> int {
     return 0; // expected-error {{'return' cannot be used outside a function}}
-    do_return 1;
+    do return 1;
   };
 
   int bad_coreturn = do -> int {
     co_return; // expected-error {{'co_return' cannot be used outside a function}}
-    do_return 1;
+    do return 1;
   };
 
   int bad_coawait = do -> int {
     co_await 0; // expected-error {{'co_await' cannot be used outside a function}}
-    do_return 1;
+    do return 1;
   };
 
   int bad_coyield = do -> int {
     co_yield 0; // expected-error {{'co_yield' cannot be used outside a function}}
-    do_return 1;
+    do return 1;
   };
 }
 

@@ -253,7 +253,7 @@ static bool isVarOnPath(const IndirectLocalPath &Path, VarDecl *VD) {
   return false;
 }
 
-/// Visit the `do_return` operands belonging to one do-expression, excluding
+/// Visit the `do return` operands belonging to one do-expression, excluding
 /// nested do-expressions, lambdas, and blocks (those constructs manage their
 /// own results).
 static void forEachDoExprResult(const Stmt *S,
@@ -696,7 +696,7 @@ static void visitLocalsRetainedByReferenceBinding(IndirectLocalPath &Path,
 
   case Stmt::DoExprClass:
     // A do-expression yielding a reference (glvalue) returns whatever its
-    // `do_return` operands designate. Walk into each operand so the analysis
+    // `do return` operands designate. Walk into each operand so the analysis
     // can see references into the do-expression's init-captures, whose lifetime
     // extends to the end of the enclosing full-expression.
     forEachDoExprResult(Init, [&](Expr *Result) {
@@ -979,9 +979,9 @@ static void visitLocalsRetainedByInitializer(IndirectLocalPath &Path,
   }
 
   case Stmt::DoExprClass:
-    // A do-expression consumed by value yields whatever its `do_return`
+    // A do-expression consumed by value yields whatever its `do return`
     // operands produce; walk into each so the analysis can see pointers or
-    // references retained inside an aggregate result (e.g. `do_return
+    // references retained inside an aggregate result (e.g. `do return
     // Holder{&local};`).
     forEachDoExprResult(Init, [&](Expr *Result) {
       visitLocalsRetainedByInitializer(Path, Result, Visit,
@@ -1468,7 +1468,7 @@ checkExprLifetimeImpl(Sema &SemaRef, const InitializedEntity *InitEntity,
           if (VD->getType().getAddressSpace() == LangAS::opencl_local)
             return false;
           // A do-expression init-capture lives until the end of the enclosing
-          // full-expression, so a `do_return` of a reference into it does not by
+          // full-expression, so a `do return` of a reference into it does not by
           // itself dangle the way returning a function-local does. Whether it
           // dangles depends on how the do-expression's result is consumed, which
           // is checked at the binding site (see the DoExprClass handling in

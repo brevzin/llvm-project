@@ -2,7 +2,7 @@
 
 // The named return value optimization out of a do-expression body.
 //
-// A body local that every value-yielding `do_return` names is constructed
+// A body local that every value-yielding `do return` names is constructed
 // directly in the do-expression's result slot, exactly as a function's NRVO
 // candidate is constructed in the function's return slot. Without this a
 // do-expression would be strictly worse than the immediately-invoked lambda
@@ -28,11 +28,11 @@ struct T {
 T simple() {
   return do {
     T r;
-    do_return r;
+    do return r;
   };
 }
 
-// Several `do_return`s naming the same candidate all elide, and each sets the
+// Several `do return`s naming the same candidate all elide, and each sets the
 // NRVO flag that suppresses the candidate's destructor on that path.
 // CHECK-LABEL: define {{.*}} @_Z13one_candidateb(ptr dead_on_unwind noalias writable sret(%struct.T) align 4 %agg.result
 // CHECK: %nrvo = alloca i1
@@ -43,8 +43,8 @@ T one_candidate(bool b) {
   return do {
     T r;
     if (b)
-      do_return r;
-    do_return r;
+      do return r;
+    do return r;
   };
 }
 
@@ -57,8 +57,8 @@ T two_candidates(bool b) {
     T a;
     T b2;
     if (b)
-      do_return a;
-    do_return b2;
+      do return a;
+    do return b2;
   };
 }
 
@@ -70,8 +70,8 @@ T mixed_with_prvalue(bool b) {
   return do {
     T r;
     if (b)
-      do_return T();
-    do_return r;
+      do return T();
+    do return r;
   };
 }
 
@@ -85,7 +85,7 @@ T mixed_with_prvalue(bool b) {
 void into_local_v() {
   T t = do {
     T r;
-    do_return r;
+    do return r;
   };
 }
 
@@ -99,7 +99,7 @@ T outer_return_wins(bool b) {
     T r;
     if (b)
       return r;
-    do_return r;
+    do return r;
   };
   return t;
 }
@@ -110,7 +110,7 @@ T outer_return_wins(bool b) {
 struct Holder {
   T m = do {
     T r;
-    do_return r;
+    do return r;
   };
   Holder();
   Holder(int);
@@ -128,5 +128,5 @@ Holder::Holder(int) {}
 // object to build into and nothing to elide.
 // CHECK-LABEL: define {{.*}} @_Z10ref_resultR1T
 T &ref_result(T &g) {
-  return do -> T & { do_return g; };
+  return do -> T & { do return g; };
 }

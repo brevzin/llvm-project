@@ -3258,7 +3258,7 @@ public:
                                  ExplicitType, TemplateDepth);
   }
 
-  /// Build a new do_return statement.
+  /// Build a new do return statement.
   StmtResult RebuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand) {
     return getSema().BuildDoReturnStmt(DoReturnLoc, Operand);
   }

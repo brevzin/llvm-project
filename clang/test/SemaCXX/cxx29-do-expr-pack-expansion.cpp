@@ -14,7 +14,7 @@
 namespace fold_over_a_body {
   template <class... Ts>
   constexpr int sum(Ts... ts) {
-    return (do { do_return ts * 2; } + ... + 0);
+    return (do { do return ts * 2; } + ... + 0);
   }
   static_assert(sum(1, 2, 3) == 12);
   static_assert(sum() == 0);
@@ -26,14 +26,14 @@ namespace expand_into_arguments {
 
   template <class... Ts>
   constexpr int call(Ts... ts) {
-    return add3(do { do_return ts + 1; }...);
+    return add3(do { do return ts + 1; }...);
   }
   static_assert(call(10, 20, 30) == 63);
 }
 
 namespace pack_in_a_body_statement {
   // The pack is named by a statement of the body rather than by the
-  // `do_return` operand. Collection has to search the whole body once the
+  // `do return` operand. Collection has to search the whole body once the
   // do-expression is known to contain a pack, exactly as it does for a lambda:
   // pruning at the first non-expression statement would find nothing to expand.
   template <class... Ts>
@@ -42,7 +42,7 @@ namespace pack_in_a_body_statement {
       int acc = 0;
       for (int i = 0; i < 3; ++i)
         acc += ts;
-      do_return acc;
+      do return acc;
     } + ... + 0);
   }
   static_assert(sum(1, 2) == 9);
@@ -57,7 +57,7 @@ namespace body_declares_locals {
     return (do {
       auto v = ts;
       auto w = v + 1;
-      do_return static_cast<int>(w);
+      do return static_cast<int>(w);
     } + ... + 0);
   }
   static_assert(sum(1, 2, 3) == 9);
@@ -67,7 +67,7 @@ namespace type_of_the_body {
   // The pack appears only in the explicit result type.
   template <class... Ts>
   constexpr int count() {
-    return (0 + ... + do -> int { do_return static_cast<int>(sizeof(Ts)); });
+    return (0 + ... + do -> int { do return static_cast<int>(sizeof(Ts)); });
   }
   static_assert(count<char, char, char>() == 3);
   static_assert(count<char, int>() == 1 + sizeof(int));
@@ -78,14 +78,14 @@ namespace nested_in_a_lambda {
   // Both have to carry the pack out.
   template <class... Ts>
   constexpr int sum(Ts... ts) {
-    return ([&] { return do { do_return ts * 3; }; }() + ... + 0);
+    return ([&] { return do { do return ts * 3; }; }() + ... + 0);
   }
   static_assert(sum(1, 2) == 9);
 
   // ... and the other nesting order.
   template <class... Ts>
   constexpr int sum2(Ts... ts) {
-    return (do { do_return [&] { return ts * 3; }(); } + ... + 0);
+    return (do { do return [&] { return ts * 3; }(); } + ... + 0);
   }
   static_assert(sum2(1, 2) == 9);
 }
@@ -93,18 +93,18 @@ namespace nested_in_a_lambda {
 namespace nested_do_expressions {
   template <class... Ts>
   constexpr int sum(Ts... ts) {
-    return (do { do_return do { do_return ts + 1; } * 2; } + ... + 0);
+    return (do { do return do { do return ts + 1; } * 2; } + ... + 0);
   }
   static_assert(sum(1, 2) == 10);
 }
 
 namespace genuinely_unexpanded {
   // No enclosing expansion, so the pack really is unexpanded and has to be
-  // diagnosed. Nothing downstream looks at a `do_return` operand as a whole,
+  // diagnosed. Nothing downstream looks at a `do return` operand as a whole,
   // so the diagnosis has to happen when the statement is built.
   template <class... Ts>
   constexpr int bad(Ts... ts) {
-    return do { do_return ts; }; // expected-error {{expression contains unexpanded parameter pack 'ts'}}
+    return do { do return ts; }; // expected-error {{expression contains unexpanded parameter pack 'ts'}}
   }
 
   // A statement expression may contain labels, so it cannot be duplicated and a
@@ -113,7 +113,7 @@ namespace genuinely_unexpanded {
   // the same way.
   template <class... Ts>
   int stmt_expr_is_still_a_barrier(Ts... ts) {
-    return (({ int r = do { do_return ts; }; r; }) // expected-error {{expression contains unexpanded parameter pack 'ts'}}
+    return (({ int r = do { do return ts; }; r; }) // expected-error {{expression contains unexpanded parameter pack 'ts'}}
             + ... + 0);                            // expected-error {{pack expansion does not contain any unexpanded parameter packs}}
   }
 
@@ -124,7 +124,7 @@ namespace genuinely_unexpanded {
   constexpr int bad_in_a_statement(Ts... ts) {
     return do { // expected-error {{expression contains unexpanded parameter pack 'ts'}}
       int acc = ts;
-      do_return acc;
+      do return acc;
     };
   }
 }

@@ -13267,23 +13267,23 @@ def warn_coroutine_type_aware_allocator_ignored : Warning <
 
 let CategoryName = "do-expressions Issue" in {
 def err_do_return_outside_do_expr : Error<
-  "'do_return' can only appear inside a do-expression">;
+  "'do return' can only appear inside a do-expression">;
 def err_do_return_crosses_function_scope : Error<
-  "'do_return' cannot appear inside a nested function or lambda body of an "
+  "'do return' cannot appear inside a nested function or lambda body of an "
   "enclosing do-expression">;
 def err_do_return_missing_value : Error<
-  "'do_return' without a value requires the enclosing do-expression to have "
+  "'do return' without a value requires the enclosing do-expression to have "
   "type 'void'">;
 def err_do_return_type_mismatch : Error<
-  "'do_return' yields type %0, conflicting with previously deduced type %1">;
+  "'do return' yields type %0, conflicting with previously deduced type %1">;
 def err_do_expr_no_return_but_not_auto : Error<
-  "cannot deduce result type %0 for do-expression with no 'do_return' "
+  "cannot deduce result type %0 for do-expression with no 'do return' "
   "statements">;
 def err_do_return_void_but_not_auto : Error<
-  "cannot deduce result type %0 from 'do_return' with omitted expression">;
+  "cannot deduce result type %0 from 'do return' with omitted expression">;
 def err_do_expr_falls_off_end : Error<
   "control may fall off the end of do-expression with non-void result type "
-  "%0; every path must exit via 'do_return', 'return', 'break', 'continue', "
+  "%0; every path must exit via 'do return', 'return', 'break', 'continue', "
   "'throw', or a '[[noreturn]]' call">;
 } // end of do-expressions issue category
 

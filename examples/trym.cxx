@@ -49,7 +49,7 @@ __macro try_(T&& e) {
             if (not \(CT)::should_continue(__r)) [[unlikely]] {
                 return \(RT)::from_break(\(CT)::extract_break(fwd!(__r)));
             }
-            do_return \(CT)::extract_continue(fwd!(__r));
+            do return \(CT)::extract_continue(fwd!(__r));
         }
     };
 }

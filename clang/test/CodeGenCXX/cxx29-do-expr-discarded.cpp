@@ -34,11 +34,11 @@ struct Trivial {
 // CHECK: doexpr.end:
 // CHECK-NEXT: call void @_ZN1TD1Ev(ptr {{.*}} %[[SLOT]])
 // CHECK-NEXT: ret void
-void discarded_prvalue() { (void)(do { do_return T{}; }); }
+void discarded_prvalue() { (void)(do { do return T{}; }); }
 
 // An NRVO candidate is still built straight into the result slot -- the
 // temporary is the elision target, not a second object -- and the candidate's
-// own destructor is suppressed by the NRVO flag on the do_return path, leaving
+// own destructor is suppressed by the NRVO flag on the do return path, leaving
 // the one call at the end of the full-expression.
 // CHECK-LABEL: define {{.*}} @_Z14discarded_nrvov()
 // CHECK: %[[SLOT:.*]] = alloca %struct.T
@@ -47,7 +47,7 @@ void discarded_prvalue() { (void)(do { do_return T{}; }); }
 // CHECK: doexpr.end:
 // CHECK-NEXT: call void @_ZN1TD1Ev(ptr {{.*}} %[[SLOT]])
 // CHECK-NEXT: ret void
-void discarded_nrvo() { (void)(do { T r; do_return r; }); }
+void discarded_nrvo() { (void)(do { T r; do return r; }); }
 
 // Two candidates defeat NRVO: the local is moved into the result slot, both
 // locals die at the end of the body, and the result dies after. This is the
@@ -69,8 +69,8 @@ void discarded_two(bool b) {
     T a;
     T c;
     if (b)
-      do_return a;
-    do_return c;
+      do return a;
+    do return c;
   });
 }
 
@@ -80,9 +80,9 @@ void discarded_two(bool b) {
 // CHECK: call void @_ZN7TrivialC1Ev
 // CHECK-NOT: call
 // CHECK: ret void
-void discarded_trivial() { (void)(do { do_return Trivial{}; }); }
+void discarded_trivial() { (void)(do { do return Trivial{}; }); }
 
-// The result object is not constructed until `do_return` runs, so an exception
+// The result object is not constructed until `do return` runs, so an exception
 // escaping the body first must not destroy it. Here the local is the elision
 // target, so the landing pad destroys it once as the local -- and there is no
 // second cleanup for a result that was never produced.
@@ -98,7 +98,7 @@ void discarded_unwind() {
   (void)(do {
     T t;
     boom();
-    do_return t;
+    do return t;
   });
 }
 
@@ -114,7 +114,7 @@ void discarded_unwind() {
 // CHECK: doexpr.end:
 // CHECK-NEXT: call void @_ZN1TD1Ev(ptr {{.*}} %[[V]])
 // CHECK-NEXT: ret void
-void owned_by_var() { T v = do { do_return T{}; }; }
+void owned_by_var() { T v = do { do return T{}; }; }
 
 // A by-value argument: destroyed after the call returns, and on the call's
 // unwind edge, but only once on each.
@@ -129,7 +129,7 @@ void owned_by_var() { T v = do { do_return T{}; }; }
 // CHECK: call void @_ZN1TD1Ev(ptr {{.*}} %[[ARG]])
 // CHECK-NEXT: br label %eh.resume
 void arg(T);
-void as_argument() { arg(do { do_return T{}; }); }
+void as_argument() { arg(do { do return T{}; }); }
 
 // A member access materializes the temporary; the materialization owns it.
 // CHECK-LABEL: define {{.*}} @_Z13member_accessv()
@@ -140,7 +140,7 @@ void as_argument() { arg(do { do_return T{}; }); }
 // CHECK-NEXT: call void @_ZN1TD1Ev(ptr {{.*}} %[[TMP]])
 // CHECK-NOT: call void @_ZN1TD1Ev
 // CHECK: ret i32
-int member_access() { return (do { do_return T{}; }).x; }
+int member_access() { return (do { do return T{}; }).x; }
 
 // Lifetime extension through a bound reference still works: one construction,
 // one destruction at the end of the enclosing block rather than the
@@ -157,7 +157,7 @@ int member_access() { return (do { do_return T{}; }).x; }
 // CHECK-NEXT: br label %eh.resume
 void uses(const T &);
 void bound_to_a_ref() {
-  const T &r = do { do_return T{}; };
+  const T &r = do { do return T{}; };
   uses(r);
 }
 
@@ -168,7 +168,7 @@ void bound_to_a_ref() {
 // CHECK: ret void
 T &ref();
 void discarded_ref() {
-  (void)(do -> T & { do_return ref(); });
+  (void)(do -> T & { do return ref(); });
 }
 
 // A void do-expression has no result object either; the body's locals are
@@ -193,7 +193,7 @@ void discarded_void() {
 // CHECK-NOT: call void @_ZN1TD1Ev
 // CHECK: ret void
 void discarded_nested() {
-  (void)(do { do_return(do { do_return T{}; }); });
+  (void)(do { do return(do { do return T{}; }); });
 }
 
 // Instantiation goes through BuildDoExpr again, so the binding has to happen
@@ -204,5 +204,5 @@ void discarded_nested() {
 // CHECK: doexpr.end:
 // CHECK-NEXT: call void @_ZN1TD1Ev(ptr {{.*}} %[[SLOT]])
 // CHECK-NEXT: ret void
-template <typename U> void in_a_template() { (void)(do { do_return U{}; }); }
+template <typename U> void in_a_template() { (void)(do { do return U{}; }); }
 template void in_a_template<T>();

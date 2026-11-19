@@ -61,7 +61,7 @@ __macro vec(Ts&&... xs) {
       std::vector<\(T)> __v;
       __v.reserve(\(sizeof...(xs)));
       \(pushes)
-      do_return __v;
+      do return __v;
     }
   };
 }

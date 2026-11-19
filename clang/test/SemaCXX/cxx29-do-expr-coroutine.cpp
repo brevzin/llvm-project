@@ -24,7 +24,7 @@ namespace co_return_inside {
   Task f(bool b) {
     int x = do {
       if (!b) co_return -1;     // exits the coroutine
-      do_return 1;
+      do return 1;
     };
     co_return x + 100;
   }
@@ -47,7 +47,7 @@ namespace co_yield_inside {
     for (int i = 0; i < n; ++i) {
       int v = do {
         if (i & 1) co_yield i;  // yields from the coroutine
-        do_return i * 2;
+        do return i * 2;
       };
       (void)v;
     }
@@ -75,7 +75,7 @@ namespace co_await_inside {
   // co_await inside a do-expression body awaits in the enclosing coroutine.
   Task f(Awaitable a) {
     int v = do {
-      do_return co_await a;  // resumes with the awaited int
+      do return co_await a;  // resumes with the awaited int
     };
     (void)v;
     co_return;
@@ -100,7 +100,7 @@ namespace mixed {
     int await_resume();
   };
 
-  // All three coroutine keywords plus do_return/return/break, all valid
+  // All three coroutine keywords plus do return/return/break, all valid
   // because the do-expression is transparent at the enclosing-function
   // level.
   Generator everything(Awaitable a, bool stop) {
@@ -109,7 +109,7 @@ namespace mixed {
         if (stop) co_return;   // exits the coroutine entirely
         if (stop) break;       // exits the while loop (compile-only branch)
         co_yield 1;            // yields, then continues in the body
-        do_return co_await a;  // yields the do-expression result
+        do return co_await a;  // yields the do-expression result
       };
       (void)v;
     }

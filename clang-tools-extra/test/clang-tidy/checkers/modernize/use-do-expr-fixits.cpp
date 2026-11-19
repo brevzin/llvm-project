@@ -13,7 +13,7 @@ int g(int);
 int in_initializer(int a) {
   int x = [&] { return a + 1; }();
   // CHECK-MESSAGES: :[[@LINE-1]]:11: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: int x = do { do_return a + 1; };
+  // CHECK-FIXES: int x = do { do return a + 1; };
   return x;
 }
 
@@ -26,8 +26,26 @@ int several_returns(int a, int b) {
   // CHECK-MESSAGES: :[[@LINE-5]]:17: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: control-flow-workaround) [modernize-use-do-expr]
   // CHECK-FIXES:      const int x = do {
   // CHECK-FIXES-NEXT:   if (a > b)
-  // CHECK-FIXES-NEXT:     do_return a;
-  // CHECK-FIXES-NEXT:   do_return b;
+  // CHECK-FIXES-NEXT:     do return a;
+  // CHECK-FIXES-NEXT:   do return b;
+  // CHECK-FIXES-NEXT: };
+  return x;
+}
+
+// `do` goes in front of `return`. A return that is the body of a do/while
+// loop becomes `do do return a;`: the do-return statement is the loop's body,
+// so the `while` still belongs to the outer `do`.
+int return_in_do_while(int a) {
+  const int x = [&] {
+    if (a)
+      do return 1; while (0);
+    return 2;
+  }();
+  // CHECK-MESSAGES: :[[@LINE-5]]:17: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: control-flow-workaround) [modernize-use-do-expr]
+  // CHECK-FIXES:      const int x = do {
+  // CHECK-FIXES-NEXT:   if (a)
+  // CHECK-FIXES-NEXT:     do do return 1; while (0);
+  // CHECK-FIXES-NEXT:   do return 2;
   // CHECK-FIXES-NEXT: };
   return x;
 }
@@ -37,7 +55,7 @@ int several_returns(int a, int b) {
 long trailing_return_type(int a) {
   return [&]() -> long { return a; }();
   // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: return do -> long { do_return a; };
+  // CHECK-FIXES: return do -> long { do return a; };
 }
 
 // Only the outer body's returns are rewritten: the inner ones belong to the
@@ -50,7 +68,7 @@ int nested_lambda(int a) {
   // CHECK-MESSAGES: :[[@LINE-4]]:10: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
   // CHECK-FIXES:      return do {
   // CHECK-FIXES-NEXT:   auto f = [&](int v) { return v + 1; };
-  // CHECK-FIXES-NEXT:   do_return f(a);
+  // CHECK-FIXES-NEXT:   do return f(a);
   // CHECK-FIXES-NEXT: };
 }
 
@@ -64,7 +82,7 @@ int nested_function(int a) {
   }();
   // CHECK-MESSAGES: :[[@LINE-6]]:10: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
   // CHECK-FIXES:      static int h(int v) { return v; }
-  // CHECK-FIXES: do_return S::h(a);
+  // CHECK-FIXES: do return S::h(a);
 }
 
 // A `do` expression is not required to produce a value.
@@ -84,14 +102,14 @@ void void_body(int a) {
 void discarded_value(int a) {
   [&] { return g(a); }();
   // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: (void)(do { do_return g(a); });
+  // CHECK-FIXES: (void)(do { do return g(a); });
 }
 
 void as_a_branch(int a) {
   if (a)
     [&] { return g(a); }();
   // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: (void)(do { do_return g(a); });
+  // CHECK-FIXES: (void)(do { do return g(a); });
 }
 
 // A lambda may be parenthesized before it is called. The `)` between the body
@@ -100,13 +118,13 @@ int gg(int);
 void parenthesized_lambda(int a) {
   int x = ([&] { return gg(a); })();
   // CHECK-MESSAGES: :[[@LINE-1]]:12: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: int x = (do { do_return gg(a); });
+  // CHECK-FIXES: int x = (do { do return gg(a); });
   ([&] { return gg(a); })();
   // CHECK-MESSAGES: :[[@LINE-1]]:4: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: ((void)(do { do_return gg(a); }));
+  // CHECK-FIXES: ((void)(do { do return gg(a); }));
   int y = (([&] { return gg(a); }))();
   // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: int y = ((do { do_return gg(a); }));
+  // CHECK-FIXES: int y = ((do { do return gg(a); }));
   (void)x;
   (void)y;
 }
@@ -122,13 +140,13 @@ const C *cg();
 void trailing_return_type_qualifiers() {
   auto *a = [&]() -> const C * { return cg(); }();
   // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: auto *a = do -> const C * { do_return cg(); };
+  // CHECK-FIXES: auto *a = do -> const C * { do return cg(); };
   const C &b = [&]() -> const C & { return *cg(); }();
   // CHECK-MESSAGES: :[[@LINE-1]]:16: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: const C &b = do -> const C & { do_return *cg(); };
+  // CHECK-FIXES: const C &b = do -> const C & { do return *cg(); };
   auto *c = [&]() -> C const * { return cg(); }();
   // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: auto *c = do -> C const * { do_return cg(); };
+  // CHECK-FIXES: auto *c = do -> C const * { do return cg(); };
   (void)a;
   (void)b;
   (void)c;
@@ -141,7 +159,7 @@ template <typename T> struct W {
 void trailing_return_type_qualified_name() {
   auto *w = [&]() -> W<C>::type { return cg(); }();
   // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: auto *w = do -> W<C>::type { do_return cg(); };
+  // CHECK-FIXES: auto *w = do -> W<C>::type { do return cg(); };
   (void)w;
 }
 
@@ -155,7 +173,7 @@ struct S {
 void statement_starts_with_the_lambda() {
   [] { return S{}; }().m();
   // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: (do { do_return S{}; }).m();
+  // CHECK-FIXES: (do { do return S{}; }).m();
 }
 
 // The whole statement is discarded, but this call's value is not: it is an
@@ -167,10 +185,10 @@ void takes_int(int i);
 void value_is_used_in_a_discarded_statement() {
   takes([] { return S{}; }());
   // CHECK-MESSAGES: :[[@LINE-1]]:9: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: takes(do { do_return S{}; });
+  // CHECK-FIXES: takes(do { do return S{}; });
   takes_int([] { return S{}; }().f);
   // CHECK-MESSAGES: :[[@LINE-1]]:13: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: takes_int(do { do_return S{}; }.f);
+  // CHECK-FIXES: takes_int(do { do return S{}; }.f);
 }
 
 // An explicit cast to void in the source already discards the value; a second
@@ -178,7 +196,7 @@ void value_is_used_in_a_discarded_statement() {
 void already_discarded(int a) {
   (void)([&] { return g(a); }());
   // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: (void)(do { do_return g(a); });
+  // CHECK-FIXES: (void)(do { do return g(a); });
 }
 
 // The left operand of a comma is discarded, and warns about it, so it gets the
@@ -186,7 +204,7 @@ void already_discarded(int a) {
 void comma_left_operand(int a) {
   [&] { return g(a); }(), g(a);
   // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: (void)(do { do_return g(a); }), g(a);
+  // CHECK-FIXES: (void)(do { do return g(a); }), g(a);
 }
 
 // A void-returning lambda never needed the cast, only the parentheses.
@@ -216,8 +234,8 @@ template <bool L> A Holder::run(int n) {
   }();
   // CHECK-MESSAGES: :[[@LINE-6]]:12: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: control-flow-workaround) [modernize-use-do-expr]
   // CHECK-FIXES: auto v = do {
-  // CHECK-FIXES: do_return A(n);
-  // CHECK-FIXES: do_return A(n + 1);
+  // CHECK-FIXES: do return A(n);
+  // CHECK-FIXES: do return A(n + 1);
   return v;
 }
 A instantiate_holder(Holder &h, int n) { return h.run<true>(n); }
@@ -226,7 +244,7 @@ A instantiate_holder(Holder &h, int n) { return h.run<true>(n); }
 int as_a_subexpression(int a) {
   return [&] { return a; }() + 1;
   // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: return do { do_return a; } + 1;
+  // CHECK-FIXES: return do { do return a; } + 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -277,7 +295,7 @@ int consteval_lambda() {
 constexpr int implicitly_constexpr() {
   return [] { return 1; }();
   // CHECK-MESSAGES: :[[@LINE-1]]:10: warning: immediately-invoked lambda can be replaced by a 'do' expression (category: simple) [modernize-use-do-expr]
-  // CHECK-FIXES: return do { do_return 1; };
+  // CHECK-FIXES: return do { do return 1; };
 }
 
 // A rewrite inside a macro body would corrupt every other expansion of it.

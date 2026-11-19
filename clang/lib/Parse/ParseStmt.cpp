@@ -29,6 +29,7 @@
 #include "clang/Sema/TypoCorrection.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/Support/SaveAndRestore.h"
 #include <optional>
 
 using namespace clang;
@@ -136,6 +137,7 @@ StmtResult Parser::ParseStatementOrDeclarationAfterAttributes(
     SourceLocation *TrailingElseLoc, ParsedAttributes &CXX11Attrs,
     ParsedAttributes &GNUAttrs, LabelDecl *PrecedingLabel) {
   const char *SemiError = nullptr;
+  bool IsDoReturn = false;
   StmtResult Res;
   SourceLocation GNUAttributeLoc;
 
@@ -338,6 +340,12 @@ Retry:
   case tok::kw_while:               // C99 6.8.5.1: while-statement
     return ParseWhileStatement(TrailingElseLoc, PrecedingLabel);
   case tok::kw_do:                  // C99 6.8.5.2: do-statement
+    if (isDoReturnStatement()) {    // do-expressions: do-return-statement
+      Res = ParseDoReturnStatement();
+      SemiError = "do return";
+      IsDoReturn = true;
+      break;
+    }
     Res = ParseDoStatement(PrecedingLabel);
     SemiError = "do/while";
     break;
@@ -366,10 +374,6 @@ Retry:
     break;
   case tok::kw__Defer: // C defer TS: defer-statement
     return ParseDeferStatement(TrailingElseLoc);
-  case tok::kw_do_return:            // do-expressions: do_return statement
-    Res = ParseDoReturnStatement();
-    SemiError = "do_return";
-    break;
 
   case tok::kw_asm: {
     for (const ParsedAttr &AL : CXX11Attrs)
@@ -573,6 +577,18 @@ Retry:
     ExpectAndConsume(tok::semi, diag::err_expected_semi_after_stmt, SemiError);
     // Skip until we see a } or ;, but don't eat it.
     SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
+  } else if (IsDoReturn && Tok.is(tok::kw_while) && Res.isUsable() &&
+             Res.get()->getBeginLoc() != DoWhileBodyLoc) {
+    // `do return x; while (c);` in a do-expression yields x; the 'while' is a
+    // loop of its own, never reached. Before do-expressions the same tokens
+    // were a do/while loop returning from the function, which is presumably
+    // what was meant, so say how to get that.
+    SourceLocation DoLoc = Res.get()->getBeginLoc();
+    Diag(Tok, diag::warn_do_return_followed_by_while);
+    Diag(DoLoc, diag::note_do_return_while_braces)
+        << FixItHint::CreateInsertion(PP.getLocForEndOfToken(DoLoc), " {")
+        << FixItHint::CreateInsertion(PP.getLocForEndOfToken(PrevTokLocation),
+                                      " }");
   }
 
   return Res;
@@ -608,7 +624,7 @@ StmtResult Parser::ParseExprStatement(ParsedStmtContext StmtCtx) {
   }
 
   // In a do-expression, if we see an expression followed by '}' (no semicolon),
-  // treat it as an implicit do_return.
+  // treat it as an implicit do-return statement.
   if ((StmtCtx & ParsedStmtContext::InDoExpr) != ParsedStmtContext() &&
       Tok.is(tok::r_brace)) {
     return Actions.ActOnDoReturnStmt(OldToken.getLocation(), Expr.get(),
@@ -1898,7 +1914,13 @@ StmtResult Parser::ParseDoStatement(LabelDecl *PrecedingLabel) {
   bool C99orCXX = getLangOpts().C99 || getLangOpts().CPlusPlus;
   ParseScope InnerScope(this, Scope::DeclScope, C99orCXX, Tok.is(tok::l_brace));
 
+  // Outside a do-expression body, `do return` is still a do/while loop. If
+  // the 'while' turns out to be missing, a do-return statement was likely
+  // meant, and is misplaced.
+  bool BodyIsReturn = Tok.is(tok::kw_return);
+
   // Read the body statement.
+  SaveAndRestore SavedDoWhileBodyLoc(DoWhileBodyLoc, Tok.getLocation());
   StmtResult Body(ParseStatement());
 
   // Pop the body scope if needed.
@@ -1908,6 +1930,10 @@ StmtResult Parser::ParseDoStatement(LabelDecl *PrecedingLabel) {
   getCurScope()->LeaveLoopBody();
 
   if (Tok.isNot(tok::kw_while)) {
+    if (BodyIsReturn && getLangOpts().DoExpressions) {
+      Actions.DiagnoseMisplacedDoReturn(DoLoc);
+      return StmtError();
+    }
     if (!Body.isInvalid()) {
       Diag(Tok, diag::err_expected_while);
       Diag(DoLoc, diag::note_matching) << "'do'";
@@ -2967,7 +2993,7 @@ ExprResult Parser::ParseDoExpression() {
   // then consume it and become the ExprWithCleanups that the enclosing
   // full-expression needed, moving the enclosing temporaries' destruction out
   // to the end of the block. Entering a context resets the cleanup state for
-  // the body and merges it back on the way out, so a `do_return` operand's
+  // the body and merges it back on the way out, so a `do return` operand's
   // temporaries still reach the enclosing full-expression.
   StmtResult Body;
   {
@@ -2988,9 +3014,15 @@ ExprResult Parser::ParseDoExpression() {
                              Body.get(), RBraceLoc, ExplicitTSI);
 }
 
+bool Parser::isDoReturnStatement() {
+  return getLangOpts().DoExpressions && Tok.is(tok::kw_do) &&
+         NextToken().is(tok::kw_return) && Actions.isInDoExprBody();
+}
+
 StmtResult Parser::ParseDoReturnStatement() {
-  assert(Tok.is(tok::kw_do_return) && "Not a do_return statement!");
-  SourceLocation DoReturnLoc = ConsumeToken();
+  assert(isDoReturnStatement() && "Not a do-return statement!");
+  SourceLocation DoReturnLoc = ConsumeToken(); // 'do'
+  ConsumeToken();                              // 'return'
 
   ExprResult R;
   if (Tok.isNot(tok::semi)) {

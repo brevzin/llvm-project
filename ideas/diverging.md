@@ -28,10 +28,10 @@ None of that falls out of a class definition. Framing it as a fundamental type (
 Under "if the type deduced is not the same in each deduction, the program is ill-formed", this is rejected:
 
 ```cpp
-do { if (c) do_return 1; else do_return std::terminate(); }
+do { if (c) do return 1; else do return std::terminate(); }
 ```
 
-We need a rule that `do_return` statements whose operand has type `noreturn_t` don't participate in deduction — exactly the rule pattern matching applies to arms. This is a genuine gap in the proposed wording, not just an omission.
+We need a rule that `do return` statements whose operand has type `noreturn_t` don't participate in deduction — exactly the rule pattern matching applies to arms. This is a genuine gap in the proposed wording, not just an omission.
 
 ### 4. Lambdas and functions
 

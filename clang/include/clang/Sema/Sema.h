@@ -8075,8 +8075,8 @@ public:
 
   /// Per-do-expression Sema state, pushed when entering a do-expression body
   /// and popped when leaving it. Used to find the enclosing do-expression for
-  /// `do_return` lookup and to drive type deduction across multiple
-  /// `do_return` operands.
+  /// `do return` lookup and to drive type deduction across multiple
+  /// `do return` operands.
   struct DoExprStackEntry {
     SourceLocation DoLoc;
     QualType ExplicitType;            ///< Set if user wrote `do -> Type`.
@@ -8086,11 +8086,11 @@ public:
     bool HasDependentDoReturn = false; ///< True iff some yielded type is deferred.
     bool TypeIsExplicit;              ///< True iff ExplicitType was given.
     bool DeductionFailed = false;     ///< Tracks irrecoverable deduction error.
-    /// True if some `do_return` operand diverges (P3549); such a `do_return`
+    /// True if some `do return` operand diverges (P3549); such a `do return`
     /// takes no part in deducing the type.
     bool HasDivergingDoReturn = false;
     /// Function-scope depth at which the do-expression body began. Used to
-    /// reject `do_return` that crosses a lambda/function-scope boundary.
+    /// reject `do return` that crosses a lambda/function-scope boundary.
     unsigned FunctionScopeDepth;
     /// True if we pushed a synthetic FunctionScopeInfo for this do-expression
     /// (e.g. when evaluating one at namespace scope, where there's no
@@ -8107,7 +8107,7 @@ public:
     /// True if the body names a parameter pack that is expanded by an
     /// expansion enclosing the do-expression, as a lambda body may.
     bool ContainsUnexpandedParameterPack = false;
-    /// The copy-elision candidate shared by the value-yielding `do_return`
+    /// The copy-elision candidate shared by the value-yielding `do return`
     /// statements seen so far: unset before the first one, null once two of
     /// them disagree (or one of them has no candidate at all), and the
     /// variable itself while they all name it. A candidate survives to
@@ -8159,6 +8159,17 @@ public:
                          Stmt *InitStmt, Stmt *Body, SourceLocation RBraceLoc,
                          TypeSourceInfo *ExplicitType, unsigned TemplateDepth);
 
+  /// Whether the current position is directly in the body of a
+  /// do-expression, not in a lambda or local function nested in it: where
+  /// `do return` is a do-return statement rather than the head of a do/while
+  /// loop.
+  bool isInDoExprBody() const {
+    return !DoExprStack.empty() &&
+           FunctionScopes.size() == DoExprStack.back().FunctionScopeDepth;
+  }
+  /// Diagnose a `do return` at \p DoLoc that is not in a do-expression body.
+  void DiagnoseMisplacedDoReturn(SourceLocation DoLoc);
+
   StmtResult ActOnDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand,
                                Scope *CurScope);
   StmtResult BuildDoReturnStmt(SourceLocation DoReturnLoc, Expr *Operand);
@@ -8166,13 +8177,13 @@ public:
   /// Is \p S a diverging statement (P3549)? One of: a compound statement whose
   /// last statement diverges; an escape statement (`break`, `continue`,
   /// `goto`, and -- in a do-expression body, \p InDoExpr -- `return`); a
-  /// `return` or `do_return` whose operand diverges; an expression statement
+  /// `return` or `do return` whose operand diverges; an expression statement
   /// whose expression diverges; a declaration statement with a diverging
   /// initializer; an `if` with an `else`, both of whose substatements
   /// diverge; or an `if constexpr` whose taken substatement diverges.
   bool isDivergingStmt(const Stmt *S, bool InDoExpr);
 
-  /// Convert the operands of the `return` (\p IsDoReturn: `do_return`)
+  /// Convert the operands of the `return` (\p IsDoReturn: `do return`)
   /// statements in \p Body whose operands diverge and so took no part in
   /// deducing \p ResultType, now that it is known (P3549). Does not descend
   /// into nested function bodies or do-expressions.
