@@ -412,11 +412,17 @@ void Sema::ActOnStartDoExpr(SourceLocation DoLoc, QualType ExplicitType,
     // mangling context. With a number, it behaves like an inline function
     // (static locals and local classes get vague linkage); without one, it is
     // internal to this translation unit, as such a lambda would be.
+    //
+    // And in a template -- a default argument of a function template, the
+    // initializer of a variable template -- it is a dependent context, which
+    // its parent, the namespace, does not say: a local class in the body is a
+    // templated entity, instantiated with the body.
     auto [MCtx, ManglingContextDecl] =
         getCurrentMangleNumberContext(CurContext);
     ASTContext::DoExprBodyInfo Info;
     Info.ManglingContextDecl = ManglingContextDecl;
     Info.ManglingNumber = MCtx ? MCtx->getNextDoExprBodyNumber() : 0;
+    Info.Dependent = Entry.TemplateDepth > 0;
     Context.setDoExprBodyInfo(SyntheticFD, Info);
     if (Info.ManglingNumber)
       SyntheticFD->setImplicitlyInline();

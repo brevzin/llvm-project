@@ -2485,7 +2485,7 @@ public:
   ///
   /// What the body declares is nonetheless named and linked relative to it,
   /// so it is numbered, linked and mangled like a lambda closure in the same
-  /// position; see ASTContext::DoExprBodyInfo.
+  /// position, and is dependent in a template; see ASTContext::DoExprBodyInfo.
   bool isDoExprBody() const {
     return isImplicit() && getDeclName().isIdentifier() &&
            getName() == DoExprBodyName;

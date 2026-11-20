@@ -58,6 +58,20 @@ long use_vt() { return vt<int> + vt<long>; }
 // MS-DAG: define linkonce_odr dso_local noundef i32 @"??R<lambda_1>@?0??<do_expr_body_1>@?$vt@H@@YAXXZ@QEBA?A?<auto>@@XZ"(
 // MS-DAG: define linkonce_odr dso_local noundef i32 @"??R<lambda_1>@?0??<do_expr_body_1>@?$vt@J@@YAXXZ@QEBA?A?<auto>@@XZ"(
 
+// A local class in a variable template's body is a templated entity: its
+// member functions are instantiated, and emitted, per specialization.
+template <class T> T vl = do { struct L { int f() { return id(sizeof(T)); } }; do return T(L{}.f()); };
+long use_vl() { return vl<int> + vl<long>; }
+// CHECK-DAG: define linkonce_odr noundef i32 @_ZZN2vlIiEM14__do_expr_bodyEvEN1L1fEv(
+// CHECK-DAG: define linkonce_odr noundef i32 @_ZZN2vlIlEM14__do_expr_bodyEvEN1L1fEv(
+
+// A default argument of a function template is instantiated inside the
+// specialization, so what its body declares is simply local to that.
+template <class T> int ft(int p = do { struct L { int f() { return id(sizeof(T)); } }; do return L{}.f(); }) { return p; }
+int use_ft() { return ft<char>() + ft<double>(); }
+// CHECK-DAG: define linkonce_odr noundef i32 @_ZZ2ftIcEiiEN1L1fEv(
+// CHECK-DAG: define linkonce_odr noundef i32 @_ZZ2ftIdEiiEN1L1fEv(
+
 // Default member initializers: one context per member.
 struct A {
   int x = do { struct L { int f() { return id(6); } }; do return L{}.f(); };

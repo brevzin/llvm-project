@@ -371,6 +371,14 @@ Response HandleFunction(Sema &SemaRef, const FunctionDecl *Function,
                         const FunctionDecl *Pattern, bool RelativeToPrimary,
                         bool ForConstraintInstantiation,
                         bool ForDefaultArgumentSubstitution) {
+  // The context of a do-expression body outside a function belongs to what is
+  // being initialized -- e.g. the VarTemplateSpecializationDecl -- rather than
+  // to the namespace it is parented in, as a lambda closure does.
+  if (Function->isDoExprBody())
+    if (const Decl *ContextDecl =
+            SemaRef.Context.getDoExprBodyInfo(Function).ManglingContextDecl)
+      return Response::ChangeDecl(ContextDecl);
+
   // Add template arguments from a function template specialization.
   if (!RelativeToPrimary &&
       Function->getTemplateSpecializationKindForInstantiation() ==

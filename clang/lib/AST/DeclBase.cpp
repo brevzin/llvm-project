@@ -1429,6 +1429,11 @@ bool DeclContext::isDependentContext() const {
     // context is dependent.
     if (cast<Decl>(this)->getFriendObjectKind())
       return getLexicalParent()->isDependentContext();
+
+    // The context of a do-expression body in a template says so itself.
+    if (Function->isDoExprBody() &&
+        Function->getASTContext().getDoExprBodyInfo(Function).Dependent)
+      return true;
   }
 
   // FIXME: A variable template is a dependent context, but is not a

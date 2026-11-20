@@ -733,6 +733,11 @@ public:
     /// ... and its 1-based number there, or 0 if it needs no mangling that
     /// another translation unit could agree on, in which case it is internal.
     unsigned ManglingNumber = 0;
+    /// Whether it is a dependent context. Its parent need not be: the body
+    /// of a do-expression in a default argument of a function template, or in
+    /// the initializer of a variable template, belongs to that template, but
+    /// the context it is parsed in is the namespace.
+    bool Dependent = false;
   };
 
 private:
