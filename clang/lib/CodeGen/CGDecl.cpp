@@ -344,6 +344,12 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
       return Addr;
   }
 
+  // The context of a do-expression body outside a function is not a function
+  // that is ever emitted: the body is emitted where the do-expression is, and
+  // that is what initializes the static local.
+  if (const auto *FD = dyn_cast<FunctionDecl>(DC); FD && FD->isDoExprBody())
+    return Addr;
+
   GlobalDecl GD;
   if (const auto *CD = dyn_cast<CXXConstructorDecl>(DC))
     GD = GlobalDecl(CD, Ctor_Base);

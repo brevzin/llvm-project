@@ -1,5 +1,7 @@
 // RUN: %clang_cc1 -std=c++2d -triple x86_64-linux-gnu -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -std=c++2d -triple x86_64-windows-msvc -emit-llvm -o - %s | FileCheck %s --check-prefix=MS
+// RUN: %clang_cc1 -std=c++2d -triple x86_64-linux-gnu -emit-llvm -o - %s | FileCheck %s --check-prefix=NODECL
+// RUN: %clang_cc1 -std=c++2d -triple x86_64-windows-msvc -emit-llvm -o - %s | FileCheck %s --check-prefix=NODECL
 
 // What a do-expression body declares outside a function -- static locals,
 // local classes, lambdas -- is named relative to the context Sema makes up for
@@ -85,3 +87,6 @@ int use_c(C c) { return c.g() + c.g(); }
 // CHECK-DAG: @_ZZZN1C1gEiiEd_14__do_expr_bodyvE1s = linkonce_odr global i32 0, comdat
 // MS-DAG: @"?s@?4??<do_expr_body_1_1>@?g@C@@QEAAHHH@Z@YAXXZ@4HA" = linkonce_odr
 // MS-DAG: @"?s@?2??<do_expr_body_2_1>@?g@C@@QEAAHHH@Z@YAXXZ@4HA" = linkonce_odr
+
+// The made-up context is never itself emitted, or even declared.
+// NODECL-NOT: declare {{.*}}do_expr_body
