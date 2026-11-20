@@ -846,6 +846,13 @@ private:
   llvm::DenseMap<const DeclContext *, GuardInfo> GuardVariableMap;
   llvm::DenseMap<const DeclContext *, GuardInfo> ThreadLocalGuardVariableMap;
   llvm::DenseMap<const DeclContext *, unsigned> ThreadSafeGuardNumMap;
+  /// The guard variable and guard number already chosen for a static local.
+  /// The initialization of one is usually emitted once, but not always: one
+  /// declared in a do-expression in a default argument or default member
+  /// initializer is emitted again at every use, and each emission must test
+  /// the same guard.
+  llvm::DenseMap<const VarDecl *, std::pair<llvm::GlobalVariable *, unsigned>>
+      StaticLocalGuards;
 
   llvm::DenseMap<size_t, llvm::StructType *> TypeDescriptorTypeMap;
   llvm::StructType *BaseClassDescriptorType;
@@ -2692,7 +2699,10 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
 
   llvm::GlobalVariable *GuardVar = GI ? GI->Guard : nullptr;
   unsigned GuardNum;
-  if (D.isExternallyVisible()) {
+  auto KnownGuard = StaticLocalGuards.find(&D);
+  if (KnownGuard != StaticLocalGuards.end()) {
+    std::tie(GuardVar, GuardNum) = KnownGuard->second;
+  } else if (D.isExternallyVisible()) {
     // Externally visible variables have to be numbered in Sema to properly
     // handle unreachable VarDecls.
     GuardNum = getContext().getStaticLocalNumber(&D);
@@ -2740,6 +2750,7 @@ void MicrosoftCXXABI::EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
     if (GI && !HasPerVariableGuard)
       GI->Guard = GuardVar;
   }
+  StaticLocalGuards[&D] = {GuardVar, GuardNum};
 
   ConstantAddress GuardAddr(GuardVar, GuardTy, GuardAlign);
 

@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -std=c++2d -triple x86_64-linux-gnu -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -std=c++2d -triple x86_64-windows-msvc -emit-llvm -o - %s | FileCheck %s --check-prefix=MS
 // RUN: %clang_cc1 -std=c++2d -triple x86_64-linux-gnu -emit-llvm -o - %s | FileCheck %s --check-prefix=NODECL
-// RUN: %clang_cc1 -std=c++2d -triple x86_64-windows-msvc -emit-llvm -o - %s | FileCheck %s --check-prefix=NODECL
+// RUN: %clang_cc1 -std=c++2d -triple x86_64-windows-msvc -emit-llvm -o - %s | FileCheck %s --check-prefixes=NODECL,MSGUARD
 
 // What a do-expression body declares outside a function -- static locals,
 // local classes, lambdas -- is named relative to the context Sema makes up for
@@ -78,6 +78,7 @@ int use_b() { return B<char>{}.x + B<double>{}.x; }
 
 // Default arguments in a class: one context per parameter, mangled the way a
 // lambda there is ('Ed_' for the last parameter, 'Ed0_' for the one before).
+// Each default argument is emitted at both calls, testing the one guard.
 struct C {
   int g(int p = do { static int s = id(8); do return s++; },
         int q = do { static int s = id(9); do return s++; });
@@ -90,3 +91,7 @@ int use_c(C c) { return c.g() + c.g(); }
 
 // The made-up context is never itself emitted, or even declared.
 // NODECL-NOT: declare {{.*}}do_expr_body
+
+// MSVC gives each static local a guard variable of its own, which has to be
+// the same one at every emission of its initialization, not a renamed copy.
+// MSGUARD-NOT: @"?$TSS0{{.*}}.{{[0-9]+}}" =
