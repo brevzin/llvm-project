@@ -674,6 +674,13 @@ ItaniumMangleContextImpl::getEffectiveDeclContext(const Decl *D) {
       return ContextParam->getDeclContext();
   }
 
+  // And for the context of a do-expression body in a default argument.
+  if (const auto *FD = dyn_cast<FunctionDecl>(D); FD && FD->isDoExprBody()) {
+    if (auto *ContextParam = dyn_cast_or_null<ParmVarDecl>(
+            getASTContext().getDoExprBodyInfo(FD).ManglingContextDecl))
+      return ContextParam->getDeclContext();
+  }
+
   // On ARM and AArch64, the va_list tag is always mangled as if in the std
   // namespace. We do not represent va_list as actually being in the std
   // namespace in C because this would result in incorrect debug info in C,
@@ -1498,6 +1505,29 @@ void CXXNameMangler::mangleUnqualifiedName(
   case DeclarationName::Identifier: {
     const IdentifierInfo *II = Name.getAsIdentifierInfo();
 
+    // The context of a do-expression body outside a function (see
+    // FunctionDecl::isDoExprBody) is numbered like a lambda closure in the
+    // same place. Not (yet) part of the Itanium ABI:
+    //
+    //   <source-name> ::= __do_expr_body [ _ <number> ]   # #1, #2, ...
+    //                 ::= __do_expr_body$_ <id>           # internal
+    if (FD && FD->isDoExprBody()) {
+      SmallString<24> Str(FunctionDecl::DoExprBodyName);
+      if (unsigned Number =
+              getASTContext().getDoExprBodyInfo(FD).ManglingNumber) {
+        if (Number > 1) {
+          Str += '_';
+          Str += llvm::utostr(Number - 1);
+        }
+      } else {
+        // Internal, so any id unique in this translation unit will do.
+        Str += "$_";
+        Str += llvm::utostr(NullOut ? 0 : Context.getAnonymousStructId(FD));
+      }
+      Out << Str.size() << Str;
+      break;
+    }
+
     // We mangle decomposition declarations as the names of their bindings.
     if (auto *DD = dyn_cast<DecompositionDecl>(ND)) {
       // FIXME: Non-standard mangling for decomposition declarations:
@@ -1980,6 +2010,10 @@ void CXXNameMangler::mangleLocalName(GlobalDecl GD,
            "Block cannot have additional abi tags");
     mangleUnqualifiedBlock(BD);
   } else {
+    // A do-expression body context in a default argument, likewise.
+    if (const auto *FD = dyn_cast<FunctionDecl>(D); FD && FD->isDoExprBody())
+      mangleDefaultArgumentPrefix(
+          getASTContext().getDoExprBodyInfo(FD).ManglingContextDecl);
     mangleUnqualifiedName(GD, DC, AdditionalAbiTags);
   }
 
@@ -1995,7 +2029,8 @@ void CXXNameMangler::mangleLocalName(GlobalDecl GD,
 }
 
 /// The `d [ <parameter number> ] _` of a <local-name> for an entity -- a
-/// lambda or a block -- in the default argument \p ContextDecl, if it is one:
+/// lambda, a block, or a do-expression body -- in the default argument
+/// \p ContextDecl, if it is one:
 ///
 ///   <local-name> := Z <function encoding> E d [ <parameter number> ]
 ///                   _ <entity name>
@@ -2375,6 +2410,9 @@ const NamedDecl *CXXNameMangler::getClosurePrefix(const Decl *ND) {
   } else if (auto *RD = dyn_cast<CXXRecordDecl>(ND)) {
     if (RD->isLambda())
       Context = dyn_cast_or_null<NamedDecl>(RD->getLambdaContextDecl());
+  } else if (auto *FD = dyn_cast<FunctionDecl>(ND); FD && FD->isDoExprBody()) {
+    Context = dyn_cast_or_null<NamedDecl>(
+        getASTContext().getDoExprBodyInfo(FD).ManglingContextDecl);
   }
   if (!Context)
     return nullptr;

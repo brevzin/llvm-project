@@ -2482,6 +2482,10 @@ public:
   /// RequiresExprBodyDecl is. It is never added to a lookup table, and
   /// `isImplicit` means user code cannot declare something that answers to
   /// this name.
+  ///
+  /// What the body declares is nonetheless named and linked relative to it,
+  /// so it is numbered, linked and mangled like a lambda closure in the same
+  /// position; see ASTContext::DoExprBodyInfo.
   bool isDoExprBody() const {
     return isImplicit() && getDeclName().isIdentifier() &&
            getName() == DoExprBodyName;

@@ -1531,6 +1531,21 @@ LinkageInfo LinkageComputer::computeLVForDecl(const NamedDecl *D,
       break;
     }
 
+    case Decl::Function: {
+      // The context synthesized for a do-expression body outside a function
+      // is linked like a lambda closure in the same place: see
+      // Sema::ActOnStartDoExpr.
+      const auto *FD = cast<FunctionDecl>(D);
+      if (!FD->isDoExprBody())
+        break;
+      ASTContext::DoExprBodyInfo Info =
+          FD->getASTContext().getDoExprBodyInfo(FD);
+      if (!Info.ManglingNumber)
+        return LinkageInfo::internal();
+      return getLVForClosure(FD->getDeclContext()->getRedeclContext(),
+                             Info.ManglingContextDecl, computation);
+    }
+
     case Decl::TemplateParamObject: {
       // The template parameter object can be referenced from anywhere its type
       // and value can be referenced.

@@ -14,9 +14,10 @@
 
 // The synthetic context is also what a local class declared in a body mangles
 // as its enclosing function, so its name shows up in the module (see
-// call_with_local_class below). Module-level globals come first, so check it
-// here.
-// CHECK: @__const._ZN14WithLocalClass14__do_expr_bodyEv.l = {{.*}} %struct.L { i32 9 }
+// call_with_local_class below). Like a lambda in the same default argument, it
+// is mangled as local to that default argument of 'f' ('Ed_'). Module-level
+// globals come first, so check it here.
+// CHECK: @__const._ZZN14WithLocalClass1fEiEd_14__do_expr_bodyv.l = {{.*}} %struct.L { i32 9 }
 
 struct S {
   static int f(int v = do { int j = 8; do return j; }) { return v; }
@@ -50,7 +51,7 @@ struct WithLocalClass {
 };
 // CHECK-LABEL: define {{.*}} @_Z21call_with_local_classv
 // CHECK: %[[L:.*]] = alloca %struct.L
-// CHECK: call void @llvm.memcpy{{.*}}(ptr align 4 %[[L]], ptr align 4 @__const._ZN14WithLocalClass14__do_expr_bodyEv.l
+// CHECK: call void @llvm.memcpy{{.*}}(ptr align 4 %[[L]], ptr align 4 @__const._ZZN14WithLocalClass1fEiEd_14__do_expr_bodyv.l
 // CHECK: call {{.*}} @_ZN14WithLocalClass1fEi
 int call_with_local_class() { return WithLocalClass::f(); }
 

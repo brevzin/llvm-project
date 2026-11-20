@@ -95,6 +95,12 @@ getLambdaDefaultArgumentDeclContext(const Decl *D) {
       if (const auto *Parm =
               dyn_cast_or_null<ParmVarDecl>(RD->getLambdaContextDecl()))
         return Parm->getDeclContext();
+  // The context of a do-expression body in a default argument is numbered
+  // like a lambda there, so it lives in the function too.
+  if (const auto *FD = dyn_cast<FunctionDecl>(D); FD && FD->isDoExprBody())
+    if (const auto *Parm = dyn_cast_or_null<ParmVarDecl>(
+            FD->getASTContext().getDoExprBodyInfo(FD).ManglingContextDecl))
+      return Parm->getDeclContext();
   return nullptr;
 }
 
@@ -1151,6 +1157,33 @@ void MicrosoftCXXNameMangler::mangleUnqualifiedName(GlobalDecl GD,
 
   switch (Name.getNameKind()) {
     case DeclarationName::Identifier: {
+      // The context of a do-expression body outside a function: named like a
+      // lambda closure in the same place (see FunctionDecl::isDoExprBody).
+      if (const auto *FD = dyn_cast_or_null<FunctionDecl>(ND);
+          FD && FD->isDoExprBody()) {
+        auto Info = Context.getASTContext().getDoExprBodyInfo(FD);
+        Decl *ContextDecl = Info.ManglingContextDecl;
+        unsigned Number = Info.ManglingNumber;
+        llvm::SmallString<24> Str("<do_expr_body_");
+        if (const auto *Parm = dyn_cast_or_null<ParmVarDecl>(ContextDecl))
+          if (const auto *Func =
+                  dyn_cast<FunctionDecl>(Parm->getDeclContext())) {
+            Str += llvm::utostr(Func->getNumParams() -
+                                Parm->getFunctionScopeIndex());
+            Str += '_';
+          }
+        if (Number)
+          Str += llvm::utostr(Number);
+        else
+          Str += "$" + llvm::utostr(Context.getAnonymousStructId(FD));
+        Str += ">";
+        mangleSourceName(Str);
+        if (Number && ContextDecl &&
+            (isa<VarDecl>(ContextDecl) || isa<FieldDecl>(ContextDecl)) &&
+            !isa<ParmVarDecl>(ContextDecl))
+          mangleUnqualifiedName(cast<NamedDecl>(ContextDecl));
+        break;
+      }
       if (const IdentifierInfo *II = Name.getAsIdentifierInfo()) {
         bool IsDeviceStub =
             ND &&

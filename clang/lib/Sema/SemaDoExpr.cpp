@@ -17,6 +17,7 @@
 
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
+#include "clang/AST/MangleNumberingContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/Analysis/Analyses/ReachableCode.h"
@@ -402,6 +403,23 @@ void Sema::ActOnStartDoExpr(SourceLocation DoLoc, QualType ExplicitType,
     // It is never added to the class's lookup, so the value is immaterial.
     if (CurContext->isRecord())
       SyntheticFD->setAccess(AS_public);
+
+    // What the body declares -- static locals, local classes, lambdas -- is
+    // named and linked relative to this context, so it needs a name that is
+    // unique, and that every translation unit agrees on wherever the ODR says
+    // they must. That is exactly the problem of a lambda closure written in
+    // the same place, and has the same answer: number it in the lambda's
+    // mangling context. With a number, it behaves like an inline function
+    // (static locals and local classes get vague linkage); without one, it is
+    // internal to this translation unit, as such a lambda would be.
+    auto [MCtx, ManglingContextDecl] =
+        getCurrentMangleNumberContext(CurContext);
+    ASTContext::DoExprBodyInfo Info;
+    Info.ManglingContextDecl = ManglingContextDecl;
+    Info.ManglingNumber = MCtx ? MCtx->getNextDoExprBodyNumber() : 0;
+    Context.setDoExprBodyInfo(SyntheticFD, Info);
+    if (Info.ManglingNumber)
+      SyntheticFD->setImplicitlyInline();
     Entry.SavedContext = CurContext;
     CurContext = SyntheticFD;
   }

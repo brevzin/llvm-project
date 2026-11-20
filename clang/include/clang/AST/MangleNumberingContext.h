@@ -30,6 +30,9 @@ class MangleNumberingContext {
   // The index of the next lambda we encounter in this context.
   unsigned LambdaIndex = 0;
 
+  // The number of do-expression bodies numbered in this context so far.
+  unsigned DoExprBodyCount = 0;
+
 public:
   virtual ~MangleNumberingContext() {}
 
@@ -73,6 +76,11 @@ public:
   // used for deduplicating lambdas across modules. Note that this is a simple
   // sequence number and is not ABI-dependent.
   unsigned getNextLambdaIndex() { return LambdaIndex++; }
+
+  /// Retrieve the (1-based) mangling number of a new do-expression body that
+  /// needs a context of its own (see FunctionDecl::isDoExprBody). Such bodies
+  /// are numbered by source order, separately from lambdas.
+  unsigned getNextDoExprBodyNumber() { return ++DoExprBodyCount; }
 };
 
 } // end namespace clang

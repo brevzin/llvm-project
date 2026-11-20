@@ -62,8 +62,8 @@ struct L {
 // CHECK-LABEL: define {{.*}} @_Z20local_class_two_usesv
 // CHECK: %[[I1:i[0-9]*]] = alloca %struct.Inner
 // CHECK: %[[I2:i[0-9]*]] = alloca %struct.Inner
-// CHECK: call void @llvm.memcpy{{.*}}(ptr align 4 %[[I1]], ptr align 4 @__const._ZN1L14__do_expr_bodyEv.i
-// CHECK: call void @llvm.memcpy{{.*}}(ptr align 4 %[[I2]], ptr align 4 @__const._ZN1L14__do_expr_bodyEv.i
+// CHECK: call void @llvm.memcpy{{.*}}(ptr align 4 %[[I1]], ptr align 4 @__const._ZN1L1xM14__do_expr_bodyEv.i
+// CHECK: call void @llvm.memcpy{{.*}}(ptr align 4 %[[I2]], ptr align 4 @__const._ZN1L1xM14__do_expr_bodyEv.i
 int local_class_two_uses() { return L{}.x + L{}.x; }
 
 // A static local is one object no matter how many times the body is emitted:
@@ -73,10 +73,10 @@ struct SL {
 };
 
 // CHECK-LABEL: define {{.*}} @_Z21static_local_two_usesv
-// CHECK: load i32, ptr @_ZZN2SL14__do_expr_bodyEvE7counter
-// CHECK: store i32 %{{.*}}, ptr @_ZZN2SL14__do_expr_bodyEvE7counter
-// CHECK: load i32, ptr @_ZZN2SL14__do_expr_bodyEvE7counter
-// CHECK: store i32 %{{.*}}, ptr @_ZZN2SL14__do_expr_bodyEvE7counter
+// CHECK: load i32, ptr @_ZZN2SL1xM14__do_expr_bodyEvE7counter
+// CHECK: store i32 %{{.*}}, ptr @_ZZN2SL1xM14__do_expr_bodyEvE7counter
+// CHECK: load i32, ptr @_ZZN2SL1xM14__do_expr_bodyEvE7counter
+// CHECK: store i32 %{{.*}}, ptr @_ZZN2SL1xM14__do_expr_bodyEvE7counter
 int static_local_two_uses() { return SL{}.x + SL{}.x; }
 
 // A body local with a non-trivial destructor is constructed and destroyed

@@ -720,6 +720,23 @@ private:
   /// need them (like static local vars).
   llvm::MapVector<const NamedDecl *, unsigned> MangleNumbers;
   llvm::MapVector<const VarDecl *, unsigned> StaticLocalNumbers;
+
+public:
+  /// What is known about the context synthesized for a do-expression body
+  /// outside a function (FunctionDecl::isDoExprBody) beyond the declaration
+  /// itself.
+  struct DoExprBodyInfo {
+    /// It is numbered like a lambda closure in the same position: the
+    /// variable, field or parameter being initialized, if any, whose mangling
+    /// context it is numbered in ...
+    Decl *ManglingContextDecl = nullptr;
+    /// ... and its 1-based number there, or 0 if it needs no mangling that
+    /// another translation unit could agree on, in which case it is internal.
+    unsigned ManglingNumber = 0;
+  };
+
+private:
+  llvm::DenseMap<const FunctionDecl *, DoExprBodyInfo> DoExprBodyInfos;
   /// Mapping the associated device lambda mangling number if present.
   mutable llvm::DenseMap<const CXXRecordDecl *, unsigned>
       DeviceLambdaManglingNumbers;
@@ -3616,6 +3633,13 @@ public:
 
   void setStaticLocalNumber(const VarDecl *VD, unsigned Number);
   unsigned getStaticLocalNumber(const VarDecl *VD) const;
+
+  void setDoExprBodyInfo(const FunctionDecl *FD, DoExprBodyInfo Info) {
+    DoExprBodyInfos[FD] = Info;
+  }
+  DoExprBodyInfo getDoExprBodyInfo(const FunctionDecl *FD) const {
+    return DoExprBodyInfos.lookup(FD);
+  }
 
   bool hasSeenTypeAwareOperatorNewOrDelete() const {
     return !TypeAwareOperatorNewAndDeletes.empty();
