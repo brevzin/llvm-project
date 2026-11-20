@@ -35,6 +35,36 @@ namespace dmi_local_class {
   // casts that function's type to FunctionProtoType unconditionally, so the
   // synthetic decl needs a prototype type rather than a no-proto one.
   struct S { int x = do { struct L { int a; }; L l{7}; do return l.a; }; };
+
+  // A local class with member functions. The parser decided that L was a
+  // class nested in S -- it looked for a function scope between them, and a
+  // do-expression has none -- so it deferred L's member function bodies to
+  // the end of S, after the do-expression was gone, and asserted on
+  // re-entering L's context.
+  struct WithMembers {
+    int x = do {
+      struct L {
+        constexpr int f() { return g() + 1; }
+        constexpr int g() { return 41; }
+      };
+      do return L{}.f();
+    };
+  };
+  static_assert(WithMembers{}.x == 42);
+
+  // A class nested in that local class is nested, as ever.
+  struct WithNested {
+    int x = do {
+      struct L { struct N { constexpr int f() { return 3; } }; };
+      do return L::N{}.f();
+    };
+  };
+  static_assert(WithNested{}.x == 3);
+
+  template <class T> struct InTemplate {
+    int x = do { struct L { constexpr int f() { return sizeof(T); } }; do return L{}.f(); };
+  };
+  static_assert(InTemplate<double>{}.x == 8);
 }
 
 namespace dmi_static_local {

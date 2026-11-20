@@ -4101,8 +4101,14 @@ void Parser::ParseCXXMemberSpecification(SourceLocation RecordLoc,
 
   // Determine whether this is a non-nested class. Note that local
   // classes are *not* considered to be nested classes.
+  //
+  // A class in a do-expression body is local too, but there may be no
+  // function scope between it and an enclosing class to say so: a
+  // do-expression in a default member initializer introduces block scope
+  // only. Its DeclContext still tells.
   bool NonNestedClass = true;
-  if (!ClassStack.empty()) {
+  if (!ClassStack.empty() && TagDecl &&
+      !TagDecl->getDeclContext()->isFunctionOrMethod()) {
     for (const Scope *S = getCurScope(); S; S = S->getParent()) {
       if (S->isClassScope()) {
         // We're inside a class scope, so this is a nested class.
