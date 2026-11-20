@@ -516,6 +516,7 @@ private:
   void mangleOCLDeviceStubName(const IdentifierInfo *II);
   void mangleSourceNameWithAbiTags(const NamedDecl *ND,
                                    ArrayRef<StringRef> AdditionalAbiTags = {});
+  void mangleDefaultArgumentPrefix(const Decl *ContextDecl);
   void mangleLocalName(GlobalDecl GD,
                        ArrayRef<StringRef> AdditionalAbiTags = {});
   void mangleBlockForPrefix(const BlockDecl *Block);
@@ -1950,19 +1951,8 @@ void CXXNameMangler::mangleLocalName(GlobalDecl GD,
     // numbering will be local to the particular argument in which it appears
     // -- other default arguments do not affect its encoding.
     const CXXRecordDecl *CXXRD = dyn_cast<CXXRecordDecl>(RD);
-    if (CXXRD && CXXRD->isLambda()) {
-      if (const ParmVarDecl *Parm
-              = dyn_cast_or_null<ParmVarDecl>(CXXRD->getLambdaContextDecl())) {
-        if (const FunctionDecl *Func
-              = dyn_cast<FunctionDecl>(Parm->getDeclContext())) {
-          Out << 'd';
-          unsigned Num = Func->getNumParams() - Parm->getFunctionScopeIndex();
-          if (Num > 1)
-            mangleNumber(Num - 2);
-          Out << '_';
-        }
-      }
-    }
+    if (CXXRD && CXXRD->isLambda())
+      mangleDefaultArgumentPrefix(CXXRD->getLambdaContextDecl());
 
     // Mangle the name relative to the closest enclosing function.
     // equality ok because RD derived from ND above
@@ -1984,17 +1974,7 @@ void CXXNameMangler::mangleLocalName(GlobalDecl GD,
   } else if (const BlockDecl *BD = dyn_cast<BlockDecl>(D)) {
     // Mangle a block in a default parameter; see above explanation for
     // lambdas.
-    if (const ParmVarDecl *Parm
-            = dyn_cast_or_null<ParmVarDecl>(BD->getBlockManglingContextDecl())) {
-      if (const FunctionDecl *Func
-            = dyn_cast<FunctionDecl>(Parm->getDeclContext())) {
-        Out << 'd';
-        unsigned Num = Func->getNumParams() - Parm->getFunctionScopeIndex();
-        if (Num > 1)
-          mangleNumber(Num - 2);
-        Out << '_';
-      }
-    }
+    mangleDefaultArgumentPrefix(BD->getBlockManglingContextDecl());
 
     assert(AdditionalAbiTags.empty() &&
            "Block cannot have additional abi tags");
@@ -2012,6 +1992,25 @@ void CXXNameMangler::mangleLocalName(GlobalDecl GD,
         Out << "__" << disc << '_';
     }
   }
+}
+
+/// The `d [ <parameter number> ] _` of a <local-name> for an entity -- a
+/// lambda or a block -- in the default argument \p ContextDecl, if it is one:
+///
+///   <local-name> := Z <function encoding> E d [ <parameter number> ]
+///                   _ <entity name>
+void CXXNameMangler::mangleDefaultArgumentPrefix(const Decl *ContextDecl) {
+  const auto *Parm = dyn_cast_or_null<ParmVarDecl>(ContextDecl);
+  if (!Parm)
+    return;
+  const auto *Func = dyn_cast<FunctionDecl>(Parm->getDeclContext());
+  if (!Func)
+    return;
+  Out << 'd';
+  unsigned Num = Func->getNumParams() - Parm->getFunctionScopeIndex();
+  if (Num > 1)
+    mangleNumber(Num - 2);
+  Out << '_';
 }
 
 void CXXNameMangler::mangleBlockForPrefix(const BlockDecl *Block) {
