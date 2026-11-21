@@ -13294,9 +13294,12 @@ def err_template_param_bound_qualified : Error<
   "%select{a reference type|cv-qualified}0">;
 def err_template_param_bound_not_object : Error<
   "bound %0 of a template parameter must be an object type">;
+def err_template_param_bound_deduces_itself : Error<
+  "template parameter %0 can only be named in its own bound in a non-deduced "
+  "context">;
 def err_template_arg_violates_bound : Error<
   "template argument %0 does not satisfy the bound %1 of template parameter "
-  "%2; it must be %1, optionally cv- or ref-qualified">;
+  "%2; it must be the bound, optionally cv- or ref-qualified">;
 def err_template_different_bound : Error<
   "template parameter bound differs in template redeclaration">;
 def err_deduced_arg_not_derived_from_bound : Error<

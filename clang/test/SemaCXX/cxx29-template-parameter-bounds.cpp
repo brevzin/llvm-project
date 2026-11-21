@@ -32,6 +32,7 @@ namespace std {
 template <class T> struct remove_reference { using type = T; };
 template <class T> struct remove_reference<T &> { using type = T; };
 template <class T> struct remove_reference<T &&> { using type = T; };
+template <class T> using remove_reference_t = typename remove_reference<T>::type;
 template <class T> struct type_identity { using type = T; };
 template <class T> using type_identity_t = typename type_identity<T>::type;
 template <class T> T &&declval();
@@ -195,6 +196,55 @@ void diagnose() {
 }
 } // namespace homogeneous_packs
 
+namespace self_reference {
+// A parameter is in scope in its own bound, where it names the type deduced
+// for it from the argument alone, in a non-deduced context.
+template <class T> struct vec {
+  using value_type = T;
+  T *data();
+};
+template <class T> struct view {
+  using value_type = T;
+  template <class R>
+    requires requires(R r) { r.data(); }
+  view(R &&);
+};
+template <class R>
+using value_t = typename std::remove_reference_t<R>::value_type;
+
+template <typename R : view<value_t<R> const>> R f(R); // #self_f
+vec<int> v;
+static_assert(same<decltype(f(v)), view<int const>>);
+static_assert(same<decltype(f(vec<char>())), view<char const>>);
+static_assert(same<decltype(f(view<int const>(v))), view<int const>>);
+static_assert(same<decltype(f<view<int const>>(v)), view<int const>>);
+
+// Each element of a pack names itself.
+template <typename... Rs : view<value_t<Rs> const>> list<Rs...> g(Rs &&...);
+static_assert(same<decltype(g(v, vec<char>())),
+                   list<view<int const>, view<char const>>>);
+
+template <class E> struct Holder {
+  template <typename R : view<value_t<R> const>> static R h(R);
+};
+static_assert(same<decltype(Holder<void>::h(v)), view<int const>>);
+
+void diagnose() {
+  f(1); // expected-error {{no matching function for call to 'f'}}
+  // expected-note@#self_f {{candidate template ignored: substitution failure [with R = int]: type 'std::remove_reference_t<int>' (aka 'int') cannot be used prior to '::' because it has no members}}
+  f<vec<int>>(v); // expected-error {{no matching function for call to 'f'}}
+  // expected-note@#self_f {{candidate template ignored: substitution failure: template argument 'vec<int>' does not satisfy the bound 'view<const value_t<vec<int>>>' (aka 'view<const int>') of template parameter 'R'}}
+}
+
+// Naming itself where it would be deduced from the bound is circular.
+template <typename T : vec<T>> void circular(T); // expected-error {{template parameter 'T' can only be named in its own bound in a non-deduced context}}
+
+// The parameter is not in scope in its default argument.
+using X = int;
+template <typename X : int = X> constexpr int dflt() { return 0; }
+static_assert(dflt() == 0);
+} // namespace self_reference
+
 namespace deducing_this {
 struct Widget {
   template <typename Self : Widget> Self &&get(this Self &&self) {
@@ -220,7 +270,7 @@ void test() {
   f<Base &>(std::declval<Derived &>());
   f<const Base>(Derived{});
   f<Derived &>(std::declval<Derived &>()); // expected-error {{no matching function for call to 'f'}}
-  // expected-note@#f {{candidate template ignored: substitution failure: template argument 'Derived &' does not satisfy the bound 'Base' of template parameter 'T'; it must be 'Base', optionally cv- or ref-qualified}}
+  // expected-note@#f {{candidate template ignored: substitution failure: template argument 'Derived &' does not satisfy the bound 'Base' of template parameter 'T'; it must be the bound, optionally cv- or ref-qualified}}
 }
 
 template <typename T : int = int> constexpr int dflt() { return sizeof(T); }
@@ -245,7 +295,7 @@ namespace class_templates {
 template <typename T : Base> struct S {}; // expected-note {{template parameter is declared here}}
 S<Base> s1;
 S<const Base &> s2;
-S<Derived> s3; // expected-error {{template argument 'Derived' does not satisfy the bound 'Base' of template parameter 'T'; it must be 'Base', optionally cv- or ref-qualified}}
+S<Derived> s3; // expected-error {{template argument 'Derived' does not satisfy the bound 'Base' of template parameter 'T'; it must be the bound, optionally cv- or ref-qualified}}
 } // namespace class_templates
 
 namespace instantiation {

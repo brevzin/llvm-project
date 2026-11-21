@@ -4162,12 +4162,6 @@ Decl *TemplateDeclInstantiator::VisitTemplateTypeParmDecl(
         return nullptr;
     }
   }
-  if (TypeSourceInfo *Bound = D->getBoundTypeSourceInfo()) {
-    TypeSourceInfo *NewBound = SemaRef.SubstType(
-        Bound, TemplateArgs, D->getLocation(), D->getDeclName());
-    if (!NewBound || SemaRef.CheckTypeParameterBound(Inst, NewBound))
-      Inst->setInvalidDecl();
-  }
   if (D->hasDefaultArgument() && !D->defaultArgumentWasInherited()) {
     TemplateArgumentLoc Output;
     if (!SemaRef.SubstTemplateArgument(D->getDefaultArgument(), TemplateArgs,
@@ -4178,6 +4172,14 @@ Decl *TemplateDeclInstantiator::VisitTemplateTypeParmDecl(
   // Introduce this template parameter's instantiation into the instantiation
   // scope.
   SemaRef.CurrentInstantiationScope->InstantiatedLocal(D, Inst);
+
+  // The bound may name the parameter itself, so it is instantiated after.
+  if (TypeSourceInfo *Bound = D->getBoundTypeSourceInfo()) {
+    TypeSourceInfo *NewBound = SemaRef.SubstType(
+        Bound, TemplateArgs, D->getLocation(), D->getDeclName());
+    if (!NewBound || SemaRef.CheckTypeParameterBound(Inst, NewBound))
+      Inst->setInvalidDecl();
+  }
 
   return Inst;
 }

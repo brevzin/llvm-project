@@ -2169,10 +2169,6 @@ static NamedDecl *transformClonedTemplateParam(
       SemaRef.SubstTypeConstraint(NewTTP, TC, CArgs,
                                   /*EvaluateConstraint=*/true);
     }
-    if (TypeSourceInfo *Bound = TTP->getBoundTypeSourceInfo())
-      if (TypeSourceInfo *NewBound = SemaRef.SubstType(
-              Bound, Args, TTP->getLocation(), TTP->getDeclName()))
-        NewTTP->setBound(NewBound);
     if (KeepDefaults && TTP->hasDefaultArgument()) {
       TemplateArgumentLoc InstantiatedDefaultArg;
       if (!SemaRef.SubstTemplateArgument(
@@ -2181,6 +2177,11 @@ static NamedDecl *transformClonedTemplateParam(
         NewTTP->setDefaultArgument(C, InstantiatedDefaultArg);
     }
     SemaRef.CurrentInstantiationScope->InstantiatedLocal(TTP, NewTTP);
+    // The bound may name the parameter itself, so it is transformed after.
+    if (TypeSourceInfo *Bound = TTP->getBoundTypeSourceInfo())
+      if (TypeSourceInfo *NewBound = SemaRef.SubstType(
+              Bound, Args, TTP->getLocation(), TTP->getDeclName()))
+        NewTTP->setBound(NewBound);
     return NewTTP;
   }
 

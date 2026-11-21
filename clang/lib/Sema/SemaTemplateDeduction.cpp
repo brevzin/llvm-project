@@ -3063,30 +3063,38 @@ static bool boundTakesPartInDeduction(Sema &S,
 /// else, if the bound did not take part in deduction, the bound itself.
 ///
 /// Deduction from a call argument has already done this if the bound was
-/// known then; this handles a bound that named parameters deduced later or
-/// not at all (defaulted, say), and T deduced from somewhere other than the
-/// top level of a function parameter.
+/// known then; this handles a bound that named the parameter itself, or
+/// parameters deduced later or not at all (defaulted, say), and T deduced from
+/// somewhere other than the top level of a function parameter.
 ///
 /// \returns true if deduction fails.
 static bool rebaseDeducedArgumentOntoBound(
     Sema &S, NamedDecl *Template, TemplateParameterList *TemplateParams,
     TemplateTypeParmDecl *TTP, DeducedTemplateArgument &Arg,
     TemplateDeductionInfo &Info, Sema::CheckTemplateArgumentInfo &CTAI) {
-  QualType U =
-      S.SubstTypeParameterBound(TTP, Template, CTAI.SugaredConverted,
-                                Info.getLocation(), Template->getSourceRange());
-  if (U.isNull())
-    return true;
-  if (U->isDependentType())
-    return false;
-
+  // The bound may name the parameter itself, standing for what was deduced
+  // for it from the argument alone; so a pack's elements each have their own.
+  SmallVector<TemplateArgument, 8> Args(CTAI.SugaredConverted.begin(),
+                                        CTAI.SugaredConverted.end());
+  Args.push_back(Arg);
   bool Convertible = !boundTakesPartInDeduction(S, TemplateParams, TTP,
                                                 Info.getNumExplicitArgs());
-  auto Rebase = [&](const TemplateArgument &A) -> TemplateArgument {
+  bool Failed = false;
+  auto Rebase = [&](const TemplateArgument &A,
+                    UnsignedOrNone PackIndex) -> TemplateArgument {
     if (A.getKind() != TemplateArgument::Type)
       return A;
     QualType D = A.getAsType();
     if (D->isDependentType())
+      return A;
+    QualType U = S.SubstTypeParameterBound(TTP, Template, Args, PackIndex,
+                                           Info.getLocation(),
+                                           Template->getSourceRange());
+    if (U.isNull()) {
+      Failed = true;
+      return A;
+    }
+    if (U->isDependentType())
       return A;
     if (S.isReferenceCompatibleWithBound(Info.getLocation(), D, U))
       return TemplateArgument(rebaseOntoBound(S.Context, D, U));
@@ -3094,14 +3102,15 @@ static bool rebaseDeducedArgumentOntoBound(
       return TemplateArgument(U);
     S.Diag(TTP->getLocation(), diag::err_deduced_arg_not_derived_from_bound)
         << D.getNonReferenceType().getUnqualifiedType() << U << TTP;
-    return TemplateArgument();
+    Failed = true;
+    return A;
   };
 
   if (Arg.getKind() == TemplateArgument::Pack) {
     SmallVector<TemplateArgument, 4> Elements;
-    for (const TemplateArgument &E : Arg.pack_elements()) {
-      Elements.push_back(Rebase(E));
-      if (Elements.back().isNull() && !E.isNull())
+    for (auto [K, E] : llvm::enumerate(Arg.pack_elements())) {
+      Elements.push_back(Rebase(E, unsigned(K)));
+      if (Failed)
         return true;
     }
     Arg = DeducedTemplateArgument(
@@ -3110,13 +3119,12 @@ static bool rebaseDeducedArgumentOntoBound(
     return false;
   }
 
-  TemplateArgument New = Rebase(Arg);
-  if (New.isNull())
+  TemplateArgument New = Rebase(Arg, std::nullopt);
+  if (Failed)
     return true;
   Arg = DeducedTemplateArgument(New, Arg.wasDeducedFromArrayBound());
   return false;
 }
-
 /// \param IsIncomplete When used, we only consider template parameters that
 /// were deduced, disregarding any default arguments. After the function
 /// finishes, the object pointed at will contain a value indicating if the
@@ -3171,11 +3179,14 @@ static TemplateDeductionResult ConvertDeducedTemplateArguments(
           TTP && TTP->hasBound() && !CTAI.PartialOrdering &&
           rebaseDeducedArgumentOntoBound(S, Template, TemplateParams, TTP,
                                          Deduced[I], Info, CTAI)) {
+        // Say what was deduced for the parameter, which its bound may name.
+        SmallVector<TemplateArgument, 4> Sugared(CTAI.SugaredConverted),
+            Canonical(CTAI.CanonicalConverted);
+        Sugared.push_back(Deduced[I]);
+        Canonical.push_back(S.Context.getCanonicalTemplateArgument(Deduced[I]));
         Info.Param = makeTemplateParameter(Param);
-        Info.reset(
-            TemplateArgumentList::CreateCopy(S.Context, CTAI.SugaredConverted),
-            TemplateArgumentList::CreateCopy(S.Context,
-                                             CTAI.CanonicalConverted));
+        Info.reset(TemplateArgumentList::CreateCopy(S.Context, Sugared),
+                   TemplateArgumentList::CreateCopy(S.Context, Canonical));
         return TemplateDeductionResult::SubstitutionFailure;
       }
 
@@ -7393,6 +7404,12 @@ void Sema::MarkUsedTemplateParameters(ArrayRef<TemplateArgument> TemplateArgs,
   for (unsigned I = 0, N = TemplateArgs.size(); I != N; ++I)
     ::MarkUsedTemplateParameters(Context, TemplateArgs[I],
                                  /*OnlyDeduced=*/false, Depth, Used);
+}
+
+void Sema::MarkUsedTemplateParameters(QualType T, bool OnlyDeduced,
+                                      unsigned Depth,
+                                      llvm::SmallBitVector &Used) {
+  ::MarkUsedTemplateParameters(Context, T, OnlyDeduced, Depth, Used);
 }
 
 void Sema::MarkUsedTemplateParameters(

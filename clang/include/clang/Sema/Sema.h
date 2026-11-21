@@ -12182,6 +12182,12 @@ public:
                                 unsigned Position, SourceLocation EqualLoc,
                                 ParsedType DefaultArg, bool HasTypeConstraint);
 
+  /// Attach the default argument of a type parameter declared by
+  /// ActOnTypeParameter.
+  void ActOnTypeParameterDefault(TemplateTypeParmDecl *Param,
+                                 SourceLocation EqualLoc,
+                                 ParsedType DefaultArg);
+
   /// Attach the bound of a bounded type parameter, 'typename T : U'
   /// (P2481).
   void ActOnTypeParameterBound(TemplateTypeParmDecl *Param, ParsedType Bound);
@@ -12192,14 +12198,20 @@ public:
   bool CheckTypeParameterBound(TemplateTypeParmDecl *Param,
                                TypeSourceInfo *Bound);
 
-  /// Substitute the template arguments converted so far into the bound of
-  /// \p Param.
+  /// Substitute template arguments into the bound of \p Param.
+  ///
+  /// \param Args The arguments for the parameters up to and including
+  /// \p Param. The bound may name \p Param itself, which stands for the type
+  /// deduced for it from the argument alone (or the argument as specified).
+  ///
+  /// \param PackIndex If \p Param is a pack, which element's bound to form.
   ///
   /// \returns the substituted bound, which is still dependent if those
   /// arguments are, or a null type if substitution failed.
   QualType SubstTypeParameterBound(TemplateTypeParmDecl *Param,
                                    NamedDecl *Template,
-                                   ArrayRef<TemplateArgument> SugaredConverted,
+                                   ArrayRef<TemplateArgument> Args,
+                                   UnsignedOrNone PackIndex,
                                    SourceLocation TemplateLoc,
                                    SourceRange InstRange);
 
@@ -13588,6 +13600,10 @@ public:
 
   void MarkUsedTemplateParameters(ArrayRef<TemplateArgument> TemplateArgs,
                                   unsigned Depth, llvm::SmallBitVector &Used);
+
+  /// Mark which template parameters are named in a given type.
+  void MarkUsedTemplateParameters(QualType T, bool OnlyDeduced, unsigned Depth,
+                                  llvm::SmallBitVector &Used);
 
   void MarkUsedTemplateParameters(ArrayRef<TemplateArgumentLoc> TemplateArgs,
                                   unsigned Depth, llvm::SmallBitVector &Used);

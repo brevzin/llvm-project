@@ -31,6 +31,7 @@ template <typename : Base> void a11();
 template <typename : int> void a12();
 template <typename T : ::Base> void a13();
 template <typename T, typename T::type N> void a14(); // still a non-type parameter
+template <typename T : X<typename T::type>> void a15(); // in scope in its own bound
 auto l = []<typename T : Base, typename U : int>(T, U) {};
 
 template <typename T : > void b1(); // expected-error {{expected a type}}

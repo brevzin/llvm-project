@@ -679,15 +679,27 @@ NamedDecl *Parser::ParseTypeParameter(unsigned Depth, unsigned Position) {
   if (TryConsumeToken(tok::ellipsis, EllipsisLoc))
     DiagnoseMisplacedEllipsis(EllipsisLoc, NameLoc, AlreadyHasEllipsis, true);
 
-  // Grab a bound (if given): ': type-id' (P2481). Like the default argument,
-  // it is parsed before the parameter is in scope.
-  TypeResult Bound;
+  // Grab a bound (if given): ': type-id' (P2481). Unlike its default
+  // argument, the parameter is in scope in its own bound, where it names the
+  // type deduced for it from the argument alone. So declare the parameter
+  // first, and hide it again while parsing the default argument.
+  TemplateTypeParmDecl *BoundedParam = nullptr;
   if (Tok.is(tok::colon)) {
     SourceLocation BoundLoc = ConsumeToken();
     if (!getLangOpts().TemplateParameterBounds)
       Diag(BoundLoc, diag::err_template_param_bound_requires_cxx29);
-    Bound =
+    BoundedParam = cast<TemplateTypeParmDecl>(Actions.ActOnTypeParameter(
+        getCurScope(), TypenameKeyword, EllipsisLoc, KeyLoc, ParamName, NameLoc,
+        Depth, Position, /*EqualLoc=*/SourceLocation(),
+        /*DefaultArg=*/nullptr, TypeConstraint != nullptr));
+    TypeResult Bound =
         ParseTypeName(/*Range=*/nullptr, DeclaratorContext::TemplateTypeArg);
+    if (Bound.isUsable() && getLangOpts().TemplateParameterBounds)
+      Actions.ActOnTypeParameterBound(BoundedParam, Bound.get());
+    if (ParamName) {
+      getCurScope()->RemoveDecl(BoundedParam);
+      Actions.IdResolver.RemoveDecl(BoundedParam);
+    }
   }
 
   // Grab a default argument (if available).
@@ -712,22 +724,24 @@ NamedDecl *Parser::ParseTypeParameter(unsigned Depth, unsigned Position) {
             .get();
   }
 
-  NamedDecl *NewDecl = Actions.ActOnTypeParameter(getCurScope(),
-                                                  TypenameKeyword, EllipsisLoc,
-                                                  KeyLoc, ParamName, NameLoc,
-                                                  Depth, Position, EqualLoc,
-                                                  DefaultArg,
-                                                  TypeConstraint != nullptr);
+  NamedDecl *NewDecl = BoundedParam;
+  if (BoundedParam) {
+    if (ParamName) {
+      getCurScope()->AddDecl(BoundedParam);
+      Actions.IdResolver.AddDecl(BoundedParam);
+    }
+    Actions.ActOnTypeParameterDefault(BoundedParam, EqualLoc, DefaultArg);
+  } else {
+    NewDecl = Actions.ActOnTypeParameter(
+        getCurScope(), TypenameKeyword, EllipsisLoc, KeyLoc, ParamName, NameLoc,
+        Depth, Position, EqualLoc, DefaultArg, TypeConstraint != nullptr);
+  }
 
   if (TypeConstraint) {
     Actions.ActOnTypeConstraint(TypeConstraintSS, TypeConstraint,
                                 cast<TemplateTypeParmDecl>(NewDecl),
                                 EllipsisLoc);
   }
-
-  if (Bound.isUsable() && getLangOpts().TemplateParameterBounds)
-    Actions.ActOnTypeParameterBound(cast<TemplateTypeParmDecl>(NewDecl),
-                                    Bound.get());
 
   return NewDecl;
 }

@@ -1070,37 +1070,42 @@ NamedDecl *Sema::ActOnTypeParameter(Scope *S, bool Typename,
     IdResolver.AddDecl(Param);
   }
 
+  ActOnTypeParameterDefault(Param, EqualLoc, DefaultArg);
+  return Param;
+}
+
+void Sema::ActOnTypeParameterDefault(TemplateTypeParmDecl *Param,
+                                     SourceLocation EqualLoc,
+                                     ParsedType DefaultArg) {
+  if (!DefaultArg)
+    return;
+
   // C++0x [temp.param]p9:
   //   A default template-argument may be specified for any kind of
   //   template-parameter that is not a template parameter pack.
-  if (DefaultArg && IsParameterPack) {
+  if (Param->isParameterPack()) {
     Diag(EqualLoc, diag::err_template_param_pack_default_arg);
-    DefaultArg = nullptr;
+    return;
   }
 
-  // Handle the default argument, if provided.
-  if (DefaultArg) {
-    TypeSourceInfo *DefaultTInfo;
-    GetTypeFromParser(DefaultArg, &DefaultTInfo);
+  TypeSourceInfo *DefaultTInfo;
+  GetTypeFromParser(DefaultArg, &DefaultTInfo);
 
-    assert(DefaultTInfo && "expected source information for type");
+  assert(DefaultTInfo && "expected source information for type");
 
-    // Check for unexpanded parameter packs.
-    if (DiagnoseUnexpandedParameterPack(ParamNameLoc, DefaultTInfo,
-                                        UPPC_DefaultArgument))
-      return Param;
+  // Check for unexpanded parameter packs.
+  if (DiagnoseUnexpandedParameterPack(Param->getLocation(), DefaultTInfo,
+                                      UPPC_DefaultArgument))
+    return;
 
-    // Check the template argument itself.
-    if (CheckTemplateArgument(DefaultTInfo)) {
-      Param->setInvalidDecl();
-      return Param;
-    }
-
-    Param->setDefaultArgument(
-        Context, TemplateArgumentLoc(DefaultTInfo->getType(), DefaultTInfo));
+  // Check the template argument itself.
+  if (CheckTemplateArgument(DefaultTInfo)) {
+    Param->setInvalidDecl();
+    return;
   }
 
-  return Param;
+  Param->setDefaultArgument(
+      Context, TemplateArgumentLoc(DefaultTInfo->getType(), DefaultTInfo));
 }
 
 void Sema::ActOnTypeParameterBound(TemplateTypeParmDecl *Param,
@@ -1114,8 +1119,30 @@ void Sema::ActOnTypeParameterBound(TemplateTypeParmDecl *Param,
 bool Sema::CheckTypeParameterBound(TemplateTypeParmDecl *Param,
                                    TypeSourceInfo *Bound) {
   SourceLocation Loc = Bound->getTypeLoc().getBeginLoc();
-  if (DiagnoseUnexpandedParameterPack(Loc, Bound, UPPC_TemplateParameterBound))
+  std::pair<unsigned, unsigned> Self(Param->getDepth(), Param->getIndex());
+
+  // A pack may name itself, unexpanded, in its bound: each element's bound
+  // names that element.
+  SmallVector<UnexpandedParameterPack, 2> Unexpanded;
+  collectUnexpandedParameterPacks(Bound->getTypeLoc(), Unexpanded);
+  llvm::erase_if(Unexpanded, [&](UnexpandedParameterPack UPP) {
+    return getDepthAndIndex(UPP) == Self;
+  });
+  if (!Unexpanded.empty()) {
+    DiagnoseUnexpandedParameterPacks(Loc, UPPC_TemplateParameterBound,
+                                     Unexpanded);
     return true;
+  }
+
+  // The parameter names, in its own bound, the type deduced for it from the
+  // argument alone. Its bound cannot be part of deducing that.
+  llvm::SmallBitVector Used(Param->getIndex() + 1);
+  MarkUsedTemplateParameters(Bound->getType(), /*OnlyDeduced=*/true,
+                             Param->getDepth(), Used);
+  if (Used[Param->getIndex()]) {
+    Diag(Loc, diag::err_template_param_bound_deduces_itself) << Param;
+    return true;
+  }
 
   // The bound is what every argument for the parameter is, give or take cv-
   // and ref-qualifiers, so it cannot carry any of its own.
@@ -1137,25 +1164,24 @@ bool Sema::CheckTypeParameterBound(TemplateTypeParmDecl *Param,
   return false;
 }
 
-QualType
-Sema::SubstTypeParameterBound(TemplateTypeParmDecl *Param, NamedDecl *Template,
-                              ArrayRef<TemplateArgument> SugaredConverted,
-                              SourceLocation TemplateLoc,
-                              SourceRange InstRange) {
+QualType Sema::SubstTypeParameterBound(TemplateTypeParmDecl *Param,
+                                       NamedDecl *Template,
+                                       ArrayRef<TemplateArgument> Args,
+                                       UnsignedOrNone PackIndex,
+                                       SourceLocation TemplateLoc,
+                                       SourceRange InstRange) {
   QualType U = Param->getBound();
   if (U.isNull() || !U->isInstantiationDependentType())
     return U;
 
-  // The bound can only name earlier parameters, which have all been converted.
-  InstantiatingTemplate Inst(*this, TemplateLoc, Template, Param,
-                             SugaredConverted, InstRange);
+  InstantiatingTemplate Inst(*this, TemplateLoc, Template, Param, Args,
+                             InstRange);
   if (Inst.isInvalid())
     return QualType();
 
-  MultiLevelTemplateArgumentList MLTAL(Template, SugaredConverted,
-                                       /*Final=*/true);
+  MultiLevelTemplateArgumentList MLTAL(Template, Args, /*Final=*/true);
   MLTAL.addOuterRetainedLevels(Param->getDepth());
-  ArgPackSubstIndexRAII OnlySubstNonPackExpansion(*this, std::nullopt);
+  ArgPackSubstIndexRAII SubstIndex(*this, PackIndex);
   return SubstType(U, MLTAL, Param->getLocation(), Param->getDeclName());
 }
 
@@ -1181,9 +1207,18 @@ static bool CheckTemplateArgumentAgainstBound(
   if (A->isDependentType())
     return false;
 
-  QualType U = S.SubstTypeParameterBound(Param, Template, CTAI.SugaredConverted,
-                                         TemplateLoc,
-                                         SourceRange(TemplateLoc, RAngleLoc));
+  // The bound may name the parameter itself, standing for this argument; an
+  // element of a pack is checked as the only element of the pack.
+  SmallVector<TemplateArgument, 8> Args(CTAI.SugaredConverted.begin(),
+                                        CTAI.SugaredConverted.end());
+  UnsignedOrNone PackIndex = std::nullopt;
+  if (Param->isParameterPack()) {
+    Args.back() = TemplateArgument::CreatePackCopy(S.Context, Args.back());
+    PackIndex = 0u;
+  }
+  QualType U =
+      S.SubstTypeParameterBound(Param, Template, Args, PackIndex, TemplateLoc,
+                                SourceRange(TemplateLoc, RAngleLoc));
   if (U.isNull())
     return true;
   if (U->isDependentType() ||
@@ -5667,8 +5702,11 @@ bool Sema::CheckTemplateArgument(NamedDecl *Param, TemplateArgumentLoc &ArgLoc,
                                   CTAI.CanonicalConverted))
       return true;
     // Partial ordering deduces unique types for the parameters of the other
-    // template, which say nothing about bounds.
-    if (TTP->hasBound() && !CTAI.PartialOrdering && !CTAI.MatchingTTP)
+    // template, which say nothing about bounds. A deduced argument has
+    // already been made to fit its bound (see ConvertDeducedTemplateArguments),
+    // in terms of what was deduced before that.
+    if (TTP->hasBound() && !CTAI.PartialOrdering && !CTAI.MatchingTTP &&
+        CTAK != CTAK_Deduced)
       return CheckTemplateArgumentAgainstBound(*this, TTP, ArgLoc, Template,
                                                TemplateLoc, RAngleLoc, CTAI);
     return false;
