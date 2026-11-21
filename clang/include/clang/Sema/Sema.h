@@ -12182,17 +12182,14 @@ public:
                                 unsigned Position, SourceLocation EqualLoc,
                                 ParsedType DefaultArg, bool HasTypeConstraint);
 
-  /// Attach the bound of a bounded type parameter, 'typename T : U' or
-  /// 'typename T -> U' (P2481).
-  void ActOnTypeParameterBound(TemplateTypeParmDecl *Param,
-                               TemplateTypeParmDecl::BoundKind Kind,
-                               ParsedType Bound);
+  /// Attach the bound of a bounded type parameter, 'typename T : U'
+  /// (P2481).
+  void ActOnTypeParameterBound(TemplateTypeParmDecl *Param, ParsedType Bound);
 
   /// Check and attach the bound of a type parameter.
   ///
   /// \returns true if the bound is invalid.
   bool CheckTypeParameterBound(TemplateTypeParmDecl *Param,
-                               TemplateTypeParmDecl::BoundKind Kind,
                                TypeSourceInfo *Bound);
 
   /// Substitute the template arguments converted so far into the bound of

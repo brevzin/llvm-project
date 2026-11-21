@@ -329,7 +329,7 @@ transformTemplateParam(Sema &SemaRef, DeclContext *DC,
   if (TypeSourceInfo *Bound = TTP->getBoundTypeSourceInfo())
     if (TypeSourceInfo *NewBound = SemaRef.SubstType(
             Bound, Args, TTP->getLocation(), TTP->getDeclName()))
-      NewTTP->setBound(TTP->getBoundKind(), NewBound);
+      NewTTP->setBound(NewBound);
   if (TTP->hasDefaultArgument()) {
     TemplateArgumentLoc InstantiatedDefaultArg;
     if (!SemaRef.SubstTemplateArgument(

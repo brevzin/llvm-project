@@ -2172,7 +2172,7 @@ static NamedDecl *transformClonedTemplateParam(
     if (TypeSourceInfo *Bound = TTP->getBoundTypeSourceInfo())
       if (TypeSourceInfo *NewBound = SemaRef.SubstType(
               Bound, Args, TTP->getLocation(), TTP->getDeclName()))
-        NewTTP->setBound(TTP->getBoundKind(), NewBound);
+        NewTTP->setBound(NewBound);
     if (KeepDefaults && TTP->hasDefaultArgument()) {
       TemplateArgumentLoc InstantiatedDefaultArg;
       if (!SemaRef.SubstTemplateArgument(

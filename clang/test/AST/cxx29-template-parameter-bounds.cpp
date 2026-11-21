@@ -15,12 +15,12 @@
 
 struct B {};
 
-// PRINT: template <typename T : B, class ...Ts -> int, typename U : B = B> void f(T &&, Ts ...);
+// PRINT: template <typename T : B, class ...Ts : int, typename U : B = B> void f(T &&, Ts ...);
 // DUMP:      FunctionTemplateDecl {{.*}} f
 // DUMP-NEXT: TemplateTypeParmDecl {{.*}} <col:11, col:24> col:20 referenced typename depth 0 index 0 T : 'B'
-// DUMP-NEXT: TemplateTypeParmDecl {{.*}} <col:27, col:42> col:36 referenced class depth 0 index 1 ... Ts -> 'int'
-// DUMP-NEXT: TemplateTypeParmDecl {{.*}} <col:47, col:64> col:56 typename depth 0 index 2 U : 'B'
-template <typename T : B, class... Ts -> int, typename U : B = B> void f(T&&, Ts...);
+// DUMP-NEXT: TemplateTypeParmDecl {{.*}} <col:27, col:41> col:36 referenced class depth 0 index 1 ... Ts : 'int'
+// DUMP-NEXT: TemplateTypeParmDecl {{.*}} <col:46, col:63> col:55 typename depth 0 index 2 U : 'B'
+template <typename T : B, class... Ts : int, typename U : B = B> void f(T&&, Ts...);
 
 template <class X> struct S {
   // PRINT: template <typename T : X> void g(T &&);

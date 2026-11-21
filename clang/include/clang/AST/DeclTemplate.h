@@ -1170,22 +1170,6 @@ class TemplateTypeParmDecl final : public TypeDecl,
   friend TrailingObjects;
   friend class ASTDeclReader;
 
-public:
-  /// The kind of bound on a bounded template type parameter (P2481).
-  ///
-  /// \code
-  /// template <typename T : Base> void f(T&&);        // Derived
-  /// template <typename T -> std::string> void g(T&&); // Convertible
-  /// \endcode
-  ///
-  /// Either way, every argument for \c T is the bound type, possibly cv- and
-  /// ref-qualified. Deduction from a call argument deduces \c T as if the
-  /// parameter named the bound: with ':', the argument must be the bound type
-  /// or a class derived from it; with '->', any other argument yields the
-  /// bound type itself, which the argument is then converted to.
-  enum class BoundKind : unsigned char { None, Derived, Convertible };
-
-private:
   /// Whether this template type parameter was declaration with
   /// the 'typename' keyword.
   ///
@@ -1200,14 +1184,21 @@ private:
   /// type constraint.
   bool TypeConstraintInitialized : 1;
 
-  /// The kind of bound, if any (see BoundKind).
-  LLVM_PREFERRED_TYPE(BoundKind)
-  unsigned BoundK : 2;
-
   /// The number of type parameters in an expanded parameter pack, if any.
   UnsignedOrNone NumExpanded = std::nullopt;
 
-  /// The bound type, as written, if this is a bounded type parameter.
+  /// The bound, as written, if this is a bounded type parameter (P2481):
+  ///
+  /// \code
+  /// template <typename T : std::string> void f(T&&);
+  /// template <class... Us, typename T : std::tuple<Us...>> void g(T&&);
+  /// \endcode
+  ///
+  /// Every argument for \c T is the bound, possibly cv- and ref-qualified.
+  /// Deduction from a call argument deduces \c T as if the function
+  /// parameter's type were the bound: where the bound has template parameters
+  /// to deduce, the argument must be the bound or derived from it; where it
+  /// does not, the argument may be anything that converts to it.
   TypeSourceInfo *Bound = nullptr;
 
   /// The default template argument, if any.
@@ -1220,7 +1211,6 @@ private:
                        bool HasTypeConstraint, UnsignedOrNone NumExpanded)
       : TypeDecl(TemplateTypeParm, DC, IdLoc, Id, KeyLoc), Typename(Typename),
         HasTypeConstraint(HasTypeConstraint), TypeConstraintInitialized(false),
-        BoundK(static_cast<unsigned>(BoundKind::None)),
         NumExpanded(NumExpanded) {}
 
 public:
@@ -1285,11 +1275,8 @@ public:
   /// the 'typename' or 'class' keyword.
   void setDeclaredWithTypename(bool withTypename) { Typename = withTypename; }
 
-  /// Whether this is a bounded type parameter, 'typename T : U' or
-  /// 'typename T -> U'.
-  bool hasBound() const { return getBoundKind() != BoundKind::None; }
-
-  BoundKind getBoundKind() const { return static_cast<BoundKind>(BoundK); }
+  /// Whether this is a bounded type parameter, 'typename T : U'.
+  bool hasBound() const { return Bound != nullptr; }
 
   /// The bound, U, as written.
   TypeSourceInfo *getBoundTypeSourceInfo() const { return Bound; }
@@ -1297,10 +1284,7 @@ public:
   /// The bound, U, or a null type if there is no bound.
   QualType getBound() const { return Bound ? Bound->getType() : QualType(); }
 
-  void setBound(BoundKind K, TypeSourceInfo *TSI) {
-    BoundK = static_cast<unsigned>(K);
-    Bound = K == BoundKind::None ? nullptr : TSI;
-  }
+  void setBound(TypeSourceInfo *TSI) { Bound = TSI; }
 
   /// Retrieve the depth of the template parameter.
   unsigned getDepth() const;

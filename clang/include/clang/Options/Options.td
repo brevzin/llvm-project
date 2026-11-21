@@ -1746,10 +1746,9 @@ defm diverging_expressions : BoolFOption<"diverging-expressions",
             " support for P3549 diverging expressions (std::noreturn_t)">>,
   ShouldParseIf<cplusplus.KeyPath>;
 
-// P2481 bounded template type parameters: 'typename T : U' (the argument is a
-// U or derived from it) and 'typename T -> U' (anything convertible to U),
-// where either way T is deduced as a cv/ref-qualified U. On by default in
-// C++2d.
+// P2481 bounded template type parameters: 'typename T : U', where T is
+// deduced from a call argument as a cv/ref-qualified U, as if the function
+// parameter's type were U. On by default in C++2d.
 defm template_parameter_bounds : BoolFOption<"template-parameter-bounds",
   LangOpts<"TemplateParameterBounds">, Default<cpp29.KeyPath>,
   PosFlag<SetTrue, [], [ClangOption], "Enable">,

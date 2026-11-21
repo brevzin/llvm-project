@@ -1996,9 +1996,7 @@ void DeclPrinter::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *TTP) {
   }
 
   if (TTP->hasBound()) {
-    Out << (TTP->getBoundKind() == TemplateTypeParmDecl::BoundKind::Derived
-                ? " : "
-                : " -> ");
+    Out << " : ";
     TTP->getBound().print(Out, Policy);
   }
 

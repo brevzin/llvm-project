@@ -1104,16 +1104,14 @@ NamedDecl *Sema::ActOnTypeParameter(Scope *S, bool Typename,
 }
 
 void Sema::ActOnTypeParameterBound(TemplateTypeParmDecl *Param,
-                                   TemplateTypeParmDecl::BoundKind Kind,
                                    ParsedType Bound) {
   TypeSourceInfo *BoundTInfo = nullptr;
   GetTypeFromParser(Bound, &BoundTInfo);
   assert(BoundTInfo && "expected source information for type");
-  CheckTypeParameterBound(Param, Kind, BoundTInfo);
+  CheckTypeParameterBound(Param, BoundTInfo);
 }
 
 bool Sema::CheckTypeParameterBound(TemplateTypeParmDecl *Param,
-                                   TemplateTypeParmDecl::BoundKind Kind,
                                    TypeSourceInfo *Bound) {
   SourceLocation Loc = Bound->getTypeLoc().getBeginLoc();
   if (DiagnoseUnexpandedParameterPack(Loc, Bound, UPPC_TemplateParameterBound))
@@ -1135,7 +1133,7 @@ bool Sema::CheckTypeParameterBound(TemplateTypeParmDecl *Param,
     return true;
   }
 
-  Param->setBound(Kind, Bound);
+  Param->setBound(Bound);
   return false;
 }
 
@@ -1197,9 +1195,7 @@ static bool CheckTemplateArgumentAgainstBound(
   bool SFINAE = S.isSFINAEContext();
   S.Diag(SFINAE ? Param->getLocation() : ArgLoc.getLocation(),
          diag::err_template_arg_violates_bound)
-      << ArgLoc.getArgument().getAsType()
-      << (Param->getBoundKind() == TemplateTypeParmDecl::BoundKind::Convertible)
-      << U << Param;
+      << ArgLoc.getArgument().getAsType() << U << Param;
   if (!SFINAE)
     S.NoteTemplateParameterLocation(*Param);
   return true;
@@ -8558,11 +8554,10 @@ static bool MatchTemplateParameterKind(
       !isa<TemplateTemplateParmDecl>(Old)) {
     const Expr *NewC = nullptr, *OldC = nullptr;
 
-    // Bounds (P2481) must match, like type-constraints: the same kind of bound
-    // and the same type.
+    // Bounds (P2481) must match, like type-constraints.
     if (auto *NewTTP = dyn_cast<TemplateTypeParmDecl>(New)) {
       auto *OldTTP = cast<TemplateTypeParmDecl>(Old);
-      if (NewTTP->getBoundKind() != OldTTP->getBoundKind() ||
+      if (NewTTP->hasBound() != OldTTP->hasBound() ||
           (NewTTP->hasBound() &&
            !S.Context.hasSameType(NewTTP->getBound(), OldTTP->getBound()))) {
         if (Complain) {

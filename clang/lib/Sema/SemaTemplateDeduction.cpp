@@ -3038,10 +3038,29 @@ static QualType rebaseOntoBound(ASTContext &Ctx, QualType ArgType, QualType U) {
   return NewCore;
 }
 
+/// P2481: whether the bound of \p TTP takes part in deduction, as a function
+/// parameter of its type would ([temp.deduct.call]p1, CWG1391): whether it
+/// names, in a deduced context, a template parameter that was not explicitly
+/// specified. If it does, an argument must be the bound or derived from it,
+/// as usual for deduction; if not, it may be anything that converts to it.
+static bool boundTakesPartInDeduction(Sema &S,
+                                      TemplateParameterList *TemplateParams,
+                                      TemplateTypeParmDecl *TTP,
+                                      unsigned NumExplicitArgs) {
+  QualType U = TTP->getBound();
+  if (!U->isDependentType())
+    return false;
+  llvm::SmallBitVector Used(TemplateParams->size());
+  MarkUsedTemplateParameters(S.Context, U, /*OnlyDeduced=*/true,
+                             TemplateParams->getDepth(), Used);
+  return llvm::any_of(Used.set_bits(),
+                      [&](unsigned I) { return I >= NumExplicitArgs; });
+}
+
 /// P2481: rewrite \p Arg, deduced for the bounded type parameter \p TTP, as
 /// the bound it binds to: the bound with the deduced type's cv- and
 /// ref-qualifiers if the deduced type is the bound or derived from it, or
-/// else, for '->', the bound itself.
+/// else, if the bound did not take part in deduction, the bound itself.
 ///
 /// Deduction from a call argument has already done this if the bound was
 /// known then; this handles a bound that named parameters deduced later or
@@ -3050,9 +3069,9 @@ static QualType rebaseOntoBound(ASTContext &Ctx, QualType ArgType, QualType U) {
 ///
 /// \returns true if deduction fails.
 static bool rebaseDeducedArgumentOntoBound(
-    Sema &S, NamedDecl *Template, TemplateTypeParmDecl *TTP,
-    DeducedTemplateArgument &Arg, TemplateDeductionInfo &Info,
-    Sema::CheckTemplateArgumentInfo &CTAI) {
+    Sema &S, NamedDecl *Template, TemplateParameterList *TemplateParams,
+    TemplateTypeParmDecl *TTP, DeducedTemplateArgument &Arg,
+    TemplateDeductionInfo &Info, Sema::CheckTemplateArgumentInfo &CTAI) {
   QualType U =
       S.SubstTypeParameterBound(TTP, Template, CTAI.SugaredConverted,
                                 Info.getLocation(), Template->getSourceRange());
@@ -3061,8 +3080,8 @@ static bool rebaseDeducedArgumentOntoBound(
   if (U->isDependentType())
     return false;
 
-  bool Convertible =
-      TTP->getBoundKind() == TemplateTypeParmDecl::BoundKind::Convertible;
+  bool Convertible = !boundTakesPartInDeduction(S, TemplateParams, TTP,
+                                                Info.getNumExplicitArgs());
   auto Rebase = [&](const TemplateArgument &A) -> TemplateArgument {
     if (A.getKind() != TemplateArgument::Type)
       return A;
@@ -3150,8 +3169,8 @@ static TemplateDeductionResult ConvertDeducedTemplateArguments(
       // deduces unique types, which say nothing about bounds.
       if (auto *TTP = dyn_cast<TemplateTypeParmDecl>(Param);
           TTP && TTP->hasBound() && !CTAI.PartialOrdering &&
-          rebaseDeducedArgumentOntoBound(S, Template, TTP, Deduced[I], Info,
-                                         CTAI)) {
+          rebaseDeducedArgumentOntoBound(S, Template, TemplateParams, TTP,
+                                         Deduced[I], Info, CTAI)) {
         Info.Param = makeTemplateParameter(Param);
         Info.reset(
             TemplateArgumentList::CreateCopy(S.Context, CTAI.SugaredConverted),
@@ -4459,58 +4478,40 @@ getBoundedTypeParam(TemplateParameterList *TemplateParams, QualType ParamType) {
 }
 
 /// P2481: deduce a bounded type parameter T, whose adjusted parameter type is
-/// T or cv T, as if the parameter named its bound U instead.
+/// T or cv T, as if the parameter's type were its bound U instead.
 ///
-/// When U is known, rewrite the adjusted argument type \p ArgType as the U it
-/// binds to: if the argument is a U or derived from one, that is a U with the
-/// argument's cv-qualifiers (and, for a forwarding reference to an lvalue, an
-/// lvalue reference to it); otherwise, with '->', it is U itself, and the
+/// If U takes part in deduction (see boundTakesPartInDeduction), deduce its
+/// template parameters from the argument, as for a parameter of type U,
+/// including from a base class. T is then deduced from the argument as
+/// written, and FinishTemplateArgumentDeduction rewrites it as the U it binds
+/// to once U is known.
+///
+/// Otherwise, if U is known, rewrite the adjusted argument type \p ArgType as
+/// the U it binds to: if the argument is a U or derived from one, that is a U
+/// with the argument's cv-qualifiers (and, for a forwarding reference to an
+/// lvalue, an lvalue reference to it); if not, it is U itself, and the
 /// argument is converted. Ordinary deduction of T from the rewritten type then
 /// gives the qualified U.
-///
-/// When U still depends on template parameters that have not been deduced,
-/// ':' deduces them from the argument as for a parameter of type U, including
-/// from a base class; '->' does not, since conversions take no part in
-/// deduction. T is then deduced from the argument as written, and
-/// FinishTemplateArgumentDeduction rewrites it once U is known.
 ///
 /// \param ArgIsBound Set if the argument (a braced-init-list) initializes U.
 static TemplateDeductionResult DeduceBoundedTypeParam(
     Sema &S, TemplateParameterList *TemplateParams, TemplateTypeParmDecl *TTP,
     QualType &ArgType, Expr *Arg, TemplateDeductionInfo &Info,
     SmallVectorImpl<DeducedTemplateArgument> &Deduced, bool &ArgIsBound) {
-  bool Convertible =
-      TTP->getBoundKind() == TemplateTypeParmDecl::BoundKind::Convertible;
   QualType U = TTP->getBound();
 
   if (isa_and_present<InitListExpr>(Arg)) {
-    // With '->', a braced-init-list initializes the bound. With ':' it is a
-    // non-deduced context, as usual.
-    if (Convertible && !U->isDependentType()) {
+    // As for a parameter of type U: a braced-init-list initializes a known U,
+    // and is otherwise a non-deduced context.
+    if (!U->isDependentType()) {
       ArgType = U;
       ArgIsBound = true;
     }
     return TemplateDeductionResult::Success;
   }
 
-  if (U->isDependentType()) {
-    if (Convertible)
-      return TemplateDeductionResult::Success;
-
-    // If everything the bound names was explicitly specified, the bound is
-    // as good as substituted, as the function parameter types are: there is
-    // nothing to deduce from it, and the argument just has to bind to it,
-    // which finishing deduction checks. (What earlier arguments deduced is
-    // different: each argument deduces independently, and they must agree.)
-    llvm::SmallBitVector Used(TemplateParams->size());
-    MarkUsedTemplateParameters(S.Context, U, /*OnlyDeduced=*/false,
-                               TemplateParams->getDepth(), Used);
-    bool AllExplicit = true;
-    for (unsigned I : Used.set_bits())
-      AllExplicit &= I < Info.getNumExplicitArgs() && !Deduced[I].isNull();
-    if (AllExplicit)
-      return TemplateDeductionResult::Success;
-
+  if (boundTakesPartInDeduction(S, TemplateParams, TTP,
+                                Info.getNumExplicitArgs())) {
     unsigned TDF = TDF_SkipNonDependent;
     if (isSimpleTemplateIdType(U))
       TDF |= TDF_DerivedClass;
@@ -4521,11 +4522,15 @@ static TemplateDeductionResult DeduceBoundedTypeParam(
         /*HasDeducedAnyParam=*/nullptr);
   }
 
+  // A U that names explicitly-specified parameters, or names them only in
+  // non-deduced contexts, is known when deduction finishes.
+  if (U->isDependentType())
+    return TemplateDeductionResult::Success;
+
   if (S.isReferenceCompatibleWithBound(Info.getLocation(), ArgType, U))
     ArgType = rebaseOntoBound(S.Context, ArgType, U);
-  else if (Convertible)
+  else
     ArgType = U;
-  // Otherwise ':' cannot bind the argument; finishing deduction says why.
   return TemplateDeductionResult::Success;
 }
 
@@ -6254,20 +6259,9 @@ FunctionTemplateDecl *Sema::getMoreSpecializedTemplate(
     return nullptr;
 
   // P2481: bounds act like constraints here. A template is at least as
-  // bounded as another if each of its type parameters has a bound at least
-  // as narrow as the other's: none, then '-> U', then ': U', for the same U.
+  // bounded as another if each of its type parameters that the other bounds
+  // has the same bound.
   {
-    auto Rank = [](const TemplateTypeParmDecl *P) {
-      switch (P->getBoundKind()) {
-      case TemplateTypeParmDecl::BoundKind::None:
-        return 0;
-      case TemplateTypeParmDecl::BoundKind::Convertible:
-        return 1;
-      case TemplateTypeParmDecl::BoundKind::Derived:
-        return 2;
-      }
-      llvm_unreachable("unknown bound kind");
-    };
     bool AtLeastAsBounded1 = true, AtLeastAsBounded2 = true;
     for (unsigned I = 0, N = TPL1->size(); I != N; ++I) {
       auto *P1 = dyn_cast<TemplateTypeParmDecl>(TPL1->getParam(I));
@@ -6277,8 +6271,8 @@ FunctionTemplateDecl *Sema::getMoreSpecializedTemplate(
       if (P1->hasBound() && P2->hasBound() &&
           !Context.hasSameType(P1->getBound(), P2->getBound()))
         return nullptr;
-      AtLeastAsBounded1 &= Rank(P1) >= Rank(P2);
-      AtLeastAsBounded2 &= Rank(P2) >= Rank(P1);
+      AtLeastAsBounded1 &= P1->hasBound() || !P2->hasBound();
+      AtLeastAsBounded2 &= P2->hasBound() || !P1->hasBound();
     }
     if (!AtLeastAsBounded1 && !AtLeastAsBounded2)
       return nullptr;

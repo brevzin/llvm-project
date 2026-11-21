@@ -4165,8 +4165,7 @@ Decl *TemplateDeclInstantiator::VisitTemplateTypeParmDecl(
   if (TypeSourceInfo *Bound = D->getBoundTypeSourceInfo()) {
     TypeSourceInfo *NewBound = SemaRef.SubstType(
         Bound, TemplateArgs, D->getLocation(), D->getDeclName());
-    if (!NewBound ||
-        SemaRef.CheckTypeParameterBound(Inst, D->getBoundKind(), NewBound))
+    if (!NewBound || SemaRef.CheckTypeParameterBound(Inst, NewBound))
       Inst->setInvalidDecl();
   }
   if (D->hasDefaultArgument() && !D->defaultArgumentWasInherited()) {

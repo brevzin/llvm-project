@@ -13295,12 +13295,12 @@ def err_template_param_bound_qualified : Error<
 def err_template_param_bound_not_object : Error<
   "bound %0 of a template parameter must be an object type">;
 def err_template_arg_violates_bound : Error<
-  "template argument %0 does not satisfy the %select{':'|'->'}1 bound %2 of "
-  "template parameter %3; it must be %2, optionally cv- or ref-qualified">;
+  "template argument %0 does not satisfy the bound %1 of template parameter "
+  "%2; it must be %1, optionally cv- or ref-qualified">;
 def err_template_different_bound : Error<
   "template parameter bound differs in template redeclaration">;
 def err_deduced_arg_not_derived_from_bound : Error<
-  "%0 is neither %1 nor a class derived from it, as the ':' bound of "
+  "%0 is neither %1 nor a class derived from it, as the deduced bound of "
   "template parameter %2 requires">;
 } // end of bounded template parameters issue category
 

@@ -12,14 +12,14 @@
 
 // P2481: a bounded parameter is deduced as the bound, so arguments of
 // different types share a specialization, and the conversion (derived to
-// base, or any conversion for '->') happens at the call.
+// base, or any other implicit conversion) happens at the call.
 
 struct Base { int v; };
 struct Derived : Base { int w; };
 struct Str { Str(const char *); };
 
 template <typename T : Base> int f(T &&t) { return t.v; }
-template <typename T -> Str> void g(T &&) {}
+template <typename T : Str> void g(T &&) {}
 template <class T, class... Ts : T> int sum(Ts... xs) { return (xs + ... + 0); }
 
 // CHECK-LABEL: define {{.*}} @_Z4testR4BaseR7Derived(
