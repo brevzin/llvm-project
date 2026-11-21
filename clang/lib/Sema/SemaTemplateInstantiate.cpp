@@ -908,6 +908,15 @@ Sema::InstantiatingTemplate::InstantiatingTemplate(
 
 Sema::InstantiatingTemplate::InstantiatingTemplate(
     Sema &SemaRef, SourceLocation PointOfInstantiation, NamedDecl *Template,
+    TemplateTypeParmDecl *Param, ArrayRef<TemplateArgument> TemplateArgs,
+    SourceRange InstantiationRange)
+    : InstantiatingTemplate(
+          SemaRef, CodeSynthesisContext::PriorTemplateArgumentSubstitution,
+          PointOfInstantiation, InstantiationRange, Param, Template,
+          TemplateArgs) {}
+
+Sema::InstantiatingTemplate::InstantiatingTemplate(
+    Sema &SemaRef, SourceLocation PointOfInstantiation, NamedDecl *Template,
     TemplateTemplateParmDecl *Param, ArrayRef<TemplateArgument> TemplateArgs,
     SourceRange InstantiationRange)
     : InstantiatingTemplate(
@@ -1263,7 +1272,10 @@ void Sema::PrintInstantiationStack(InstantiationContextDiagFuncRef DiagFunc) {
                                                       ->getTemplateParameters();
       DiagFunc(Active->PointOfInstantiation,
                PDiag(diag::note_prior_template_arg_substitution)
-                   << isa<TemplateTemplateParmDecl>(Parm) << Name
+                   << (isa<TemplateTypeParmDecl>(Parm)       ? 2
+                       : isa<TemplateTemplateParmDecl>(Parm) ? 1
+                                                             : 0)
+                   << Name
                    << getTemplateArgumentBindingsText(TemplateParams,
                                                       Active->TemplateArgs,
                                                       Active->NumTemplateArgs)

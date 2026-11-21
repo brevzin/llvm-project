@@ -6179,7 +6179,8 @@ def note_deduced_template_arg_substitution_here : Note<
   "during template argument deduction for %select{class|variable}0 template "
   "%select{partial specialization |}1%2 %3">;
 def note_prior_template_arg_substitution : Note<
-  "while substituting prior template arguments into %select{non-type|template}0"
+  "while substituting prior template arguments into "
+  "%select{non-type|template|the bound of type}0"
   " template parameter%1 %2">;
 def note_template_default_arg_checking : Note<
   "while checking a default template argument used here">;
@@ -6406,7 +6407,7 @@ def err_unexpanded_parameter_pack : Error<
   "using declaration|friend declaration|qualifier|initializer|default argument|"
   "non-type template parameter type|exception type|explicit specialization|"
   "partial specialization|__if_exists name|__if_not_exists name|lambda|block|"
-  "type constraint|requirement|requires clause}0 "
+  "type constraint|requirement|requires clause|template parameter bound}0 "
   "contains%plural{0: an|:}1 unexpanded parameter pack"
   "%plural{0:|1: %2|2:s %2 and %3|:s %2, %3, ...}1">;
 
@@ -13286,6 +13287,22 @@ def err_do_expr_falls_off_end : Error<
   "%0; every path must exit via 'do return', 'return', 'break', 'continue', "
   "'throw', or a '[[noreturn]]' call">;
 } // end of do-expressions issue category
+
+let CategoryName = "Bounded Template Parameters Issue" in {
+def err_template_param_bound_qualified : Error<
+  "bound %1 of a template parameter cannot be "
+  "%select{a reference type|cv-qualified}0">;
+def err_template_param_bound_not_object : Error<
+  "bound %0 of a template parameter must be an object type">;
+def err_template_arg_violates_bound : Error<
+  "template argument %0 does not satisfy the %select{':'|'->'}1 bound %2 of "
+  "template parameter %3; it must be %2, optionally cv- or ref-qualified">;
+def err_template_different_bound : Error<
+  "template parameter bound differs in template redeclaration">;
+def err_deduced_arg_not_derived_from_bound : Error<
+  "%0 is neither %1 nor a class derived from it, as the ':' bound of "
+  "template parameter %2 requires">;
+} // end of bounded template parameters issue category
 
 let CategoryName = "Diverging Expressions Issue" in {
 def err_noreturn_object_init : Error<

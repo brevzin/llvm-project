@@ -4162,6 +4162,13 @@ Decl *TemplateDeclInstantiator::VisitTemplateTypeParmDecl(
         return nullptr;
     }
   }
+  if (TypeSourceInfo *Bound = D->getBoundTypeSourceInfo()) {
+    TypeSourceInfo *NewBound = SemaRef.SubstType(
+        Bound, TemplateArgs, D->getLocation(), D->getDeclName());
+    if (!NewBound ||
+        SemaRef.CheckTypeParameterBound(Inst, D->getBoundKind(), NewBound))
+      Inst->setInvalidDecl();
+  }
   if (D->hasDefaultArgument() && !D->defaultArgumentWasInherited()) {
     TemplateArgumentLoc Output;
     if (!SemaRef.SubstTemplateArgument(D->getDefaultArgument(), TemplateArgs,

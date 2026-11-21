@@ -1103,6 +1103,108 @@ NamedDecl *Sema::ActOnTypeParameter(Scope *S, bool Typename,
   return Param;
 }
 
+void Sema::ActOnTypeParameterBound(TemplateTypeParmDecl *Param,
+                                   TemplateTypeParmDecl::BoundKind Kind,
+                                   ParsedType Bound) {
+  TypeSourceInfo *BoundTInfo = nullptr;
+  GetTypeFromParser(Bound, &BoundTInfo);
+  assert(BoundTInfo && "expected source information for type");
+  CheckTypeParameterBound(Param, Kind, BoundTInfo);
+}
+
+bool Sema::CheckTypeParameterBound(TemplateTypeParmDecl *Param,
+                                   TemplateTypeParmDecl::BoundKind Kind,
+                                   TypeSourceInfo *Bound) {
+  SourceLocation Loc = Bound->getTypeLoc().getBeginLoc();
+  if (DiagnoseUnexpandedParameterPack(Loc, Bound, UPPC_TemplateParameterBound))
+    return true;
+
+  // The bound is what every argument for the parameter is, give or take cv-
+  // and ref-qualifiers, so it cannot carry any of its own.
+  QualType U = Bound->getType();
+  if (U->isReferenceType()) {
+    Diag(Loc, diag::err_template_param_bound_qualified) << 0 << U;
+    return true;
+  }
+  if (U.getCanonicalType().hasQualifiers()) {
+    Diag(Loc, diag::err_template_param_bound_qualified) << 1 << U;
+    return true;
+  }
+  if (!U->isDependentType() && !U->isObjectType()) {
+    Diag(Loc, diag::err_template_param_bound_not_object) << U;
+    return true;
+  }
+
+  Param->setBound(Kind, Bound);
+  return false;
+}
+
+QualType
+Sema::SubstTypeParameterBound(TemplateTypeParmDecl *Param, NamedDecl *Template,
+                              ArrayRef<TemplateArgument> SugaredConverted,
+                              SourceLocation TemplateLoc,
+                              SourceRange InstRange) {
+  QualType U = Param->getBound();
+  if (U.isNull() || !U->isInstantiationDependentType())
+    return U;
+
+  // The bound can only name earlier parameters, which have all been converted.
+  InstantiatingTemplate Inst(*this, TemplateLoc, Template, Param,
+                             SugaredConverted, InstRange);
+  if (Inst.isInvalid())
+    return QualType();
+
+  MultiLevelTemplateArgumentList MLTAL(Template, SugaredConverted,
+                                       /*Final=*/true);
+  MLTAL.addOuterRetainedLevels(Param->getDepth());
+  ArgPackSubstIndexRAII OnlySubstNonPackExpansion(*this, std::nullopt);
+  return SubstType(U, MLTAL, Param->getLocation(), Param->getDeclName());
+}
+
+bool Sema::isReferenceCompatibleWithBound(SourceLocation Loc, QualType ArgType,
+                                          QualType Bound) {
+  QualType A = ArgType.getNonReferenceType().getUnqualifiedType();
+  if (Context.hasSameUnqualifiedType(A, Bound))
+    return true;
+  return A->isRecordType() && Bound->isRecordType() &&
+         IsDerivedFrom(Loc, A, Bound);
+}
+
+/// Check that a template argument for a bounded type parameter is the bound,
+/// give or take cv- and ref-qualifiers (P2481).
+static bool CheckTemplateArgumentAgainstBound(
+    Sema &S, TemplateTypeParmDecl *Param, const TemplateArgumentLoc &ArgLoc,
+    NamedDecl *Template, SourceLocation TemplateLoc, SourceLocation RAngleLoc,
+    Sema::CheckTemplateArgumentInfo &CTAI) {
+  const TemplateArgument &Converted = CTAI.CanonicalConverted.back();
+  if (Converted.getKind() != TemplateArgument::Type)
+    return false;
+  QualType A = Converted.getAsType();
+  if (A->isDependentType())
+    return false;
+
+  QualType U = S.SubstTypeParameterBound(Param, Template, CTAI.SugaredConverted,
+                                         TemplateLoc,
+                                         SourceRange(TemplateLoc, RAngleLoc));
+  if (U.isNull())
+    return true;
+  if (U->isDependentType() ||
+      S.Context.hasSameUnqualifiedType(A.getNonReferenceType(), U))
+    return false;
+
+  // In a SFINAE context, this becomes a note on the candidate, which shows
+  // where it is, so point into the template rather than at the argument.
+  bool SFINAE = S.isSFINAEContext();
+  S.Diag(SFINAE ? Param->getLocation() : ArgLoc.getLocation(),
+         diag::err_template_arg_violates_bound)
+      << ArgLoc.getArgument().getAsType()
+      << (Param->getBoundKind() == TemplateTypeParmDecl::BoundKind::Convertible)
+      << U << Param;
+  if (!SFINAE)
+    S.NoteTemplateParameterLocation(*Param);
+  return true;
+}
+
 /// Convert the parser's template argument list representation into our form.
 static TemplateArgumentListInfo
 makeTemplateArgumentListInfo(Sema &S, TemplateIdAnnotation &TemplateId) {
@@ -5564,9 +5666,17 @@ bool Sema::CheckTemplateArgument(NamedDecl *Param, TemplateArgumentLoc &ArgLoc,
                                  CheckTemplateArgumentInfo &CTAI,
                                  CheckTemplateArgumentKind CTAK) {
   // Check template type parameters.
-  if (TemplateTypeParmDecl *TTP = dyn_cast<TemplateTypeParmDecl>(Param))
-    return CheckTemplateTypeArgument(TTP, ArgLoc, CTAI.SugaredConverted,
-                                     CTAI.CanonicalConverted);
+  if (TemplateTypeParmDecl *TTP = dyn_cast<TemplateTypeParmDecl>(Param)) {
+    if (CheckTemplateTypeArgument(TTP, ArgLoc, CTAI.SugaredConverted,
+                                  CTAI.CanonicalConverted))
+      return true;
+    // Partial ordering deduces unique types for the parameters of the other
+    // template, which say nothing about bounds.
+    if (TTP->hasBound() && !CTAI.PartialOrdering && !CTAI.MatchingTTP)
+      return CheckTemplateArgumentAgainstBound(*this, TTP, ArgLoc, Template,
+                                               TemplateLoc, RAngleLoc, CTAI);
+    return false;
+  }
 
   const TemplateArgument &Arg = ArgLoc.getArgument();
   // Check non-type template parameters.
@@ -8447,6 +8557,26 @@ static bool MatchTemplateParameterKind(
       Kind != Sema::TPL_TemplateTemplateParmMatch &&
       !isa<TemplateTemplateParmDecl>(Old)) {
     const Expr *NewC = nullptr, *OldC = nullptr;
+
+    // Bounds (P2481) must match, like type-constraints: the same kind of bound
+    // and the same type.
+    if (auto *NewTTP = dyn_cast<TemplateTypeParmDecl>(New)) {
+      auto *OldTTP = cast<TemplateTypeParmDecl>(Old);
+      if (NewTTP->getBoundKind() != OldTTP->getBoundKind() ||
+          (NewTTP->hasBound() &&
+           !S.Context.hasSameType(NewTTP->getBound(), OldTTP->getBound()))) {
+        if (Complain) {
+          auto BoundLoc = [](TemplateTypeParmDecl *P) {
+            TypeSourceInfo *TSI = P->getBoundTypeSourceInfo();
+            return TSI ? TSI->getTypeLoc().getBeginLoc() : P->getLocation();
+          };
+          S.Diag(BoundLoc(NewTTP), diag::err_template_different_bound);
+          S.Diag(BoundLoc(OldTTP), diag::note_template_prev_declaration)
+              << /*declaration*/ 0;
+        }
+        return false;
+      }
+    }
 
     if (isa<TemplateTypeParmDecl>(New)) {
       if (const auto *TC = cast<TemplateTypeParmDecl>(New)->getTypeConstraint())

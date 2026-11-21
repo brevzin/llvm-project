@@ -1995,6 +1995,13 @@ void DeclPrinter::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *TTP) {
       Out << TTP->getDeclName();
   }
 
+  if (TTP->hasBound()) {
+    Out << (TTP->getBoundKind() == TemplateTypeParmDecl::BoundKind::Derived
+                ? " : "
+                : " -> ");
+    TTP->getBound().print(Out, Policy);
+  }
+
   if (TTP->hasDefaultArgument() && !TTP->defaultArgumentWasInherited()) {
     Out << " = ";
     TTP->getDefaultArgument().getArgument().print(Policy, Out,

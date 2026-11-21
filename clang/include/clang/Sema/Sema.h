@@ -12182,6 +12182,36 @@ public:
                                 unsigned Position, SourceLocation EqualLoc,
                                 ParsedType DefaultArg, bool HasTypeConstraint);
 
+  /// Attach the bound of a bounded type parameter, 'typename T : U' or
+  /// 'typename T -> U' (P2481).
+  void ActOnTypeParameterBound(TemplateTypeParmDecl *Param,
+                               TemplateTypeParmDecl::BoundKind Kind,
+                               ParsedType Bound);
+
+  /// Check and attach the bound of a type parameter.
+  ///
+  /// \returns true if the bound is invalid.
+  bool CheckTypeParameterBound(TemplateTypeParmDecl *Param,
+                               TemplateTypeParmDecl::BoundKind Kind,
+                               TypeSourceInfo *Bound);
+
+  /// Substitute the template arguments converted so far into the bound of
+  /// \p Param.
+  ///
+  /// \returns the substituted bound, which is still dependent if those
+  /// arguments are, or a null type if substitution failed.
+  QualType SubstTypeParameterBound(TemplateTypeParmDecl *Param,
+                                   NamedDecl *Template,
+                                   ArrayRef<TemplateArgument> SugaredConverted,
+                                   SourceLocation TemplateLoc,
+                                   SourceRange InstRange);
+
+  /// Whether an argument of class (or other) type \p ArgType may bind to
+  /// \p Bound by reference without a conversion: it is \p Bound, ignoring
+  /// cv-qualifiers, or a class derived from it.
+  bool isReferenceCompatibleWithBound(SourceLocation Loc, QualType ArgType,
+                                      QualType Bound);
+
   bool CheckTypeConstraint(TemplateIdAnnotation *TypeConstraint);
 
   bool ActOnTypeConstraint(const CXXScopeSpec &SS,
@@ -14041,6 +14071,13 @@ public:
                           ArrayRef<TemplateArgument> TemplateArgs,
                           SourceRange InstantiationRange);
 
+    /// Note that we are substituting prior template arguments into the bound
+    /// of a type parameter.
+    InstantiatingTemplate(Sema &SemaRef, SourceLocation PointOfInstantiation,
+                          NamedDecl *Template, TemplateTypeParmDecl *Param,
+                          ArrayRef<TemplateArgument> TemplateArgs,
+                          SourceRange InstantiationRange);
+
     /// Note that we are substituting prior template arguments into a
     /// template template parameter.
     InstantiatingTemplate(Sema &SemaRef, SourceLocation PointOfInstantiation,
@@ -15181,6 +15218,9 @@ public:
 
     // A requires-clause.
     UPPC_RequiresClause,
+
+    // The bound of a bounded template type parameter.
+    UPPC_TemplateParameterBound,
   };
 
   /// Diagnose unexpanded parameter packs.

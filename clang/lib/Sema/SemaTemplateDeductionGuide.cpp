@@ -326,6 +326,10 @@ transformTemplateParam(Sema &SemaRef, DeclContext *DC,
   if (const auto *TC = TTP->getTypeConstraint())
     SemaRef.SubstTypeConstraint(NewTTP, TC, Args,
                                 /*EvaluateConstraint=*/EvaluateConstraint);
+  if (TypeSourceInfo *Bound = TTP->getBoundTypeSourceInfo())
+    if (TypeSourceInfo *NewBound = SemaRef.SubstType(
+            Bound, Args, TTP->getLocation(), TTP->getDeclName()))
+      NewTTP->setBound(TTP->getBoundKind(), NewBound);
   if (TTP->hasDefaultArgument()) {
     TemplateArgumentLoc InstantiatedDefaultArg;
     if (!SemaRef.SubstTemplateArgument(

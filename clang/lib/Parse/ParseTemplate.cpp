@@ -423,6 +423,18 @@ Parser::TPResult Parser::isStartOfTemplateTypeParameter() {
     case tok::greatergreater:
       return TPResult::True;
 
+    // A bounded type-parameter, 'class T : U' or 'class T -> U' (P2481).
+    // 'class T : public ...' is a class definition, mistyped.
+    case tok::colon:
+      if (!getLangOpts().TemplateParameterBounds ||
+          GetLookAheadToken(3).isOneOf(tok::kw_public, tok::kw_protected,
+                                       tok::kw_private, tok::kw_virtual))
+        return TPResult::False;
+      return TPResult::True;
+    case tok::arrow:
+      return getLangOpts().TemplateParameterBounds ? TPResult::True
+                                                   : TPResult::False;
+
     default:
       return TPResult::False;
     }
@@ -462,6 +474,13 @@ Parser::TPResult Parser::isStartOfTemplateTypeParameter() {
   case tok::greater:
   case tok::greatergreater:
   case tok::ellipsis:
+    return TPResult::True;
+
+  // A bounded type-parameter, 'typename T : U' or 'typename T -> U' (P2481).
+  // Neither can follow 'typename X' in a non-type parameter: 'typename X::Y'
+  // lexes '::' as one token, and a declarator cannot start with '->'.
+  case tok::colon:
+  case tok::arrow:
     return TPResult::True;
 
   case tok::kw_typename:
@@ -651,7 +670,7 @@ NamedDecl *Parser::ParseTypeParameter(unsigned Depth, unsigned Position) {
     ParamName = Tok.getIdentifierInfo();
     ConsumeToken();
   } else if (Tok.isOneOf(tok::equal, tok::comma, tok::greater,
-                         tok::greatergreater)) {
+                         tok::greatergreater, tok::colon, tok::arrow)) {
     // Unnamed template parameter. Don't have to do anything here, just
     // don't consume this token.
   } else {
@@ -663,6 +682,22 @@ NamedDecl *Parser::ParseTypeParameter(unsigned Depth, unsigned Position) {
   bool AlreadyHasEllipsis = EllipsisLoc.isValid();
   if (TryConsumeToken(tok::ellipsis, EllipsisLoc))
     DiagnoseMisplacedEllipsis(EllipsisLoc, NameLoc, AlreadyHasEllipsis, true);
+
+  // Grab a bound (if given): ': type-id' or '-> type-id' (P2481). Like the
+  // default argument, it is parsed before the parameter is in scope.
+  SourceLocation BoundLoc;
+  TypeResult Bound;
+  auto BoundKind = TemplateTypeParmDecl::BoundKind::None;
+  if (Tok.isOneOf(tok::colon, tok::arrow)) {
+    BoundKind = Tok.is(tok::colon)
+                    ? TemplateTypeParmDecl::BoundKind::Derived
+                    : TemplateTypeParmDecl::BoundKind::Convertible;
+    BoundLoc = ConsumeToken();
+    if (!getLangOpts().TemplateParameterBounds)
+      Diag(BoundLoc, diag::err_template_param_bound_requires_cxx29);
+    Bound =
+        ParseTypeName(/*Range=*/nullptr, DeclaratorContext::TemplateTypeArg);
+  }
 
   // Grab a default argument (if available).
   // Per C++0x [basic.scope.pdecl]p9, we parse the default argument before
@@ -698,6 +733,11 @@ NamedDecl *Parser::ParseTypeParameter(unsigned Depth, unsigned Position) {
                                 cast<TemplateTypeParmDecl>(NewDecl),
                                 EllipsisLoc);
   }
+
+  if (BoundKind != TemplateTypeParmDecl::BoundKind::None && Bound.isUsable() &&
+      getLangOpts().TemplateParameterBounds)
+    Actions.ActOnTypeParameterBound(cast<TemplateTypeParmDecl>(NewDecl),
+                                    BoundKind, Bound.get());
 
   return NewDecl;
 }

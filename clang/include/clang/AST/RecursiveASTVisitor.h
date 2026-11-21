@@ -2168,6 +2168,8 @@ DEF_TRAVERSE_DECL(TemplateTypeParmDecl, {
   if (D->getTypeForDecl())
     TRY_TO(TraverseType(QualType(D->getTypeForDecl(), 0)));
   TRY_TO(TraverseTemplateTypeParamDeclConstraints(D));
+  if (TypeSourceInfo *Bound = D->getBoundTypeSourceInfo())
+    TRY_TO(TraverseTypeLoc(Bound->getTypeLoc()));
   if (D->hasDefaultArgument() && !D->defaultArgumentWasInherited())
     TRY_TO(TraverseTemplateArgumentLoc(D->getDefaultArgument()));
 })

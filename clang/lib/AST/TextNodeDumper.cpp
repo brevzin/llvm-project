@@ -2919,6 +2919,12 @@ void TextNodeDumper::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D) {
   if (D->isParameterPack())
     OS << " ...";
   dumpName(D);
+  if (D->hasBound()) {
+    OS << (D->getBoundKind() == TemplateTypeParmDecl::BoundKind::Derived
+               ? " :"
+               : " ->");
+    dumpType(D->getBound());
+  }
 }
 
 void TextNodeDumper::VisitNonTypeTemplateParmDecl(

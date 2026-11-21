@@ -4177,6 +4177,8 @@ static void RenderCharacterOptions(const ArgList &Args, const llvm::Triple &T,
                   options::OPT_fno_do_expressions);
   Args.AddLastArg(CmdArgs, options::OPT_fdiverging_expressions,
                   options::OPT_fno_diverging_expressions);
+  Args.AddLastArg(CmdArgs, options::OPT_ftemplate_parameter_bounds,
+                  options::OPT_fno_template_parameter_bounds);
 
   if (const Arg *A = Args.getLastArg(options::OPT_fshort_wchar,
                                      options::OPT_fno_short_wchar)) {

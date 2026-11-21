@@ -1746,6 +1746,18 @@ defm diverging_expressions : BoolFOption<"diverging-expressions",
             " support for P3549 diverging expressions (std::noreturn_t)">>,
   ShouldParseIf<cplusplus.KeyPath>;
 
+// P2481 bounded template type parameters: 'typename T : U' (the argument is a
+// U or derived from it) and 'typename T -> U' (anything convertible to U),
+// where either way T is deduced as a cv/ref-qualified U. On by default in
+// C++2d.
+defm template_parameter_bounds : BoolFOption<"template-parameter-bounds",
+  LangOpts<"TemplateParameterBounds">, Default<cpp29.KeyPath>,
+  PosFlag<SetTrue, [], [ClangOption], "Enable">,
+  NegFlag<SetFalse, [], [ClangOption], "Disable">,
+  BothFlags<[], [ClangOption, CC1Option],
+            " support for P2481 bounded template type parameters">>,
+  ShouldParseIf<cplusplus.KeyPath>;
+
 defm coro_aligned_allocation : BoolFOption<"coro-aligned-allocation",
   LangOpts<"CoroAlignedAllocation">, DefaultFalse,
   PosFlag<SetTrue, [], [ClangOption, CC1Option],

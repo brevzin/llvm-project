@@ -229,6 +229,12 @@ def note_do_expr_init_hoist_not_a_capture : Note<
   "'do [' introduces an init-hoist, not a lambda capture: it declares a new "
   "variable and always requires an initializer">;
 
+// P2481 ext: bounded template type parameters.
+def err_template_param_bound_requires_cxx29 : Error<
+  "bounded template parameters are only available in C++29; use "
+  "'-std=c++2d', or '-ftemplate-parameter-bounds' to enable them as an "
+  "extension">;
+
 // Generic errors.
 def err_expected_expression : Error<"expected expression">;
 def err_expected_type : Error<"expected a type">;
