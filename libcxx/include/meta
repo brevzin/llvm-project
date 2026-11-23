@@ -399,6 +399,11 @@ consteval auto has_inaccessible_bases(
         info r,
         access_context cls) -> vector<info>;
 
+// scope identification
+consteval auto current_function() -> info;
+consteval auto current_class() -> info;
+consteval auto current_namespace() -> info;
+
 // other bespoke functions (not proposed at this time)
 consteval auto is_access_specified(info) -> bool;
 
@@ -2566,6 +2571,44 @@ consteval auto has_inaccessible_nonstatic_data_members(
 
 consteval auto has_inaccessible_bases(info r, access_context ctx) -> bool {
   return __any_inaccessible(bases_of(r, access_context::unchecked()), ctx);
+}
+
+// [meta.reflection.scope] Scope identification.
+//
+// Each of these must invoke the access-context metafunction directly (rather
+// than through access_context::current()), since it identifies the scope from
+// the caller of the function in which it appears.
+
+// Returns a reflection of the function whose function parameter scope is the
+// innermost enclosing one (CURRENT-SCOPE) at the point of invocation.
+[[clang::instantiation_dependent]]
+consteval auto current_function() -> info {
+  info s = __metafunction(detail::__metafn_access_context);
+  if (!is_function(s))
+    throw "current_function() must be invoked from within a function";
+  return s;
+}
+
+// Returns a reflection of the innermost enclosing class, which is either the
+// current scope or the class of which the current function is a member.
+[[clang::instantiation_dependent]]
+consteval auto current_class() -> info {
+  info s = __metafunction(detail::__metafn_access_context);
+  if (is_type(s))
+    return s;
+  if (is_function(s) && is_class_member(s))
+    return parent_of(s);
+  throw "current_class() must be invoked from within a class or a member "
+        "function";
+}
+
+// Returns a reflection of the innermost enclosing namespace.
+[[clang::instantiation_dependent]]
+consteval auto current_namespace() -> info {
+  info s = __metafunction(detail::__metafn_access_context);
+  while (!is_namespace(s))
+    s = parent_of(s);
+  return s;
 }
 
              // ===================================================

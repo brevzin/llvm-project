@@ -8681,6 +8681,28 @@ bool current_access_context(APValue &Result, ASTContext &C, MetaActions &Meta,
       Ctor && Ctor->isInheritingConstructor())
     Ctx = cast<Decl>(Ctor->getDeclContext());
 
+  // [meta.reflection.scope]: Within a consteval-block-declaration, the
+  // evaluation point is in the scope inhabited by the outermost such
+  // declaration (looking through only block scopes and other consteval
+  // blocks). Consteval blocks are implemented as immediately-invoked lambdas,
+  // so look through the call operators of their closure types. Also look
+  // through contexts which don't introduce a scope (e.g., linkage specs).
+  while (true) {
+    if (auto *MD = dyn_cast<CXXMethodDecl>(Ctx);
+        MD && MD->getParent()->isConstevalBlockLambda() &&
+        MD->getOverloadedOperator() == OO_Call) {
+      Ctx = cast<Decl>(MD->getParent()->getDeclContext());
+      continue;
+    }
+    if (isa<FunctionDecl, RecordDecl, NamespaceDecl, TranslationUnitDecl>(
+            Ctx))
+      break;
+    if (auto *DC = Ctx->getDeclContext())
+      Ctx = cast<Decl>(DC);
+    else
+      break;
+  }
+
   if (auto *RD = dyn_cast<CXXRecordDecl>(Ctx))
     return SetAndSucceed(Result,
                          makeReflection(C.getCanonicalTagType(RD)));
