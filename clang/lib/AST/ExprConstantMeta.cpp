@@ -1199,6 +1199,13 @@ Metafunction::TokenArrayOp Metafunction::getTokenArrayOp() const {
 
 bool Metafunction::isMemberGather() const { return ImplFn == members_gather; }
 
+unsigned Metafunction::getReflectResultID() {
+  for (unsigned ID = 0; ID != NumMetafunctions; ++ID)
+    if (Metafunctions[ID].ImplFn == reflect_result)
+      return ID;
+  llvm_unreachable("reflect_result is not a metafunction");
+}
+
 bool Metafunction::Lookup(unsigned ID, const Metafunction *&result) {
   if (ID >= NumMetafunctions)
     return true;
@@ -7462,6 +7469,123 @@ bool is_user_declared(APValue &Result, ASTContext &C, MetaActions &Meta,
   return SetAndSucceed(Result, makeBool(C, IsUserDeclared));
 }
 
+// P4340/P4341 ext: normalize, in place, the value 'V' of the object of type
+// 'T' that the glvalue 'Obj' designates, while the evaluation that produced
+// that object is still live: every subobject of a class type with a
+// user-provided 'operator template' is run through it, and replaced with the
+// value of the object it returns. Only subobjects whose types call for it
+// (HasUserProvidedOperatorTemplateSubobject) are visited. This has to happen
+// before the value is checked as a constant expression: a subobject's value
+// can refer to transient allocations (e.g. a long std::string's buffer),
+// which only its customization knows how to persist. Returns 'true' on
+// error. If 'TopObj' is nonnull and 'T' itself is customized, it receives the
+// lvalue designating the returned object.
+static bool normalizeLiveValue(ASTContext &C, MetaActions &Meta,
+                               EvalFn Evaluator, QualType T, Expr *Obj,
+                               APValue &V, SourceLocation Loc,
+                               bool IsSubobject, APValue *TopObj = nullptr) {
+  if (!Meta.HasUserProvidedOperatorTemplateSubobject(T))
+    return false;
+
+  Qualifiers Quals = T.getQualifiers();
+  if (const ConstantArrayType *CAT = C.getAsConstantArrayType(T)) {
+    if (!V.isArray())
+      return false;
+    QualType ElemTy = CAT->getElementType();
+    Expr *Decayed = ImplicitCastExpr::Create(
+        C, C.getPointerType(ElemTy), CK_ArrayToPointerDecay, Obj, nullptr,
+        VK_PRValue, FPOptionsOverride());
+    auto Element = [&](unsigned I) -> Expr * {
+      llvm::APInt Idx(C.getTypeSize(C.getSizeType()), I);
+      Expr *IdxE = IntegerLiteral::Create(C, Idx, C.getSizeType(), Loc);
+      return new (C) ArraySubscriptExpr(Decayed, IdxE, ElemTy, VK_LValue,
+                                        OK_Ordinary, Loc);
+    };
+    unsigned N = V.getArrayInitializedElts();
+    for (unsigned I = 0; I != N; ++I)
+      if (normalizeLiveValue(C, Meta, Evaluator, ElemTy, Element(I),
+                             V.getArrayInitializedElt(I), Loc, true))
+        return true;
+    // The filler stands for the remaining elements, which all have its value.
+    if (V.hasArrayFiller() && N < V.getArraySize())
+      if (normalizeLiveValue(C, Meta, Evaluator, ElemTy, Element(N),
+                             V.getArrayFiller(), Loc, true))
+        return true;
+    return false;
+  }
+
+  CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  if (!RD)
+    return false;
+
+  // A customized type: run the object through its customization point.
+  if (RD->hasReflectConstant() && !RD->hasDeletedReflectConstant()) {
+    bool Error = false;
+    if (Expr *Call = Meta.SynthesizeOperatorTemplateCall(T, Obj, Loc, Error)) {
+      APValue First, Returned, Value;
+      if (!Evaluator(First, Call, true) ||
+          Meta.CompleteOperatorTemplateCall(T, First, IsSubobject, Loc,
+                                            Returned, Value))
+        return true;
+      V = std::move(Value);
+      if (TopObj)
+        *TopObj = std::move(Returned);
+      return false;
+    }
+    if (Error)
+      return true;
+    // Defaulted: normalize the subobjects (one of which must call for it).
+  }
+
+  if (V.isStruct()) {
+    unsigned I = 0;
+    for (const CXXBaseSpecifier &BS : RD->bases()) {
+      if (I >= V.getStructNumBases())
+        break;
+      QualType BaseTy = C.getQualifiedType(BS.getType().getUnqualifiedType(),
+                                           Quals);
+      CXXCastPath Path;
+      Path.push_back(const_cast<CXXBaseSpecifier *>(&BS));
+      Expr *Base = ImplicitCastExpr::Create(C, BaseTy,
+                                            CK_UncheckedDerivedToBase, Obj,
+                                            &Path, VK_LValue,
+                                            FPOptionsOverride());
+      if (normalizeLiveValue(C, Meta, Evaluator, BaseTy, Base,
+                             V.getStructBase(I), Loc, true))
+        return true;
+      ++I;
+    }
+    I = 0;
+    for (FieldDecl *FD : RD->fields()) {
+      if (I >= V.getStructNumFields())
+        break;
+      if (!FD->getType()->isReferenceType()) {
+        QualType FieldTy = C.getQualifiedType(FD->getType(), Quals);
+        Expr *Member = MemberExpr::CreateImplicit(
+            C, Obj, /*IsArrow=*/false, FD, FieldTy, VK_LValue, OK_Ordinary);
+        if (normalizeLiveValue(C, Meta, Evaluator, FieldTy, Member,
+                               V.getStructField(I), Loc, true))
+          return true;
+      }
+      ++I;
+    }
+    return false;
+  }
+
+  if (V.isUnion()) {
+    FieldDecl *FD = const_cast<FieldDecl *>(V.getUnionField());
+    if (!FD || FD->getType()->isReferenceType())
+      return false;
+    QualType FieldTy = C.getQualifiedType(FD->getType(), Quals);
+    Expr *Member = MemberExpr::CreateImplicit(C, Obj, /*IsArrow=*/false, FD,
+                                              FieldTy, VK_LValue, OK_Ordinary);
+    return normalizeLiveValue(C, Meta, Evaluator, FieldTy, Member,
+                              V.getUnionValue(), Loc, true);
+  }
+
+  return false;
+}
+
 bool reflect_result(APValue &Result, ASTContext &C, MetaActions &Meta,
                     EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
                     QualType ResultTy, SourceRange Range,
@@ -7478,9 +7602,45 @@ bool reflect_result(APValue &Result, ASTContext &C, MetaActions &Meta,
     return Diagnoser(Range.getBegin(), diag::metafn_value_not_structural_type)
         << ArgTy.getReflectedType() << Range;
 
+  // (Outside of any call, e.g. for an annotation or a template argument, the
+  // range is empty: point at the argument instead.)
+  SourceLocation Loc = Range.getBegin().isValid() ? Range.getBegin()
+                                                  : Args[1]->getExprLoc();
+
   APValue Arg;
-  if (!Evaluator(Arg, Args[1], !IsLValue))
+  bool NormalizedLive = false;
+  if (!IsLValue && Args[1]->isGLValue() && C.getLangOpts().CPlusPlus29 &&
+      Meta.HasUserProvidedOperatorTemplateSubobject(
+          ArgTy.getReflectedType())) {
+    // P4340/P4341 ext: the value has subobjects with user-provided
+    // customizations, which can refer to transient allocations (e.g. a
+    // std::string member). Normalize those while the argument object is
+    // still alive, before checking the value as a constant expression.
+    APValue ObjLV;
+    if (!Evaluator(ObjLV, Args[1], false))
+      return true;
+    Expr *Obj = ConstantExpr::Create(
+        C,
+        new (C) OpaqueValueExpr(Loc, Args[1]->getType(), VK_LValue), ObjLV);
+
+    // Read the value without checking it: the customized subobjects are
+    // about to be replaced.
+    if (!Evaluator(Arg, Obj, CXXMetafunctionExpr::ReadWithoutChecking))
+      return true;
+
+    APValue TopObj;
+    if (normalizeLiveValue(C, Meta, Evaluator, Args[1]->getType(), Obj, Arg,
+                           Loc, /*IsSubobject=*/false, &TopObj))
+      return true;
+
+    // A type with a user-provided customization: the result designates the
+    // object it returned.
+    if (TopObj.isLValue())
+      return SetAndSucceed(Result, TopObj.Lift(QualType{}));
+    NormalizedLive = true;
+  } else if (!Evaluator(Arg, Args[1], !IsLValue)) {
     return true;
+  }
 
   // Construct an expression whose result is 'Arg', and evaluate it to check if
   // it's an allowed result of a constant template argument.
@@ -7496,22 +7656,35 @@ bool reflect_result(APValue &Result, ASTContext &C, MetaActions &Meta,
   // - An OpaqueValueExpr wrapper around the ConstantExpr to prevent
   //   EvaluateAsConstantExpr from grabbing 'Arg' and short-circuiting the
   //   evaluation (and, more imporantly, the result validation).
-  Expr *OVE = new (C) OpaqueValueExpr(Range.getBegin(), Args[1]->getType(),
+  Expr *OVE = new (C) OpaqueValueExpr(Loc, Args[1]->getType(),
                                       IsLValue ? VK_LValue : VK_PRValue);
   {
     Expr *CE = ConstantExpr::Create(C, OVE, Arg);
-    OVE = new (C) OpaqueValueExpr(Range.getBegin(), Args[1]->getType(),
+    OVE = new (C) OpaqueValueExpr(Loc, Args[1]->getType(),
                                   CE->getValueKind(), OK_Ordinary, CE);
   }
   {
     Expr::EvalResult Discarded;
+    SmallVector<PartialDiagnosticAt, 4> Notes;
+    Discarded.Diag = &Notes;
 
-    ConstantExprKind CEKind = (OVE->getType()->isRecordType() && !IsLValue) ?
-                              ConstantExprKind::ClassTemplateArgument :
-                              ConstantExprKind::NonClassTemplateArgument;
-    if (!OVE->EvaluateAsConstantExpr(Discarded, C, CEKind))
-      return Diagnoser(Range.getBegin(), diag::metafn_result_not_representable)
+    // A value of class type is also required to have constant destruction --
+    // except when its customized subobjects were normalized above: those now
+    // share the storage of the objects their customizations returned (e.g.
+    // the persisted buffer of a std::string), which the template parameter
+    // object designates but doesn't own (and, having static storage
+    // duration, never destroys).
+    ConstantExprKind CEKind =
+        (OVE->getType()->isRecordType() && !IsLValue && !NormalizedLive)
+            ? ConstantExprKind::ClassTemplateArgument
+            : ConstantExprKind::NonClassTemplateArgument;
+    if (!OVE->EvaluateAsConstantExpr(Discarded, C, CEKind)) {
+      Diagnoser(Loc, diag::metafn_result_not_representable)
           << (IsLValue ? 1 : 0) << Range;
+      for (PartialDiagnosticAt &Note : Notes)
+        Diagnoser(Note.first, Note.second.getDiagID()) = Note.second;
+      return true;
+    }
   }
 
   // If this is an lvalue to a function, promote the result to reflect

@@ -2376,9 +2376,10 @@ static void handleAttrWithMessage(Sema &S, Decl *D, const ParsedAttr &AL) {
   D->addAttr(::new (S.Context) AttrTy(S.Context, AL, Str));
 }
 
-/// Handle an annotation (C++2c).
-static void handleCXX2CAnnotation(Sema &S, Decl *D, const ParsedAttr &AL) {
-  Expr *CE = AL.getArgAsExpr(0);
+CXX26AnnotationAttr *
+Sema::BuildCXX26AnnotationAttr(Expr *CE, const AttributeCommonInfo &CI,
+                               SourceLocation EqLoc) {
+  Sema &S = *this;
   if (CE->isLValue()) {
     if (CE->getType()->isRecordType()) {
       InitializedEntity Entity =
@@ -2390,11 +2391,11 @@ static void handleCXX2CAnnotation(Sema &S, Decl *D, const ParsedAttr &AL) {
 
       ExprResult CopyResult = Seq.Perform(S, Entity, Kind, CE);
       if (CopyResult.isInvalid())
-        return;
+        return nullptr;
 
       CE = CopyResult.get();
     } else {
-      ExprResult RVExprResult = S.DefaultLvalueConversion(AL.getArgAsExpr(0));
+      ExprResult RVExprResult = S.DefaultLvalueConversion(CE);
       assert(!RVExprResult.isInvalid() && RVExprResult.get());
 
       CE = RVExprResult.get();
@@ -2407,27 +2408,61 @@ static void handleCXX2CAnnotation(Sema &S, Decl *D, const ParsedAttr &AL) {
   Result.Diag = &Notes;
 
   if (!CE->isValueDependent()) {
-    ConstantExprKind CEKind = (CE->getType()->isClassType() ?
-                               ConstantExprKind::ClassTemplateArgument :
-                               ConstantExprKind::NonClassTemplateArgument);
-
-    if (!CE->EvaluateAsConstantExpr(Result, S.Context, CEKind)) {
+    QualType T = CE->getType();
+    auto DiagNotStructural = [&] {
+      S.Diag(CE->getBeginLoc(), diag::err_attribute_argument_type)
+          << "C++26 annotation" << 5 << CE->getSourceRange();
+      if (T->isRecordType() && T->isLiteralType(S.Context))
+        S.NoteNonStructuralType(T);
+    };
+    auto DiagNotConstant = [&] {
       S.Diag(CE->getBeginLoc(), diag::err_attribute_argument_type)
           << "C++26 annotation" << 4 << CE->getSourceRange();
       for (auto P : Notes)
         S.Diag(P.first, P.second);
+    };
 
-      return;
-    } else if (!CE->getType()->isStructuralType()) {
-      S.Diag(CE->getBeginLoc(), diag::err_attribute_argument_type)
-          << "C++26 annotation" << 5 << CE->getSourceRange();
-      return;
+    // Check the type first: a value of non-structural type is often not
+    // a valid template argument either (e.g. it refers to a transient
+    // allocation), but the type is the more useful thing to point at.
+    if (!T->isStructuralType()) {
+      DiagNotStructural();
+      return nullptr;
+    }
+
+    // P4340/P4341 ext: a value with subobjects of types with user-provided
+    // customizations (e.g. a std::string member) is normalized as
+    // reflect_constant would, while its evaluation is live: the subobjects
+    // can refer to transient allocations.
+    if (S.getLangOpts().CPlusPlus29 && S.getLangOpts().Reflection &&
+        T->isRecordType() && CE->isPRValue() &&
+        S.HasUserProvidedOperatorTemplateSubobject(T)) {
+      if (S.EvaluateAsTemplateParameterObject(CE, CE->getBeginLoc(),
+                                              Result.Val, Notes)) {
+        DiagNotConstant();
+        return nullptr;
+      }
+    } else {
+      ConstantExprKind CEKind = (T->isClassType() ?
+                                 ConstantExprKind::ClassTemplateArgument :
+                                 ConstantExprKind::NonClassTemplateArgument);
+      if (!CE->EvaluateAsConstantExpr(Result, S.Context, CEKind)) {
+        DiagNotConstant();
+        return nullptr;
+      }
     }
   }
-  auto *Annot = CXX26AnnotationAttr::Create(S.Context, CE, AL);
+  auto *Annot = CXX26AnnotationAttr::Create(S.Context, CE, CI);
   Annot->setValue(Result.Val);
-  Annot->setEqLoc(AL.getLoc());
-  D->addAttr(Annot);
+  Annot->setEqLoc(EqLoc);
+  return Annot;
+}
+
+/// Handle an annotation (C++2c).
+static void handleCXX2CAnnotation(Sema &S, Decl *D, const ParsedAttr &AL) {
+  if (auto *Annot =
+          S.BuildCXX26AnnotationAttr(AL.getArgAsExpr(0), AL, AL.getLoc()))
+    D->addAttr(Annot);
 }
 
 static void handleInstantiationDependentAttr(Sema &S, Decl *D,

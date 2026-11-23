@@ -1149,6 +1149,30 @@ static void instantiateDependentMallocSpanAttr(Sema &S,
     New->addAttr(Attr->clone(S.getASTContext()));
 }
 
+CXX26AnnotationAttr *Sema::InstantiateCXX26AnnotationAttr(
+    const CXX26AnnotationAttr *A,
+    const MultiLevelTemplateArgumentList &TemplateArgs) {
+  // A non-dependent annotation was evaluated with its template.
+  if (!A->getArg()->isValueDependent()) {
+    auto *Annot = CXX26AnnotationAttr::Create(Context, A->getArg(), *A);
+    Annot->setValue(A->getValue());
+    Annot->setEqLoc(A->getEqLoc());
+    return Annot;
+  }
+
+  ExprResult Arg;
+  {
+    EnterExpressionEvaluationContext ConstantEvaluated(
+        *this, ExpressionEvaluationContext::ConstantEvaluated);
+    Arg = SubstExpr(A->getArg(), TemplateArgs);
+    if (!Arg.isInvalid())
+      Arg = ActOnConstantExpression(Arg);
+  }
+  if (Arg.isInvalid())
+    return nullptr;
+  return BuildCXX26AnnotationAttr(Arg.get(), *A, A->getEqLoc());
+}
+
 void Sema::InstantiateAttrsForDecl(
     const MultiLevelTemplateArgumentList &TemplateArgs, const Decl *Tmpl,
     Decl *New, LateInstantiatedAttrVec *LateAttrs,
@@ -1162,10 +1186,15 @@ void Sema::InstantiateAttrsForDecl(
       if (!isRelevantAttr(*this, New, TmplAttr))
         continue;
 
-      if (isa<CXX26AnnotationAttr>(TmplAttr) && !AddAnnotations)
+      if (const auto *Annot = dyn_cast<CXX26AnnotationAttr>(TmplAttr)) {
         // See https://github.com/llvm/llvm-project/issues/138596
         // Just skip here to avoid duplication of the attribute.
+        if (AddAnnotations)
+          if (Attr *NewAttr =
+                  InstantiateCXX26AnnotationAttr(Annot, TemplateArgs))
+            New->addAttr(NewAttr);
         continue;
+      }
 
       // FIXME: If any of the special case versions from InstantiateAttrs become
       // applicable to template declaration, we'll need to add them here.
@@ -1356,10 +1385,14 @@ void Sema::InstantiateAttrs(const MultiLevelTemplateArgumentList &TemplateArgs,
       continue;
     }
 
-    if (isa<CXX26AnnotationAttr>(TmplAttr) && !AddAnnotations)
+    if (const auto *Annot = dyn_cast<CXX26AnnotationAttr>(TmplAttr)) {
       // See https://github.com/llvm/llvm-project/issues/138596
       // Just skip here to avoid duplication of the attribute.
+      if (AddAnnotations)
+        if (Attr *NewAttr = InstantiateCXX26AnnotationAttr(Annot, TemplateArgs))
+          New->addAttr(NewAttr);
       continue;
+    }
 
     // Existing DLL attribute on the instantiation takes precedence.
     if (TmplAttr->getKind() == attr::DLLExport ||

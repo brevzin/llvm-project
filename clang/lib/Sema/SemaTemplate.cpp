@@ -1519,20 +1519,24 @@ bool Sema::RequireStructuralType(QualType T, SourceLocation Loc) {
     return true;
 
   Diag(Loc, diag::err_template_nontype_parm_not_structural) << T;
+  NoteNonStructuralType(T);
+  return true;
+}
 
+void Sema::NoteNonStructuralType(QualType T) {
   // Drill down into the reason why the class is non-structural.
   while (const CXXRecordDecl *RD = T->getAsCXXRecordDecl()) {
     // A token sequence has no mangling (P4380): that is the reason, and its
     // storage is not a member to point at.
     if (T->isStdMetaTokenSequenceType())
-      return true;
+      return;
 
     // P4340 ext: a deleted 'operator template' makes the
     // type non-structural regardless of its subobjects.
     if (RD->hasDeletedReflectConstant()) {
       Diag(RD->getLocation(), diag::note_not_structural_deleted_reflect)
           << T;
-      return true;
+      return;
     }
 
     // All members are required to be public and non-mutable, and can't be of
@@ -1541,16 +1545,16 @@ bool Sema::RequireStructuralType(QualType T, SourceLocation Loc) {
     for (const FieldDecl *FD : RD->fields()) {
       if (FD->getAccess() != AS_public) {
         Diag(FD->getLocation(), diag::note_not_structural_non_public) << T << 0;
-        return true;
+        return;
       }
       if (FD->isMutable()) {
         Diag(FD->getLocation(), diag::note_not_structural_mutable_field) << T;
-        return true;
+        return;
       }
       if (FD->getType()->isRValueReferenceType()) {
         Diag(FD->getLocation(), diag::note_not_structural_rvalue_ref_field)
             << T;
-        return true;
+        return;
       }
     }
 
@@ -1559,7 +1563,7 @@ bool Sema::RequireStructuralType(QualType T, SourceLocation Loc) {
       if (BaseSpec.getAccessSpecifier() != AS_public) {
         Diag(BaseSpec.getBaseTypeLoc(), diag::note_not_structural_non_public)
             << T << 1;
-        return true;
+        return;
       }
     }
 
@@ -1590,14 +1594,15 @@ bool Sema::RequireStructuralType(QualType T, SourceLocation Loc) {
       }
     }
 
-    assert(Kind != -1 && "couldn't find reason why type is not structural");
+    // (Every literal class has a reason; but don't insist, since annotations
+    // ask about types not otherwise checked for being literal.)
+    if (Kind == -1)
+      return;
     Diag(SubLoc, diag::note_not_structural_subobject)
         << T << Kind << SubType;
     T = SubType;
     RD = T->getAsCXXRecordDecl();
   }
-
-  return true;
 }
 
 QualType Sema::CheckNonTypeTemplateParameterType(QualType T,
@@ -7534,6 +7539,9 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
       *this, Sema::ExpressionEvaluationContext::ConstantEvaluated);
 
   bool IsConvertedConstantExpression = true;
+  // The initializer of a class-type parameter, before it became a
+  // full-expression.
+  Expr *ClassInit = nullptr;
   if (isa<InitListExpr>(DeductionArg) || ParamType->isRecordType()) {
     InitializationKind Kind = InitializationKind::CreateForInit(
         StartLoc, /*DirectInit=*/false, DeductionArg);
@@ -7547,6 +7555,7 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
     Result = ActOnConstantExpression(Result.get());
     if (Result.isInvalid() || !Result.get())
       return ExprError();
+    ClassInit = Result.get();
     setDeductionArg(ActOnFinishFullExpr(Result.get(), Arg->getBeginLoc(),
                                         /*DiscardedValue=*/false,
                                         /*IsConstexpr=*/true,
@@ -7584,13 +7593,36 @@ ExprResult Sema::CheckTemplateArgument(NamedDecl *Param, QualType ParamType,
       return Arg;
     }
 
-    APValue PreNarrowingValue;
-    ArgResult = EvaluateConvertedConstantExpression(
-        ArgResult.get(), ParamType, Value, CCEKind::TemplateArg, /*RequireInt=*/
-        false, PreNarrowingValue, Param);
-    if (ArgResult.isInvalid())
-      return ExprError();
-    setDeductionArg(ArgResult.get());
+    if (getLangOpts().Reflection && getLangOpts().CPlusPlus29 && ClassInit &&
+        ParamType->isRecordType() && ClassInit->isPRValue() &&
+        !ClassInit->isValueDependent() &&
+        HasUserProvidedOperatorTemplateSubobject(ParamType)) {
+      // P4340/P4341 ext: the value has subobjects of types with user-provided
+      // customizations (e.g. a std::string member), which can refer to
+      // transient allocations. Evaluate it as reflect_constant would,
+      // normalizing those subobjects while the evaluation is live; Value is
+      // then the value of the template parameter object.
+      SmallVector<PartialDiagnosticAt, 8> Notes;
+      if (EvaluateAsTemplateParameterObject(ClassInit, StartLoc, Value,
+                                            Notes)) {
+        if (!Expr::isConstexprErroneous(Notes)) {
+          Diag(Arg->getBeginLoc(), diag::err_expr_not_cce)
+              << CCEKind::TemplateArg << Arg->getSourceRange();
+          for (PartialDiagnosticAt &Note : Notes)
+            Diag(Note.first, Note.second);
+        }
+        NoteTemplateParameterLocation(*Param);
+        return ExprError();
+      }
+    } else {
+      APValue PreNarrowingValue;
+      ArgResult = EvaluateConvertedConstantExpression(
+          ArgResult.get(), ParamType, Value, CCEKind::TemplateArg,
+          /*RequireInt=*/false, PreNarrowingValue, Param);
+      if (ArgResult.isInvalid())
+        return ExprError();
+      setDeductionArg(ArgResult.get());
+    }
 
     if (Value.isLValue()) {
       APValue::LValueBase Base = Value.getLValueBase();

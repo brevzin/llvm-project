@@ -423,17 +423,38 @@ public:
     if (!CP || CP->isDefaulted())
       return S.NormalizeReflectConstantValue(T, V, Loc);
 
-    Expr *OVE =
-        new (S.Context) OpaqueValueExpr(Loc, T.getUnqualifiedType(),
-                                        VK_PRValue);
-    Expr *CE = ConstantExpr::Create(S.Context, OVE, V);
-    CE->setValueKind(VK_PRValue);
-    ExprResult Materialized = S.TemporaryMaterializationConversion(CE);
-    if (Materialized.isInvalid())
-      return true;
-
     return S.EvaluateReflectConstantCustomization(
-        Materialized.get(), T.getUnqualifiedType(), Loc, Result);
+        S.BuildValueHolderRef(T, V, Loc), T.getUnqualifiedType(), Loc,
+        Result);
+  }
+
+  bool HasUserProvidedOperatorTemplateSubobject(QualType T) override {
+    return S.HasUserProvidedOperatorTemplateSubobject(T);
+  }
+
+  Expr *SynthesizeOperatorTemplateCall(QualType T, Expr *Obj,
+                                       SourceLocation Loc,
+                                       bool &Error) override {
+    Error = false;
+    CXXMethodDecl *CP =
+        S.LookupUserProvidedOperatorTemplate(T->getAsCXXRecordDecl());
+    if (!CP)
+      return nullptr;
+    ExprResult Call = S.BuildOperatorTemplateCall(Obj, CP, Loc);
+    Error = Call.isInvalid();
+    return Error ? nullptr : Call.get();
+  }
+
+  bool CompleteOperatorTemplateCall(QualType T, const APValue &First,
+                                    bool IsSubobject, SourceLocation Loc,
+                                    APValue &Obj, APValue &Value) override {
+    CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+    if (IsSubobject && S.CheckReflectConstantSubobjectCopyable(RD, Loc))
+      return true;
+    return S.CompleteReflectConstantCustomization(RD, MaybeUnproxy(S.Context,
+                                                                   First),
+                                                  Loc, Obj) ||
+           S.ReadReflectConstantObject(RD, Obj, Loc, Value);
   }
 
   void EnsureInstantiationOfExceptionSpec(SourceLocation Loc,
@@ -3633,6 +3654,65 @@ CXXMethodDecl *Sema::LookupReflectConstantCustomization(CXXRecordDecl *RD) {
   return nullptr;
 }
 
+CXXMethodDecl *Sema::LookupUserProvidedOperatorTemplate(CXXRecordDecl *RD) {
+  if (!RD || !RD->hasDefinition() || !RD->hasReflectConstant() ||
+      RD->hasDeletedReflectConstant())
+    return nullptr;
+  CXXMethodDecl *CP = LookupReflectConstantCustomization(RD);
+  if (!CP || CP->isDefaulted() || CP->isDeleted())
+    return nullptr;
+  return CP;
+}
+
+bool Sema::HasUserProvidedOperatorTemplateSubobject(QualType T) {
+  T = Context.getBaseElementType(T).getCanonicalType().getUnqualifiedType();
+  CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+  if (!RD || !RD->hasDefinition() || RD->isDependentType())
+    return false;
+  RD = RD->getDefinition();
+
+  if (auto It = UserProvidedOperatorTemplateSubobjectCache.find(RD);
+      It != UserProvidedOperatorTemplateSubobjectCache.end())
+    return It->second;
+
+  bool Result =
+      LookupUserProvidedOperatorTemplate(RD) ||
+      llvm::any_of(RD->bases(),
+                   [&](const CXXBaseSpecifier &BS) {
+                     return HasUserProvidedOperatorTemplateSubobject(
+                         BS.getType());
+                   }) ||
+      llvm::any_of(RD->fields(), [&](const FieldDecl *FD) {
+        return !FD->getType()->isReferenceType() &&
+               HasUserProvidedOperatorTemplateSubobject(FD->getType());
+      });
+  UserProvidedOperatorTemplateSubobjectCache[RD] = Result;
+  return Result;
+}
+
+ExprResult Sema::BuildOperatorTemplateCall(Expr *Obj, CXXMethodDecl *CP,
+                                           SourceLocation Loc) {
+  EnterExpressionEvaluationContext ConstantEvaluated(
+      *this, ExpressionEvaluationContext::ImmediateFunctionContext);
+
+  DeclarationName Name =
+      Context.DeclarationNames.getCXXOperatorName(OO_Template);
+  LookupResult LR(*this, DeclarationNameInfo(Name, Loc), LookupMemberName);
+  // The customization point may be private: the language invokes it on the
+  // class's behalf, so access is not checked.
+  LR.addDecl(CP, AS_public);
+  LR.resolveKind();
+  LR.suppressDiagnostics();
+
+  llvm::SaveAndRestore<bool> Invoking(InvokingOperatorTemplate, true);
+  ExprResult Ref = BuildMemberReferenceExpr(
+      Obj, Obj->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
+      SourceLocation(), nullptr, LR, nullptr, nullptr);
+  if (Ref.isInvalid())
+    return ExprError();
+  return BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc);
+}
+
 bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
                                                 QualType ParamType,
                                                 SourceLocation Loc,
@@ -3640,8 +3720,6 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
   Result = APValue();
   CXXRecordDecl *RD = ParamType->getAsCXXRecordDecl();
   assert(RD && RD->hasReflectConstant() && "not a customized class type");
-
-  QualType ExpectedTy = Context.getCanonicalTagType(RD).withConst();
 
   if (RD->hasDeletedReflectConstant()) {
     Diag(Loc, diag::err_reflect_constant_deleted)
@@ -3657,47 +3735,43 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
   if (CP->isDefaulted())
     return false;
 
-  // Evaluate ArgExpr.operator template() as a constant expression, then
-  // re-evaluate on the result until it is idempotent-checked (exactly one
-  // extra round).
-  auto EvaluateCallOn = [&](Expr *Obj, APValue &Out) -> bool {
-    EnterExpressionEvaluationContext ConstantEvaluated(
-        *this, ExpressionEvaluationContext::ImmediateFunctionContext);
+  APValue First;
+  if (EvaluateOperatorTemplateCall(ArgExpr, CP, Loc, First))
+    return true;
+  return CompleteReflectConstantCustomization(RD, First, Loc, Result);
+}
 
-    DeclarationName Name =
-        Context.DeclarationNames.getCXXOperatorName(OO_Template);
-    LookupResult LR(*this, DeclarationNameInfo(Name, Loc), LookupMemberName);
-    // The customization point may be private: the language invokes it on the
-    // class's behalf, so access is not checked.
-    LR.addDecl(CP, AS_public);
-    LR.resolveKind();
-    LR.suppressDiagnostics();
+bool Sema::EvaluateOperatorTemplateCall(Expr *Obj, CXXMethodDecl *CP,
+                                        SourceLocation Loc, APValue &Out) {
+  ExprResult Call = BuildOperatorTemplateCall(Obj, CP, Loc);
+  if (Call.isInvalid())
+    return true;
 
-    llvm::SaveAndRestore<bool> Invoking(InvokingOperatorTemplate, true);
-    ExprResult Ref = BuildMemberReferenceExpr(
-        Obj, Obj->getType(), Loc, /*IsArrow=*/false, CXXScopeSpec(),
-        SourceLocation(), nullptr, LR, nullptr, nullptr);
-    if (Ref.isInvalid())
-      return true;
-    ExprResult Call = BuildCallExpr(nullptr, Ref.get(), Loc, {}, Loc);
-    if (Call.isInvalid())
-      return true;
+  // Evaluation failure is a hard error (consteval evaluation failures are
+  // not SFINAE-able); the conditions on the returned object are checked by
+  // the caller and are substitution failures.
+  SmallVector<PartialDiagnosticAt, 4> Notes;
+  Expr::EvalResult ER;
+  ER.Diag = &Notes;
+  if (!Call.get()->EvaluateAsConstantExpr(ER, Context)) {
+    Diag(Loc, diag::err_reflection_op_not_constant) << /*generic*/ 0;
+    for (PartialDiagnosticAt &Note : Notes)
+      Diag(Note.first, Note.second);
+    return true;
+  }
+  Out = MaybeUnproxy(Context, ER.Val);
+  return false;
+}
 
-    // Evaluation failure is a hard error (consteval evaluation failures are
-    // not SFINAE-able); the conditions on the returned object are checked by
-    // the caller and are substitution failures.
-    SmallVector<PartialDiagnosticAt, 4> Notes;
-    Expr::EvalResult ER;
-    ER.Diag = &Notes;
-    if (!Call.get()->EvaluateAsConstantExpr(ER, Context)) {
-      Diag(Loc, diag::err_reflection_op_not_constant) << /*generic*/ 0;
-      for (PartialDiagnosticAt &Note : Notes)
-        Diag(Note.first, Note.second);
-      return true;
-    }
-    Out = MaybeUnproxy(Context, ER.Val);
-    return false;
-  };
+bool Sema::CompleteReflectConstantCustomization(CXXRecordDecl *RD,
+                                                const APValue &First,
+                                                SourceLocation Loc,
+                                                APValue &Result) {
+  Result = APValue();
+  CXXMethodDecl *CP = LookupReflectConstantCustomization(RD);
+  assert(CP && !CP->isDefaulted() && "not a user-provided customization");
+
+  QualType ExpectedTy = Context.getCanonicalTagType(RD).withConst();
 
   // An lvalue expression of type 'const C' designating the object 'Obj'.
   auto DesignateObject = [&](const APValue &Obj) -> Expr * {
@@ -3796,10 +3870,6 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
            A.getLValuePath() == B.getLValuePath();
   };
 
-  APValue First;
-  if (EvaluateCallOn(ArgExpr, First))
-    return true;
-
   APValue Obj;
   unsigned Select = 0;
   QualType FoundTy;
@@ -3812,7 +3882,7 @@ bool Sema::EvaluateReflectConstantCustomization(Expr *ArgExpr,
   // Idempotence check: calling the customization on its own result must
   // return a reflection of the same object.
   APValue Second;
-  if (EvaluateCallOn(DesignateObject(Obj), Second))
+  if (EvaluateOperatorTemplateCall(DesignateObject(Obj), CP, Loc, Second))
     return true;
 
   APValue Obj2;
@@ -3915,6 +3985,106 @@ bool Sema::InternStringLiteralValue(APValue &V, bool &Changed,
   return false;
 }
 
+bool Sema::EvaluateAsTemplateParameterObject(
+    Expr *E, SourceLocation Loc, APValue &Value,
+    SmallVectorImpl<PartialDiagnosticAt> &Notes) {
+  QualType T = E->getType().getUnqualifiedType();
+  assert(T->isRecordType() && E->isPRValue() && "not a class prvalue");
+
+  // Build and evaluate the full-expression
+  //   __metafunction(reflect_result, ^^T, E)
+  // -- reflect_constant without the copy into its parameter: E's result
+  // object is materialized as a temporary that the metafunction normalizes
+  // while it's alive, and that is destroyed (with whatever transient
+  // allocations it owns) at the end of the full-expression.
+  EnterExpressionEvaluationContext ConstantEvaluated(
+      *this, ExpressionEvaluationContext::ConstantEvaluated);
+  ExprResult Materialized = TemporaryMaterializationConversion(E);
+  if (Materialized.isInvalid())
+    return true;
+
+  unsigned ID = Metafunction::getReflectResultID();
+  llvm::APInt IDVal(Context.getIntWidth(Context.UnsignedIntTy), ID);
+  SmallVector<Expr *, 3> Args = {
+      IntegerLiteral::Create(Context, IDVal, Context.UnsignedIntTy, Loc),
+      CXXReflectExpr::Create(
+          Context, Loc, Loc,
+          APValue(ReflectionKind::Type,
+                  T.getCanonicalType().getAsOpaquePtr())),
+      Materialized.get()};
+  ExprResult Call = BuildCXXMetafunctionExpr(Loc, Loc, Loc, ID,
+                                             getMetafunctionCb(ID), Args);
+  if (Call.isInvalid())
+    return true;
+  Expr *Full = ExprWithCleanups::Create(Context, Call.get(),
+                                        /*CleanupsHaveSideEffects=*/true, {});
+
+  Expr::EvalResult ER;
+  ER.Diag = &Notes;
+  if (!Full->EvaluateAsConstantExpr(ER, Context) || !ER.Val.isReflection())
+    return true;
+  APValue Refl = MaybeUnproxy(Context, ER.Val);
+  if (Refl.getReflectionKind() != ReflectionKind::Object)
+    return true;
+
+  // Usually the template parameter object for the normalized value; for a
+  // type with a user-provided 'operator template', the object it returned.
+  APValue Obj = Refl.getReflectedObject();
+  if (const auto *TPOD = dyn_cast_if_present<TemplateParamObjectDecl>(
+          Obj.getLValueBase().dyn_cast<const ValueDecl *>());
+      TPOD && Obj.hasLValuePath() && Obj.getLValuePath().empty()) {
+    Value = TPOD->getValue();
+    return false;
+  }
+  return ReadReflectConstantObject(T->getAsCXXRecordDecl(), Obj, Loc, Value);
+}
+
+Expr *Sema::BuildValueHolderRef(QualType T, const APValue &V,
+                                SourceLocation Loc) {
+  // The customization runs on an object holding V in place -- a template
+  // parameter object, which is never destroyed -- rather than on a temporary
+  // copy of V. V may already be normalized, its customized subobjects
+  // sharing the storage of the objects their customizations returned (e.g.
+  // the persisted buffer of a std::string); destroying a copy would free
+  // storage it doesn't own.
+  QualType ObjTy = T.getCanonicalType().getUnqualifiedType();
+  TemplateParamObjectDecl *Holder = Context.getTemplateParamObjectDecl(ObjTy, V);
+  Expr *OVE =
+      new (Context) OpaqueValueExpr(Loc, ObjTy.withConst(), VK_LValue);
+  return ConstantExpr::Create(
+      Context, OVE,
+      APValue(APValue::LValueBase(Holder), CharUnits::Zero(),
+              ArrayRef<APValue::LValuePathEntry>(), /*OnePastTheEnd=*/false));
+}
+
+bool Sema::CheckReflectConstantSubobjectCopyable(CXXRecordDecl *RD,
+                                                 SourceLocation Loc) {
+  // The value must be copyable in constant expressions to be transplanted
+  // into an enclosing object.
+  CXXConstructorDecl *Copy = LookupCopyingConstructor(RD, Qualifiers::Const);
+  if (!Copy || Copy->isDeleted() || !Copy->isConstexpr()) {
+    Diag(Loc, diag::err_reflect_constant_subobject_not_copyable)
+        << Context.getCanonicalTagType(RD);
+    return true;
+  }
+  return false;
+}
+
+bool Sema::ReadReflectConstantObject(CXXRecordDecl *RD, const APValue &Obj,
+                                     SourceLocation Loc, APValue &V) {
+  QualType ObjTy = Context.getCanonicalTagType(RD).withConst();
+  Expr *ObjRef = ConstantExpr::Create(
+      Context, new (Context) OpaqueValueExpr(Loc, ObjTy, VK_LValue), Obj);
+  Expr::EvalResult ER;
+  if (ObjRef->EvaluateAsRValue(ER, Context, /*InConstantContext=*/true)) {
+    V = std::move(ER.Val);
+    return false;
+  }
+  Diag(Loc, diag::err_reflect_constant_bad_result)
+      << Context.getCanonicalTagType(RD) << ObjTy << QualType() << 2;
+  return true;
+}
+
 bool Sema::NormalizeReflectConstantValue(QualType T, APValue &V,
                                          SourceLocation Loc) {
   // P4340 is a C++29 extension: below C++29 no customization points are
@@ -3955,44 +4125,20 @@ bool Sema::NormalizeReflectConstantValue(QualType T, APValue &V,
   if (RD->hasReflectConstant()) {
     CXXMethodDecl *CP = LookupReflectConstantCustomization(RD);
     if (CP && !CP->isDefaulted() && !CP->isDeleted()) {
-      // The value must be copyable in constant expressions to be transplanted
-      // into an enclosing object.
-      CXXConstructorDecl *Copy = LookupCopyingConstructor(RD, Qualifiers::Const);
-      if (!Copy || Copy->isDeleted() || !Copy->isConstexpr()) {
-        Diag(Loc, diag::err_reflect_constant_subobject_not_copyable)
-            << Context.getCanonicalTagType(RD);
-        return true;
-      }
-
-      Expr *OVE = new (Context)
-          OpaqueValueExpr(Loc, T.getUnqualifiedType(), VK_PRValue);
-      Expr *CE = ConstantExpr::Create(Context, OVE, V);
-      CE->setValueKind(VK_PRValue);
-      ExprResult Materialized = TemporaryMaterializationConversion(CE);
-      if (Materialized.isInvalid())
+      if (CheckReflectConstantSubobjectCopyable(RD, Loc))
         return true;
 
       APValue Obj;
-      if (EvaluateReflectConstantCustomization(
-              Materialized.get(), T.getUnqualifiedType(), Loc, Obj))
+      if (EvaluateReflectConstantCustomization(BuildValueHolderRef(T, V, Loc),
+                                               T.getUnqualifiedType(), Loc,
+                                               Obj))
         return true;
       assert(Obj.isLValue() &&
              "non-defaulted customization must produce an object");
 
       // Replace V with the value of the returned object (which can be a
       // subobject of a variable's object).
-      QualType ObjTy = Context.getCanonicalTagType(RD).withConst();
-      Expr *ObjRef = ConstantExpr::Create(
-          Context, new (Context) OpaqueValueExpr(Loc, ObjTy, VK_LValue), Obj);
-      Expr::EvalResult ER;
-      if (ObjRef->EvaluateAsRValue(ER, Context, /*InConstantContext=*/true)) {
-        V = std::move(ER.Val);
-        return false;
-      }
-      Diag(Loc, diag::err_reflect_constant_bad_result)
-          << Context.getCanonicalTagType(RD)
-          << Context.getCanonicalTagType(RD).withConst() << QualType() << 2;
-      return true;
+      return ReadReflectConstantObject(RD, Obj, Loc, V);
     }
     // Defaulted (or deleted, diagnosed elsewhere): fall through to
     // member-wise normalization.

@@ -6494,6 +6494,89 @@ public:
                                             SourceLocation Loc,
                                             APValue &Result);
 
+  /// P4340 ext: \p RD's 'operator template' if it is user-provided (declared,
+  /// eligible, and neither defaulted nor deleted); otherwise null.
+  CXXMethodDecl *LookupUserProvidedOperatorTemplate(CXXRecordDecl *RD);
+
+  /// P4340 ext: whether \p T (or its array element type) is, or has a
+  /// non-reference subobject of, a class type with a user-provided
+  /// 'operator template'. Such a value has to be normalized while the
+  /// evaluation that produced it is still live: the subobject's value can
+  /// refer to transient allocations (as a std::string's does) that only its
+  /// customization knows how to persist.
+  bool HasUserProvidedOperatorTemplateSubobject(QualType T);
+  llvm::DenseMap<const CXXRecordDecl *, bool>
+      UserProvidedOperatorTemplateSubobjectCache;
+
+  /// P4340 ext: build the call Obj.operator template() (\p Obj an expression
+  /// of the class type declaring \p CP), as the language invokes it.
+  ExprResult BuildOperatorTemplateCall(Expr *Obj, CXXMethodDecl *CP,
+                                       SourceLocation Loc);
+
+  /// P4340 ext: evaluate Obj.operator template() as a constant expression,
+  /// giving the returned reflection in \p Out.
+  ///
+  /// \return \c true on error (diagnosed).
+  bool EvaluateOperatorTemplateCall(Expr *Obj, CXXMethodDecl *CP,
+                                    SourceLocation Loc, APValue &Out);
+
+  /// P4340 ext: given the reflection \p First returned by \p RD's
+  /// user-provided 'operator template', validate the conditions on the
+  /// object it designates and run the idempotence check. On success,
+  /// \p Result is an lvalue designating that object.
+  ///
+  /// \return \c true on error (diagnosed).
+  bool CompleteReflectConstantCustomization(CXXRecordDecl *RD,
+                                            const APValue &First,
+                                            SourceLocation Loc,
+                                            APValue &Result);
+
+  /// P4340 ext: a subobject of customized type \p RD is replaced by a copy of
+  /// the object its customization returns, so it has to be constexpr
+  /// copyable.
+  ///
+  /// \return \c true on error (diagnosed).
+  bool CheckReflectConstantSubobjectCopyable(CXXRecordDecl *RD,
+                                             SourceLocation Loc);
+
+  /// P4340 ext: an lvalue of type const T designating an object, of static
+  /// storage duration, whose value is \p V -- for running a customization on
+  /// an already-computed value.
+  Expr *BuildValueHolderRef(QualType T, const APValue &V, SourceLocation Loc);
+
+  /// P4340 ext: read the value of the object \p Obj (an lvalue of type
+  /// const RD, as returned by CompleteReflectConstantCustomization).
+  ///
+  /// \return \c true on error (diagnosed).
+  bool ReadReflectConstantObject(CXXRecordDecl *RD, const APValue &Obj,
+                                 SourceLocation Loc, APValue &V);
+
+  /// Build a C++26 annotation [[=CE]], evaluating its value. Returns null on
+  /// (diagnosed) error.
+  CXX26AnnotationAttr *BuildCXX26AnnotationAttr(Expr *CE,
+                                                const AttributeCommonInfo &CI,
+                                                SourceLocation EqLoc);
+
+  /// Instantiate the C++26 annotation \p A, evaluating its value if it was
+  /// dependent. Returns null on (diagnosed) error.
+  CXX26AnnotationAttr *
+  InstantiateCXX26AnnotationAttr(const CXX26AnnotationAttr *A,
+                                 const MultiLevelTemplateArgumentList &TemplateArgs);
+
+  /// P4340/P4341 ext: evaluate \p E, a constant of class type, to the value of
+  /// the object std::meta::reflect_constant(E) would designate -- for a
+  /// template argument or an annotation. Subobjects with a user-provided
+  /// 'operator template' are normalized while E's evaluation is live, so
+  /// that a value holding transient allocations (e.g. a struct with a
+  /// std::string member) can be persisted. Notes explaining a failure are
+  /// appended to \p Notes.
+  ///
+  /// \return \c true on failure (not diagnosed, except for errors from the
+  /// customization points themselves).
+  bool EvaluateAsTemplateParameterObject(
+      Expr *E, SourceLocation Loc, APValue &Value,
+      SmallVectorImpl<PartialDiagnosticAt> &Notes);
+
   /// P4340 ext: recursively normalize the value \p V of type \p T by running
   /// every subobject of customized class type through its 'operator template'
   /// and replacing the subobject's value with the value
@@ -12253,6 +12336,10 @@ public:
   ///
   /// \return \c true if an error was produced.
   bool RequireStructuralType(QualType T, SourceLocation Loc);
+
+  /// Emit notes explaining why the literal class type \p T is not
+  /// structural.
+  void NoteNonStructuralType(QualType T);
 
   /// Check that the type of a non-type template parameter is
   /// well-formed.

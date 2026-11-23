@@ -1318,10 +1318,27 @@ consteval auto substitute(info templ, R &&args) -> info {
   }
 }
 
+consteval auto is_annotation(info r) -> bool;
+consteval auto is_object(info r) -> bool;
+consteval auto is_variable(info r) -> bool;
+
 // Returns the value or object from 'r' if 'r' is a reflection of a value
 // or object having type 'T'.
 template <typename Ty> requires (!is_rvalue_reference_v<Ty>)
 consteval auto extract(info r) -> Ty {
+#if _LIBCPP_STD_VER >= 29
+  // P4341 ext: the value of an object of class type is a copy of it. A type
+  // with a non-trivial copy constructor can own storage (as a std::string
+  // owns its persisted buffer); copying the object's representation would
+  // make a second owner, whose destruction frees storage it doesn't own. So
+  // copy-construct the result from the object instead.
+  if constexpr (is_class_v<Ty> && !is_trivially_copy_constructible_v<Ty>) {
+    if (is_annotation(r))
+      r = constant_of(r);
+    if (is_object(r) || is_variable(r))
+      return __metafunction(detail::__metafn_extract, ^^const Ty&, r);
+  }
+#endif
   return __metafunction(detail::__metafn_extract, ^^Ty, r);
 }
 

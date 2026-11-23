@@ -116,6 +116,10 @@ public:
                 QualType ResultType, SourceRange Range,
                 ArrayRef<Expr *> Args, Decl *ContainingDecl) const;
 
+  // The ID of the metafunction behind std::meta::reflect_constant and
+  // std::meta::reflect_object.
+  static unsigned getReflectResultID();
+
   // Get a pointer to the metafunction with the given ID.
   // Returns true in the case of error (i.e., no such metafunction exists).
   static bool Lookup(unsigned ID, const Metafunction *&result);

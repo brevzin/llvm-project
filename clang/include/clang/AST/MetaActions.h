@@ -118,6 +118,29 @@ public:
   virtual bool NormalizeReflectConstant(QualType T, APValue &V, APValue &Result,
                                         SourceLocation Loc) = 0;
 
+  // P4340 ext: whether 'T' is, or has a subobject of, a class type with a
+  // user-provided 'operator template'. A value of such a type is normalized
+  // while the evaluation producing it is live (see below), since the
+  // subobject's value may refer to transient allocations.
+  virtual bool HasUserProvidedOperatorTemplateSubobject(QualType T) = 0;
+
+  // P4340 ext: for a class type 'T' with a user-provided 'operator template',
+  // the call 'Obj.operator template()', for the caller to evaluate. Returns
+  // null if 'T' has none, or on (diagnosed) error, setting 'Error'.
+  virtual Expr *SynthesizeOperatorTemplateCall(QualType T, Expr *Obj,
+                                               SourceLocation Loc,
+                                               bool &Error) = 0;
+
+  // P4340 ext: given the reflection 'First' that a call synthesized by
+  // SynthesizeOperatorTemplateCall returned, check the conditions on the
+  // object it designates and idempotence (and, for a subobject, that 'T' is
+  // constexpr copyable). On success, 'Obj' is an lvalue designating the
+  // object and 'Value' its value. Returns 'true' on (diagnosed) error.
+  virtual bool CompleteOperatorTemplateCall(QualType T, const APValue &First,
+                                            bool IsSubobject,
+                                            SourceLocation Loc, APValue &Obj,
+                                            APValue &Value) = 0;
+
   // Ensures instantiation of the exception specification of 'FD'.
   virtual void EnsureInstantiationOfExceptionSpec(SourceLocation Loc,
                                                   FunctionDecl *FD) = 0;

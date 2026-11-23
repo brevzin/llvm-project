@@ -5805,9 +5805,17 @@ public:
 class CXXMetafunctionExpr : public Expr {
 public:
   // Type of callback provided to executing metafunctinons to help evaluate an
-  // expression in the current constant evaluation context.
+  // expression in the current constant evaluation context. 'ConvertToRValue'
+  // is true (the value of the expression, checked to be a constant
+  // expression), false (as is: a glvalue gives an lvalue), or
+  // ReadWithoutChecking.
   using EvaluateFn = std::function<bool(APValue &, const Expr *,
-                                        bool ConvertToRValue)>;
+                                        unsigned ConvertToRValue)>;
+
+  // For EvaluateFn: the value of the expression, not (yet) checked to be a
+  // constant expression -- it may, for instance, refer to transient
+  // allocations that the caller deals with before checking it.
+  static constexpr unsigned ReadWithoutChecking = 2;
 
   // Type of callback provided to report a diagnistc to the evaluation context.
   using DiagnoseFn = std::function<PartialDiagnostic &(SourceLocation,
