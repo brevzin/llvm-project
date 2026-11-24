@@ -13,6 +13,7 @@
 
 #include "UsedDeclVisitor.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ConstevalPlugin.h"
 #include "clang/AST/ASTDiagnostic.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
@@ -270,6 +271,10 @@ public:
 const unsigned Sema::MaxAlignmentExponent;
 const uint64_t Sema::MaximumAlignment;
 
+namespace clang {
+void initASTContextMetaActions(Sema &S, ASTContext &Ctx);
+} // namespace clang
+
 Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
            TranslationUnitKind TUKind, CodeCompleteConsumer *CodeCompleter)
     : SemaBase(*this), CollectStats(false), TUKind(TUKind),
@@ -326,6 +331,7 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
       CurrentInstantiationScope(nullptr), NonInstantiationEntries(0),
       ArgPackSubstIndex(std::nullopt), SatisfactionCache(Context) {
   assert(pp.TUKind == TUKind);
+  initASTContextMetaActions(*this, Context);
   TUScope = nullptr;
 
   LoadedExternalKnownNamespaces = false;
@@ -1072,7 +1078,8 @@ static void checkUndefinedButUsed(Sema &S) {
         S.Diag(VD->getLocation(), diag::warn_undefined_internal)
             << isa<VarDecl>(VD) << VD;
     } else if (auto *FD = dyn_cast<FunctionDecl>(VD)) {
-      (void)FD;
+      if (FD->isConsteval() && hasConstevalPluginSymbol(S.Context, FD))
+        continue;
       assert(FD->getMostRecentDecl()->isInlined() &&
              "used object requires definition but isn't inline or internal?");
       // FIXME: This is ill-formed; we should reject.

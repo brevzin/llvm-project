@@ -194,8 +194,19 @@ public:
   }
   void VisitCXXBindTemporaryExpr(CXXBindTemporaryExpr *E);
   void VisitCXXConstructExpr(const CXXConstructExpr *E);
-  // A token literal (P4380): token sequences carry no state at runtime.
+  // A token literal (P4380): token sequences carry no state at runtime,
+  // except in native consteval plugin mode where they hold an opaque handle.
   void VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
+    if (CGF.getLangOpts().ConstevalPlugin) {
+      llvm::Value *H = CGF.EmitConstevalPluginTokenSeq(E);
+      if (!Dest.isIgnored()) {
+        llvm::Type *TSTy =
+            CGF.ConvertTypeForMem(CGF.getContext().TokenSequenceTy);
+        H = Builder.CreateZExtOrTrunc(H, TSTy);
+        Builder.CreateStore(H, Dest.getAddress().withElementType(TSTy));
+      }
+      return;
+    }
     if (!Dest.isIgnored())
       CGF.EmitNullInitialization(Dest.getAddress(), E->getType());
   }
@@ -1039,6 +1050,16 @@ void AggExprEmitter::VisitCastExpr(CastExpr *E) {
     break;
 
   case CK_TokenArrayToSequence:
+    if (CGF.getLangOpts().ConstevalPlugin) {
+      llvm::Value *H = CGF.EmitScalarExpr(E->getSubExpr());
+      if (!Dest.isIgnored()) {
+        llvm::Type *TSTy =
+            CGF.ConvertTypeForMem(CGF.getContext().TokenSequenceTy);
+        H = Builder.CreateZExtOrTrunc(H, TSTy);
+        Builder.CreateStore(H, Dest.getAddress().withElementType(TSTy));
+      }
+      break;
+    }
     // Token sequences carry no state at runtime (P4380): the empty value.
     CGF.EmitIgnoredExpr(E->getSubExpr());
     if (!Dest.isIgnored())

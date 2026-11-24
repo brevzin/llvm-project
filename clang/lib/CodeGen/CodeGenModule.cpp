@@ -1071,6 +1071,7 @@ CodeGenModule::StackProtectorAttribute(const Decl *D) const {
 }
 
 void CodeGenModule::Release() {
+  EmitConstevalPluginInit();
   Module *Primary = getContext().getCurrentNamedModule();
   if (CXX20ModuleInits && Primary && !Primary->isHeaderLikeModule())
     EmitModuleInitializers(Primary);
@@ -7914,8 +7915,9 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
   if (D->isTemplated())
     return;
 
-  // Consteval function shouldn't be emitted.
-  if (auto *FD = dyn_cast<FunctionDecl>(D); FD && FD->isImmediateFunction())
+  // Consteval function shouldn't be emitted unless building a consteval plugin.
+  if (auto *FD = dyn_cast<FunctionDecl>(D);
+      FD && FD->isImmediateFunction() && !getLangOpts().ConstevalPlugin)
     return;
 
   switch (D->getKind()) {
@@ -7923,6 +7925,8 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
   case Decl::CXXMethod:
   case Decl::Function:
     EmitGlobal(cast<FunctionDecl>(D));
+    if (getLangOpts().ConstevalPlugin)
+      EmitConstevalPluginThunk(cast<FunctionDecl>(D));
     // Always provide some coverage mapping
     // even for the functions that aren't emitted.
     AddDeferredUnusedCoverageMapping(D);

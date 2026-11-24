@@ -3945,7 +3945,10 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     return RValue::get(nullptr);
   }
   case Builtin::BI__assume:
+    return RValue::get(nullptr);
   case Builtin::BI__builtin_constexpr_diag:
+    if (getLangOpts().ConstevalPlugin)
+      EmitConstevalPluginDiag(E);
     // Only has an effect when manifestly constant-evaluated.
     return RValue::get(nullptr);
   case Builtin::BI__builtin_assume: {

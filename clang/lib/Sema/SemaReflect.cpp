@@ -3115,6 +3115,12 @@ ExprResult Sema::BuildExplDependentCallExpr(Expr *SubExpr,
   return ExplDependentCallExpr::Create(Context, SubExpr, TemplateDepth);
 }
 
+namespace clang {
+void initASTContextMetaActions(Sema &S, ASTContext &Ctx) {
+  Ctx.setMetaActions(new (Ctx) MetaActionsImpl(S));
+}
+} // namespace clang
+
 SpliceResult
 Sema::BuildSpliceSpecifier(SourceLocation LSpliceLoc, Expr *Operand,
                            SourceLocation RSpliceLoc,

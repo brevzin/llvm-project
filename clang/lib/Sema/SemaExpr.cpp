@@ -17,6 +17,7 @@
 #include "UsedDeclVisitor.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ConstevalPlugin.h"
 #include "clang/AST/ASTDiagnostic.h"
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/ASTMutationListener.h"
@@ -8374,7 +8375,7 @@ bool Sema::EvaluateMacroExpansion(Expr *Fn, FunctionDecl *Macro,
                                   /*DefinitionRequired=*/true);
   if (Macro->isInvalidDecl())
     return true;
-  if (!Macro->getBody()) {
+  if (!Macro->getBody() && !hasConstevalPluginSymbol(Context, Macro)) {
     Diag(LParenLoc, diag::err_macro_undefined) << Macro;
     Diag(Macro->getLocation(), diag::note_declared_at);
     return true;

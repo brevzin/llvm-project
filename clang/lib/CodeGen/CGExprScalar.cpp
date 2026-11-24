@@ -555,11 +555,59 @@ public:
     return Visit(PE->getSubExpr());
   }
   // Reflections and token sequences carry no state at runtime; a reflect- or
-  // token-sequence-expression lowers to the empty (zero) value.
+  // token-sequence-expression lowers to the empty (zero) value, except when
+  // emitting a native consteval plugin.
   Value *VisitCXXReflectExpr(CXXReflectExpr *E) {
+    if (CGF.getLangOpts().ConstevalPlugin)
+      return CGF.EmitConstevalPluginReflect(E);
     return llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
   }
   Value *VisitCXXTokenSequenceExpr(CXXTokenSequenceExpr *E) {
+    if (CGF.getLangOpts().ConstevalPlugin)
+      return CGF.EmitConstevalPluginTokenSeq(E);
+    return llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
+  }
+  Value *VisitCXXMetafunctionExpr(const CXXMetafunctionExpr *E) {
+    if (CGF.getLangOpts().ConstevalPlugin)
+      return CGF.EmitConstevalPluginMetafnScalar(E);
+    return E->getType()->isVoidType()
+               ? nullptr
+               : llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
+  }
+  Value *VisitCXXBuiltinInjectExpr(const CXXBuiltinInjectExpr *E) {
+    if (CGF.getLangOpts().ConstevalPlugin)
+      CGF.EmitConstevalPluginQueueInjection(E);
+    return nullptr;
+  }
+  Value *VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
+    if (!CGF.getLangOpts().ConstevalPlugin)
+      return llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
+    SmallVector<const Expr *, 4> As, Szs, Dts;
+    for (unsigned I = 0, N = E->getNumArgs(); I < N; ++I) {
+      As.push_back(E->getArg(I));
+      Szs.push_back(E->getSizeCall(I));
+      Dts.push_back(E->getDataCall(I));
+    }
+    llvm::Value *H = CGF.EmitConstevalPluginIdOrStrLit(
+        false, E->getNumArgs(), As.data(), Szs.data(), Dts.data());
+    return Builder.CreateZExtOrTrunc(H, CGF.ConvertType(E->getType()));
+  }
+  Value *VisitCXXBuiltinStrLiteralExpr(const CXXBuiltinStrLiteralExpr *E) {
+    if (!CGF.getLangOpts().ConstevalPlugin)
+      return llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
+    SmallVector<const Expr *, 4> As, Szs, Dts;
+    for (unsigned I = 0, N = E->getNumArgs(); I < N; ++I) {
+      As.push_back(E->getArg(I));
+      Szs.push_back(E->getSizeCall(I));
+      Dts.push_back(E->getDataCall(I));
+    }
+    llvm::Value *H = CGF.EmitConstevalPluginIdOrStrLit(
+        true, E->getNumArgs(), As.data(), Szs.data(), Dts.data());
+    return Builder.CreateZExtOrTrunc(H, CGF.ConvertType(E->getType()));
+  }
+  Value *VisitCXXBuiltinStringizeExpr(const CXXBuiltinStringizeExpr *E) {
+    if (CGF.getLangOpts().ConstevalPlugin)
+      return CGF.EmitConstevalPluginStringize(E);
     return llvm::Constant::getNullValue(CGF.ConvertType(E->getType()));
   }
   Value *VisitSubstNonTypeTemplateParmExpr(SubstNonTypeTemplateParmExpr *E) {
@@ -3054,6 +3102,22 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     return nullptr;
   }
   case CK_SequenceToTokenArray:
+    if (CGF.getLangOpts().ConstevalPlugin) {
+      Address Addr = Address::invalid();
+      if (E->isGLValue()) {
+        Addr = CGF.EmitLValue(E).getAddress();
+      } else {
+        Addr = CGF.CreateMemTemp(E->getType(), "ce.ts.tmp");
+        CGF.EmitAggExpr(
+            E, AggValueSlot::forAddr(Addr, E->getType().getQualifiers(),
+                                     AggValueSlot::IsDestructed,
+                                     AggValueSlot::DoesNotNeedGCBarriers,
+                                     AggValueSlot::IsNotAliased,
+                                     AggValueSlot::DoesNotOverlap));
+      }
+      llvm::Type *LLTy = ConvertType(DestTy);
+      return Builder.CreateLoad(Addr.withElementType(LLTy), "ce.ts.unwrap");
+    }
     // Token sequences carry no state at runtime (P4380): the empty value.
     CGF.EmitIgnoredExpr(E);
     return llvm::Constant::getNullValue(ConvertType(DestTy));
@@ -5395,7 +5459,14 @@ Value *ScalarExprEmitter::EmitCompare(const BinaryOperator *E,
           RHS = Builder.CreateStripInvariantGroup(RHS);
       }
 
-      Result = Builder.CreateICmp(UICmpOpc, LHS, RHS, "cmp");
+      if (CGF.getLangOpts().ConstevalPlugin && LHSTy->isReflectionType() &&
+          (E->getOpcode() == BO_EQ || E->getOpcode() == BO_NE)) {
+        Result = CGF.EmitConstevalPluginMetaEqual(LHS, RHS);
+        if (E->getOpcode() == BO_NE)
+          Result = Builder.CreateNot(Result, "meta.ne");
+      } else {
+        Result = Builder.CreateICmp(UICmpOpc, LHS, RHS, "cmp");
+      }
     }
 
     // If this is a vector comparison, sign extend the result to the appropriate

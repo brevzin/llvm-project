@@ -2608,6 +2608,8 @@ ConstantEmitter::tryEmitPrivate(const APValue &Value, QualType DestType,
   }
   case APValue::Reflection:
   case APValue::TokenSequence:
+    if (CGM.getLangOpts().ConstevalPlugin)
+      return nullptr;
     // Reflections and token sequences carry no state at runtime; they lower to
     // a 1-byte empty value.
     return llvm::Constant::getNullValue(CGM.getTypes().ConvertType(DestType));

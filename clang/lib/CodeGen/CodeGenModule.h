@@ -731,6 +731,10 @@ public:
   /// Finalize LLVM code generation.
   void Release();
 
+  llvm::GlobalVariable *getConstevalHostPtr();
+  void EmitConstevalPluginInit();
+  void EmitConstevalPluginThunk(const FunctionDecl *FD);
+
   /// Get the current Atomic options.
   AtomicOptions getAtomicOpts() { return AtomicOpts; }
 

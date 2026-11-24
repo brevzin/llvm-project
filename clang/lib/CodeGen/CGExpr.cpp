@@ -6993,7 +6993,8 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType,
   const Decl *TargetDecl =
       OrigCallee.getAbstractInfo().getCalleeDecl().getDecl();
 
-  assert((!isa_and_present<FunctionDecl>(TargetDecl) ||
+  assert((CGM.getLangOpts().ConstevalPlugin ||
+          !isa_and_present<FunctionDecl>(TargetDecl) ||
           !cast<FunctionDecl>(TargetDecl)->isImmediateFunction()) &&
          "trying to emit a call to an immediate function");
 

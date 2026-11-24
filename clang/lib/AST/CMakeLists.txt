@@ -42,6 +42,7 @@ add_clang_library(clangAST
   CommentSema.cpp
   ComparisonCategories.cpp
   ComputeDependence.cpp
+  ConstevalPlugin.cpp
   CXXInheritance.cpp
   DataCollection.cpp
   Decl.cpp

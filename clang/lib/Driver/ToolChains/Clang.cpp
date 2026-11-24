@@ -7758,6 +7758,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // default (the consteval-only value model).
   Args.addOptInFlag(CmdArgs, options::OPT_fconsteval_operations,
                     options::OPT_fno_consteval_operations);
+  Args.addOptInFlag(CmdArgs, options::OPT_fconsteval_plugin,
+                    options::OPT_fno_consteval_plugin);
+  Args.AddAllArgs(CmdArgs, options::OPT_fconsteval_plugin_load_EQ);
   Args.addOptInFlag(CmdArgs, options::OPT_foperator_for,
                     options::OPT_fno_operator_for);
 

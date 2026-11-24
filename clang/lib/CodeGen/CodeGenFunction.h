@@ -3343,6 +3343,18 @@ public:
                                   const CallExpr *TheCallExpr, bool IsDelete);
 
   llvm::Value *EmitCXXTypeidExpr(const CXXTypeidExpr *E);
+  llvm::Value *EmitConstevalPluginMetafnScalar(const CXXMetafunctionExpr *E);
+  llvm::Value *EmitConstevalPluginTokenSeq(const CXXTokenSequenceExpr *E);
+  llvm::Value *EmitConstevalPluginReflect(const CXXReflectExpr *E);
+  llvm::Value *EmitConstevalPluginMetaEqual(llvm::Value *LHS, llvm::Value *RHS);
+  void EmitConstevalPluginQueueInjection(const CXXBuiltinInjectExpr *E);
+  llvm::Value *EmitConstevalPluginIdOrStrLit(bool IsStrLit,
+                                             unsigned NumArgs,
+                                             const Expr *const *Args,
+                                             const Expr *const *SizeCalls,
+                                             const Expr *const *DataCalls);
+  llvm::Value *EmitConstevalPluginStringize(const CXXBuiltinStringizeExpr *E);
+  void EmitConstevalPluginDiag(const CallExpr *E);
   llvm::Value *EmitDynamicCast(Address V, const CXXDynamicCastExpr *DCE);
   Address EmitCXXUuidofExpr(const CXXUuidofExpr *E);
 

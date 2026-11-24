@@ -40,6 +40,7 @@
 #include "ExprConstShared.h"
 #include "clang/AST/APValue.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ConstevalPlugin.h"
 #include "clang/AST/SpliceSpecifier.h"
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/Attr.h"
@@ -9717,6 +9718,43 @@ public:
     const FunctionDecl *Definition = nullptr;
     Stmt *Body = FD->getBody(Definition);
     SourceLocation Loc = E->getExprLoc();
+
+    // If this is an undefined consteval function and native consteval plugins
+    // are loaded (-fconsteval-plugin-load=), try invoking the native plugin.
+    if (!Body && FD->isConsteval() && !This &&
+        !Info.Ctx.getLangOpts().ConstevalPluginPaths.empty() &&
+        Info.Ctx.getMetaActions()) {
+      bool AllowInjection =
+          (Info.EvalMode ==
+           EvaluationMode::ConstantExpressionPlainlyConstantEvaluated);
+      SmallVector<APValue, 8> EvalArgs;
+      EvalArgs.reserve(Args.size());
+      for (const Expr *ArgE : Args) {
+        APValue V;
+        if (!Evaluate(V, Info, ArgE))
+          return false;
+        EvalArgs.push_back(std::move(V));
+      }
+      std::string PluginTag, PluginErr;
+      int Status = invokeConstevalPlugin(
+          Info.Ctx, *Info.Ctx.getMetaActions(), FD, Loc, Info.ContainingDecl,
+          AllowInjection, &Info.EvalStatus, EvalArgs, Result, PluginTag,
+          PluginErr);
+      if (Status == 1)
+        return CallScope.destroy();
+      if (Status == 0) {
+        if (!PluginErr.empty()) {
+          if (PluginTag.empty())
+            Info.FFDiag(Loc, diag::note_constexpr_message) << PluginErr;
+          else
+            Info.FFDiag(Loc, diag::note_constexpr_message_tag)
+                << PluginTag << PluginErr;
+        } else {
+          Info.FFDiag(Loc);
+        }
+        return false;
+      }
+    }
 
     // Treat the object argument as `this` when evaluating defaulted
     // special menmber functions
@@ -25947,6 +25985,51 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
   // macro_expansion_context() in the body sees where the expansion lands, not
   // where the macro was defined.
   Info.MacroExpansionContext = InvocationContext;
+
+  // If this is an undefined __macro and a consteval plugin provides it, invoke
+  // the plugin natively.
+  if (!Macro->getBody() && !Ctx.getLangOpts().ConstevalPluginPaths.empty() &&
+      Ctx.getMetaActions()) {
+    SmallVector<APValue, 8> EvalArgs;
+    EvalArgs.reserve(Macro->getNumParams());
+    for (unsigned I = 0, N = std::min<unsigned>(ParamValues.size(),
+                                                Macro->getNumParams());
+         I != N; ++I) {
+      if (I < ParamInits.size() && ParamInits[I]) {
+        APValue V;
+        FullExpressionRAII Scope(Info);
+        if (!Evaluate(V, Info, ParamInits[I]) || !Scope.destroy())
+          return false;
+        EvalArgs.push_back(std::move(V));
+      } else {
+        EvalArgs.push_back(ParamValues[I]);
+      }
+    }
+    std::string PluginTag, PluginErr;
+    int PluginStatus = invokeConstevalPlugin(
+        const_cast<ASTContext &>(Ctx), *Ctx.getMetaActions(), Macro,
+        Macro->getLocation(), InvocationContext, /*AllowInjection=*/true,
+        &Status, EvalArgs, Result, PluginTag, PluginErr);
+    if (PluginStatus == 1) {
+      if (Result.isStruct() && Result.getStructNumFields() == 1 &&
+          Result.getStructField(0).isTokenSequence()) {
+        APValue TS = Result.getStructField(0);
+        Result = std::move(TS);
+      }
+      return true;
+    }
+    if (PluginStatus == 0) {
+      if (!PluginErr.empty()) {
+        if (PluginTag.empty())
+          Info.FFDiag(Macro->getLocation(), diag::note_constexpr_message)
+              << PluginErr;
+        else
+          Info.FFDiag(Macro->getLocation(), diag::note_constexpr_message_tag)
+              << PluginTag << PluginErr;
+      }
+      return false;
+    }
+  }
 
   // The parameters hold reflections and token sequences rather than values of
   // their declared types; nothing about them is evaluated from an argument.

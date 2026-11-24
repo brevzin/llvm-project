@@ -4017,6 +4017,15 @@ defm consteval_operations : BoolFOption<"consteval-operations",
           "runtime and only their operations (e.g. ==) are consteval, instead "
           "of the default consteval-only value model">,
   NegFlag<SetFalse>>;
+defm consteval_plugin : BoolFOption<"consteval-plugin",
+  LangOpts<"ConstevalPlugin">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option],
+          "Emit native code for consteval functions as a compiler plugin">,
+  NegFlag<SetFalse>>;
+def fconsteval_plugin_load_EQ : Joined<["-"], "fconsteval-plugin-load=">,
+  HelpText<"Load a compiled consteval plugin shared library">,
+  MetaVarName<"<path>">, Group<f_Group>, Visibility<[ClangOption, CC1Option]>,
+  MarshallingInfoStringVector<LangOpts<"ConstevalPluginPaths">>;
 
 defm sized_deallocation : BoolFOption<"sized-deallocation",
   LangOpts<"SizedDeallocation">, Default<cpp14.KeyPath>,

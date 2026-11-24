@@ -102,6 +102,7 @@ struct BlockVarCopyInit;
 class BuiltinTemplateDecl;
 class CharUnits;
 class ConceptDecl;
+class MetaActions;
 class CXXABI;
 class CXXConstructorDecl;
 class CXXMethodDecl;
@@ -1015,6 +1016,10 @@ public:
   bool AtomicUsesUnsupportedLibcall(const AtomicExpr *E) const;
 
   const LangOptions& getLangOpts() const { return LangOpts; }
+
+  MetaActions *MetaActionsPtr = nullptr;
+  MetaActions *getMetaActions() const { return MetaActionsPtr; }
+  void setMetaActions(MetaActions *M) { MetaActionsPtr = M; }
 
   // If this condition is false, typo correction must be performed eagerly
   // rather than delayed in many places, as it makes use of dependent types.

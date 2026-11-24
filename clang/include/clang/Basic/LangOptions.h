@@ -579,6 +579,9 @@ public:
 
   std::vector<std::string> OverflowPatternExclusionValues;
 
+  /// Paths to native consteval plugin shared libraries (-fconsteval-plugin-load=).
+  std::vector<std::string> ConstevalPluginPaths;
+
   /// The seed used by the randomize structure layout feature.
   std::string RandstructSeed;
 
