@@ -632,6 +632,7 @@ enum : unsigned {
   __metafn_has_parent,
   __metafn_object_parameter_of,
   __metafn_is_closure_type,
+  __metafn_transform_type,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -1437,7 +1438,7 @@ consteval auto is_accessible(info r, access_context ctx) -> bool {
 // the count, then the reflections written into the vector.
 enum class __member_query : size_t {
   members, bases, static_data_members, nonstatic_data_members, subobjects,
-  hidden_friends, overloads
+  hidden_friends, overloads, parameters
 };
 consteval auto __gather_members(info r, access_context ctx,
                                 __member_query q) -> vector<info> {
@@ -1940,7 +1941,7 @@ consteval auto bit_size_of(info r) -> size_t {
 // Type trait wrappers
 
 consteval auto is_void_type(info r) -> bool {
-  return extract<bool>(substitute(^^is_void_v, {r}));
+  return __metafunction(detail::__metafn_transform_type, r, size_t(2)) == ^^void;
 }
 
 consteval auto is_null_pointer_type(info r) -> bool {
@@ -2243,7 +2244,11 @@ consteval auto extent(info r, unsigned i = 0) -> size_t {
 }
 
 consteval auto is_same_type(info r, info s) -> bool {
-  return extract<bool>(substitute(^^is_same_v, {r, s}));
+  return __metafunction(detail::__metafn_transform_type, r, size_t(2)) ==
+             __metafunction(detail::__metafn_transform_type, r, size_t(2)) &&
+         __metafunction(detail::__metafn_transform_type, s, size_t(2)) ==
+             __metafunction(detail::__metafn_transform_type, s, size_t(2)) &&
+         dealias(r) == dealias(s);
 }
 
 consteval auto is_base_of_type(info r, info s) -> bool {
@@ -2306,47 +2311,39 @@ consteval auto is_nothrow_invocable_r_type(info result, info type,
 }
 
 consteval auto remove_const(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^remove_const_t, {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(0));
 }
 
 consteval auto remove_volatile(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^remove_volatile_t, {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(1));
 }
 
 consteval auto remove_cv(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^remove_cv_t, {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(2));
 }
 
 consteval auto add_const(info type) -> info {
-  return detail::__underlying_entity_of(substitute(^^add_const_t, {type}));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(3));
 }
 
 consteval auto add_volatile(info type) -> info {
-  return detail::__underlying_entity_of(substitute(^^add_volatile_t, {type}));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(4));
 }
 
 consteval auto add_cv(info type) -> info {
-  return detail::__underlying_entity_of(substitute(^^add_cv_t, {type}));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(5));
 }
 
 consteval auto remove_reference(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^remove_reference_t, {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(6));
 }
 
 consteval auto add_lvalue_reference(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^add_lvalue_reference_t,
-                                                {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(7));
 }
 
 consteval auto add_rvalue_reference(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^add_rvalue_reference_t,
-                                                {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(8));
 }
 
 consteval auto make_signed(info type) -> info {
@@ -2371,18 +2368,15 @@ consteval auto remove_all_extents(info type) -> info {
 }
 
 consteval auto remove_pointer(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^remove_pointer_t, {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(10));
 }
 
 consteval auto add_pointer(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^add_pointer_t, {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(11));
 }
 
 consteval auto remove_cvref(info type) -> info {
-  return detail::__workaround_expand_compiler_builtins(
-      detail::__underlying_entity_of(substitute(^^remove_cvref_t, {type})));
+  return __metafunction(detail::__metafn_transform_type, type, size_t(9));
 }
 
 consteval auto decay(info type) -> info {
@@ -2456,13 +2450,8 @@ consteval auto __workaround_expand_compiler_builtins(info type) -> info {
 #if __has_feature(parameter_reflection)
 
 consteval auto parameters_of(info r) -> vector<info> {
-  using iterator =
-    __range_of_infos::iterator<__range_of_infos::front_parameter_of_fn,
-                                __range_of_infos::next_parameter_of_fn,
-                                __range_of_infos::map_identity_fn>;
-  using range = __range_of_infos::range<iterator>;
-  auto rng = range{r};
-  return vector<info>{rng.begin(), rng.end()};
+  return __gather_members(r, access_context::unchecked(),
+                          __member_query::parameters);
 }
 
 consteval auto has_ellipsis_parameter(info r) -> bool {

@@ -927,6 +927,11 @@ static bool is_closure_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                             bool AllowInjection, QualType ResultTy,
                             SourceRange Range, ArrayRef<Expr *> Args,
                             Decl *ContainingDecl);
+static bool transform_type(APValue &Result, ASTContext &C, MetaActions &Meta,
+                           EvalFn Evaluator, DiagFn Diagnoser,
+                           bool AllowInjection, QualType ResultTy,
+                           SourceRange Range, ArrayRef<Expr *> Args,
+                           Decl *ContainingDecl);
 
 static bool token_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -1165,6 +1170,7 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_bool, 1, 1, has_parent},
     {Metafunction::MFRK_metaInfo, 1, 1, object_parameter_of},
     {Metafunction::MFRK_bool, 1, 1, is_closure_type},
+    {Metafunction::MFRK_metaInfo, 2, 2, transform_type},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3119,6 +3125,19 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
                                   DescriptionOf(RU));
   };
 
+  auto Parameters = [&]() {
+    for (uint64_t I = 0;; ++I) {
+      APValue P;
+      Expr *IdxE =
+          ArgOf(APValue(C.MakeIntValue(I, C.getSizeType())), C.getSizeType());
+      if (Call(get_ith_parameter_of, C.MetaInfoTy, {RE, SentinelE, IdxE}, P))
+        return true;
+      if (IsSentinel(P))
+        return false;
+      Out.push_back(P);
+    }
+  };
+
   bool Failed = false;
   switch (Kind) {
   case 0:
@@ -3142,6 +3161,9 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
   case 6:
     Failed = Overloads();
     break;
+  case 7:
+    Failed = Parameters();
+    break;
   default:
     llvm_unreachable("unknown member query");
   }
@@ -3152,6 +3174,86 @@ bool members_gather(APValue &Result, ASTContext &C, MetaActions &Meta,
   for (unsigned I = 0; I != Out.size(); ++I)
     Arr.getArrayInitializedElt(I) = Out[I];
   return SetAndSucceed(Result, Arr);
+}
+
+// Native type transformations (remove_const, add_const, remove_reference,
+// add_lvalue_reference, etc.) without instantiating <type_traits> templates.
+bool transform_type(APValue &Result, ASTContext &C, MetaActions &Meta,
+                    EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                    QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                    Decl *ContainingDecl) {
+  APValue R, KindV;
+  if (!Evaluator(R, Args[0], true) || !Evaluator(KindV, Args[1], true))
+    return true;
+  if (!R.isReflectedType())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a type", DescriptionOf(R));
+
+  QualType QT = C.getCanonicalType(R.getReflectedType());
+  auto IsRefableFunc = [](QualType T) {
+    if (const auto *FPT = T->getAs<FunctionProtoType>())
+      return FPT->getMethodQuals().empty() && FPT->getRefQualifier() == RQ_None;
+    return true;
+  };
+  uint64_t Kind = KindV.getInt().getZExtValue();
+  switch (Kind) {
+  case 0: // remove_const
+    if (!QT->isReferenceType())
+      QT.removeLocalConst();
+    break;
+  case 1: // remove_volatile
+    if (!QT->isReferenceType())
+      QT.removeLocalVolatile();
+    break;
+  case 2: // remove_cv
+    if (!QT->isReferenceType()) {
+      QT.removeLocalConst();
+      QT.removeLocalVolatile();
+    }
+    break;
+  case 3: // add_const
+    if (!QT->isReferenceType() && !QT->isFunctionType())
+      QT.addConst();
+    break;
+  case 4: // add_volatile
+    if (!QT->isReferenceType() && !QT->isFunctionType())
+      QT.addVolatile();
+    break;
+  case 5: // add_cv
+    if (!QT->isReferenceType() && !QT->isFunctionType()) {
+      QT.addConst();
+      QT.addVolatile();
+    }
+    break;
+  case 6: // remove_reference
+    QT = QT.getNonReferenceType();
+    break;
+  case 7: // add_lvalue_reference
+    if (!QT->isVoidType() && IsRefableFunc(QT))
+      QT = C.getLValueReferenceType(QT);
+    break;
+  case 8: // add_rvalue_reference
+    if (!QT->isVoidType() && IsRefableFunc(QT)) {
+      if (!QT->isLValueReferenceType())
+        QT = C.getRValueReferenceType(QT.getNonReferenceType());
+    }
+    break;
+  case 9: // remove_cvref
+    QT = QT.getNonReferenceType();
+    QT.removeLocalConst();
+    QT.removeLocalVolatile();
+    break;
+  case 10: // remove_pointer
+    if (QT->isPointerType())
+      QT = QT->getPointeeType();
+    break;
+  case 11: // add_pointer
+    if (QT->isVoidType() || IsRefableFunc(QT))
+      QT = C.getPointerType(QT.getNonReferenceType());
+    break;
+  default:
+    llvm_unreachable("unknown transform_type kind");
+  }
+  return SetAndSucceed(Result, makeReflection(QT));
 }
 
 // tokens_append(token array, token array or token): the first followed by

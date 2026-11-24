@@ -849,6 +849,55 @@ static bool unmarshalResult(ActiveHostState &H, QualType Ty,
     Result = APValue(C.MakeIntValue(Val, Ty));
     return true;
   }
+  if (Ty->isPointerType() && Ty->getPointeeType()->isCharType()) {
+    const char *Ptr = nullptr;
+    std::memcpy(&Ptr, Buf, std::min(BufSize, sizeof(Ptr)));
+    if (!Ptr) {
+      Result = APValue(APValue::LValueBase(), CharUnits::Zero(),
+                       APValue::NoLValuePath(), /*CallIndex=*/0);
+      return true;
+    }
+    llvm::StringRef SR(Ptr);
+    auto *SL = StringLiteral::Create(
+        C, SR, StringLiteralKind::Ordinary, /*Pascal=*/false,
+        C.getStringLiteralArrayType(C.CharTy, SR.size()), H.CallLoc);
+    APValue::LValuePathEntry Path[1] = {
+        APValue::LValuePathEntry::ArrayIndex(0)};
+    Result = APValue(SL, CharUnits::Zero(), Path, /*OnePastTheEnd=*/false);
+    return true;
+  }
+  if (const auto *CAT = C.getAsConstantArrayType(Ty)) {
+    uint64_t N = CAT->getZExtSize();
+    QualType ElemTy = CAT->getElementType();
+    size_t ElemSz = C.getTypeSizeInChars(ElemTy).getQuantity();
+    Result = APValue(APValue::UninitArray(), N, N);
+    for (uint64_t I = 0; I < N; ++I) {
+      if (I * ElemSz + ElemSz > BufSize)
+        return false;
+      if (!unmarshalResult(H, ElemTy, Buf + I * ElemSz, ElemSz,
+                           Result.getArrayInitializedElt(I)))
+        return false;
+    }
+    return true;
+  }
+  if (const auto *RT = Ty->getAs<RecordType>()) {
+    const RecordDecl *RD = RT->getDecl();
+    const ASTRecordLayout &Layout = C.getASTRecordLayout(RD);
+    unsigned NumFields = std::distance(RD->field_begin(), RD->field_end());
+    Result = APValue(APValue::UninitStruct(), 0, NumFields);
+    unsigned FieldIdx = 0;
+    for (const FieldDecl *FD : RD->fields()) {
+      uint64_t Offset = Layout.getFieldOffset(FieldIdx) / 8;
+      size_t FieldSize = C.getTypeSizeInChars(FD->getType()).getQuantity();
+      if (Offset + FieldSize <= BufSize) {
+        if (!unmarshalResult(H, FD->getType(), Buf + Offset, FieldSize,
+                             Result.getStructField(FieldIdx)))
+          return false;
+      }
+      ++FieldIdx;
+    }
+    return true;
+  }
   return false;
 }
 

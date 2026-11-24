@@ -73,6 +73,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <debugging>
 #include <meta>
 #include <optional>
@@ -532,29 +533,38 @@ consteval auto resolve(info trait, info self, desc const& d) -> resolution {
     return res;
 }
 
-consteval auto satisfied(info trait, info self, desc const& d) -> bool {
-    return resolve(trait, self, d).error.empty();
+template <size_t N>
+struct cached_resolution {
+    std::array<info, N> assoc{};
+    char const* error = nullptr;
+};
+
+template <size_t N>
+consteval auto resolve_cached(info trait, info self, desc const& d) -> cached_resolution<N> {
+    resolution r = resolve(trait, self, d);
+    cached_resolution<N> out;
+    if (!r.error.empty()) {
+        out.error = std::define_static_string(r.error);
+        return out;
+    }
+    for (size_t i = 0; i < N; ++i) {
+        out.assoc[i] = r.assoc[i];
+    }
+    return out;
 }
 
-// The I-th associated type of Self's conformance: what the generated
-// 'ref<S>::iterator' and the like are.
-consteval auto assoc(info trait, info self, desc const& d, size_t i) -> info {
-    resolution r = resolve(trait, self, d);
-    if (!r.error.empty()) {
-        std::consteval_error_str("trait-not-satisfied", r.error);
+consteval auto check_cached(char const* error) -> bool {
+    if (error) {
+        std::consteval_error_str("trait-not-satisfied", error);
     }
-    return r.assoc[i];
+    return true;
 }
 
 // static_assert(traits::check<Range, Foo>()) -- as models<Foo, Range>, but
 // with the reason for failure as the diagnostic.
 template <class Trait, class T>
 consteval auto check() -> bool {
-    auto r = resolve(^^Trait, ^^T, Trait::__desc());
-    if (!r.error.empty()) {
-        std::consteval_error_str("trait-not-satisfied", r.error);
-    }
-    return true;
+    return check_cached(Trait::template __resolved<T>.error);
 }
 
 // ------------------------------------------------------- the trait macro --
@@ -598,8 +608,7 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
             }
             size_t index = nassoc++;
             ref_assoc += ^^{
-                using ${ it.name } = typename [: ::traits::detail::assoc(
-                    dealias(^^__self), ^^S, __desc(), $index) :];
+                using ${ it.name } = typename [: __resolved<S>.assoc[$index] :];
             };
             assoc_params += ^^{ class ${ it.name } };
             prev_params = assoc_params;
@@ -814,12 +823,16 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
             $defaults
             $dispatchers
 
+            template <class S>
+            static constexpr auto __resolved =
+                ::traits::detail::resolve_cached<$nassoc>(dealias(^^__self), ^^S, __desc());
+
             // S viewed through the trait. Its associated types are those of
             // S's conformance; its functions call the trait's dispatch, which
             // finds S's impl, its member, or the default.
             template <class S>
             struct ref {
-                static_assert(::traits::check<__self, S>());
+                static_assert(::traits::detail::check_cached(__resolved<S>.error));
                 S* __p;
                 $ref_assoc
                 $ref_members
@@ -827,8 +840,7 @@ consteval auto generate(token_sequence name, token_sequence body) -> token_seque
             };
 
             template <class S>
-            static constexpr bool __satisfied =
-                ::traits::detail::satisfied(dealias(^^__self), ^^S, __desc());
+            static constexpr bool __satisfied = (__resolved<S>.error == nullptr);
 
             $aliases
 
