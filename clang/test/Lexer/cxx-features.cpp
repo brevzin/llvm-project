@@ -117,7 +117,7 @@
 #error "wrong value for __cpp_conditional_explicit"
 #endif
 
-#if check(consteval, 0, 0, 0, 0, 202211, 202211, 202211)
+#if check(consteval, 0, 0, 0, 0, 202211, 202211, 202611)
 #error "wrong value for __cpp_consteval"
 #endif
 

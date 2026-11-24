@@ -84,6 +84,12 @@ def add_version_header(tc):
 #                   is only used when a feature isn't fully implemented. Once
 #                   you've fully implemented the feature, you should remove
 #                   this field.
+# fork_extension    An optional dict with the fields `value` and `guard`, for a
+#                   macro that this fork bumps beyond the latest Standard. When
+#                   `guard` holds, the macro has `value` instead of its
+#                   Standard value. `guard` is used both in <version> and in
+#                   the tests, so it may only depend on macros defined by the
+#                   compiler itself.
 # ================  ============================================================
 feature_test_macros = [
     add_version_header(x)
@@ -325,6 +331,13 @@ feature_test_macros = [
             "headers": ["functional"],
         },
         {
+            "name": "__cpp_lib_compile_time_messages",
+            "values": {"c++26": 202611},  # P2758 Emitting messages at compile time (not adopted)
+            "headers": ["debugging"],
+            "test_suite_guard": "__has_builtin(__builtin_constexpr_diag)",
+            "libcxx_guard": "__has_builtin(__builtin_constexpr_diag)",
+        },
+        {
             "name": "__cpp_lib_complex_udls",
             "values": {"c++14": 201309},
             "headers": ["complex"],
@@ -333,6 +346,28 @@ feature_test_macros = [
             "name": "__cpp_lib_concepts",
             "values": {"c++20": 202207},
             "headers": ["concepts"],
+        },
+        {
+            "name": "__cpp_lib_constant_template_args",
+            "values": {"c++26": 202611},  # P4340 Extending support for constant template parameters (not adopted)
+            "headers": [
+                "bitset",
+                "chrono",
+                "compare",
+                "complex",
+                "expected",
+                "format",
+                "functional",
+                "optional",
+                "span",
+                "string",
+                "string_view",
+                "tuple",
+                "variant",
+                "vector",
+            ],
+            "test_suite_guard": "defined(__cpp_nontype_template_args) && __cpp_nontype_template_args >= 202611L",
+            "libcxx_guard": "defined(__cpp_nontype_template_args) && __cpp_nontype_template_args >= 202611L",
         },
         {
             "name": "__cpp_lib_constant_wrapper",
@@ -409,6 +444,11 @@ feature_test_macros = [
             "name": "__cpp_lib_constexpr_memory",
             "values": {"c++20": 201811, "c++23": 202202},
             "headers": ["memory"],
+            # P4341 Another take on non-transient constexpr allocation (not adopted)
+            "fork_extension": {
+                "value": 202611,
+                "guard": "defined(__cpp_constexpr_dynamic_alloc) && __cpp_constexpr_dynamic_alloc >= 202611L",
+            },
         },
         {
             "name": "__cpp_lib_constexpr_new",
@@ -431,6 +471,11 @@ feature_test_macros = [
             "name": "__cpp_lib_constexpr_string",
             "values": {"c++20": 201907},
             "headers": ["string"],
+            # P4341 Another take on non-transient constexpr allocation (not adopted)
+            "fork_extension": {
+                "value": 202611,
+                "guard": "defined(__cpp_constexpr_dynamic_alloc) && __cpp_constexpr_dynamic_alloc >= 202611L",
+            },
         },
         {
             "name": "__cpp_lib_constexpr_string_view",
@@ -456,6 +501,11 @@ feature_test_macros = [
             "name": "__cpp_lib_constexpr_vector",
             "values": {"c++20": 201907},
             "headers": ["vector"],
+            # P4341 Another take on non-transient constexpr allocation (not adopted)
+            "fork_extension": {
+                "value": 202611,
+                "guard": "defined(__cpp_constexpr_dynamic_alloc) && __cpp_constexpr_dynamic_alloc >= 202611L",
+            },
         },
         {
             "name": "__cpp_lib_constrained_equality",
@@ -506,6 +556,13 @@ feature_test_macros = [
             "values": {"c++26": 202403}, # P2248R8: Enabling list-initialization for algorithms
             "headers": ["algorithm", "deque", "forward_list", "list", "ranges", "string", "vector"],
             "unimplemented": True,
+        },
+        {
+            "name": "__cpp_lib_define_static",
+            "values": {"c++26": 202506},  # P3491R3 define_static_{string,object,array}
+            "headers": ["meta"],
+            "test_suite_guard": "defined(__cpp_impl_reflection)",
+            "libcxx_guard": "defined(__cpp_impl_reflection)",
         },
         {
             "name": "__cpp_lib_destroying_delete",
@@ -1008,6 +1065,13 @@ feature_test_macros = [
             ],
         },
         {
+            "name": "__cpp_lib_noreturn_t",
+            "values": {"c++17": 202611},  # P3549 Diverging expressions (not adopted)
+            "headers": ["cstddef", "type_traits"],
+            "test_suite_guard": "defined(__cpp_diverging_expressions)",
+            "libcxx_guard": "defined(__cpp_diverging_expressions)",
+        },
+        {
             "name": "__cpp_lib_not_fn",
             "values": {
                 "c++17": 201603,
@@ -1162,6 +1226,13 @@ feature_test_macros = [
             "headers": ["ranges"],
         },
         {
+            "name": "__cpp_lib_ranges_operator_for",
+            "values": {"c++23": 202611},  # 'operator for' (not proposed)
+            "headers": ["ranges"],
+            "test_suite_guard": "defined(__cpp_operator_for)",
+            "libcxx_guard": "_LIBCPP_HAS_OPERATOR_FOR",
+        },
+        {
             "name": "__cpp_lib_ranges_repeat",
             "values": {"c++23": 202207},
             "headers": ["ranges"],
@@ -1220,6 +1291,15 @@ feature_test_macros = [
             "name": "__cpp_lib_reference_wrapper",
             "values": {"c++26": 202403}, # P2944R3: Comparisons for reference_wrapper
             "headers": ["functional"],
+        },
+        {
+            "name": "__cpp_lib_reflection",
+            # C++26 is 202603 (P2996R13, P3096R12, P3394R4, P3795R2). This fork
+            # adds extensions beyond it (not adopted).
+            "values": {"c++26": 202611},
+            "headers": ["meta"],
+            "test_suite_guard": "defined(__cpp_impl_reflection)",
+            "libcxx_guard": "defined(__cpp_impl_reflection)",
         },
         {
             "name": "__cpp_lib_remove_cvref",
@@ -1416,6 +1496,13 @@ feature_test_macros = [
             "libcxx_guard": "_LIBCPP_HAS_EXPERIMENTAL_SYNCSTREAM",
         },
         {
+            "name": "__cpp_lib_template_string",
+            "values": {"c++26": 202611},  # P3951 String interpolation with template strings (not adopted)
+            "headers": ["format"],
+            "test_suite_guard": "defined(__cpp_template_strings)",
+            "libcxx_guard": "_LIBCPP_HAS_TEMPLATE_STRINGS",
+        },
+        {
             "name": "__cpp_lib_text_encoding",
             "values": {
                 "c++26": 202306  # P1885R12 Naming Text Encodings to Demystify Them
@@ -1457,6 +1544,13 @@ feature_test_macros = [
             "name": "__cpp_lib_to_underlying",
             "values": {"c++23": 202102},
             "headers": ["utility"],
+        },
+        {
+            "name": "__cpp_lib_token_sequence",
+            "values": {"c++26": 202611},  # P4380 Token sequence injection (not adopted)
+            "headers": ["meta"],
+            "test_suite_guard": "defined(__cpp_token_sequences)",
+            "libcxx_guard": "defined(__cpp_token_sequences)",
         },
         {
             "name": "__cpp_lib_transformation_trait_aliases",
@@ -1538,8 +1632,10 @@ assert feature_test_macros == sorted(feature_test_macros, key=lambda tc: tc["nam
 for tc in feature_test_macros:
     assert tc["headers"] == sorted(tc["headers"]), tc
     assert ("libcxx_guard" in tc) == ("test_suite_guard" in tc), tc
-    valid_keys = ["name", "values", "headers", "libcxx_guard", "test_suite_guard", "unimplemented"]
+    valid_keys = ["name", "values", "headers", "libcxx_guard", "test_suite_guard", "unimplemented", "fork_extension"]
     assert all(key in valid_keys for key in tc.keys()), tc
+    if "fork_extension" in tc:
+        assert "test_suite_guard" not in tc and "unimplemented" not in tc, tc
 
 # Map from each header to the Lit annotations that should be used for
 # tests that include that header.
@@ -1557,6 +1653,10 @@ lit_markup = {
     "istream": ["UNSUPPORTED: no-localization"],
     "latch": ["UNSUPPORTED: no-threads"],
     "locale": ["UNSUPPORTED: no-localization"],
+    "meta": [
+        "UNSUPPORTED: c++03, c++11, c++14, c++17, c++20, c++23",
+        "ADDITIONAL_COMPILE_FLAGS: -freflection",
+    ],
     "mutex": ["UNSUPPORTED: no-threads"],
     "ostream": ["UNSUPPORTED: no-localization"],
     "print": ["UNSUPPORTED: no-filesystem"],
@@ -1671,8 +1771,24 @@ def produce_macros_definitions():
                 macro_definition=produce_macros_definition_for_std(std),
             )
         )
+    macros_definitions.append(produce_fork_extension_definitions())
 
     return "\n\n".join(macros_definitions)
+
+
+def produce_fork_extension_definitions():
+    result = "// Extensions in this fork, beyond the latest Standard."
+    for tc in feature_test_macros:
+        if "fork_extension" not in tc.keys():
+            continue
+        ext = tc["fork_extension"]
+        result += "\n#if %s\n" % ext["guard"]
+        result += "# undef  %s\n" % tc["name"]
+        line = "# define %s" % tc["name"]
+        line += " " * (55 - len(line))
+        result += line + " %sL\n" % ext["value"]
+        result += "#endif"
+    return result
 
 
 def chunks(l, n):
@@ -1709,6 +1825,11 @@ def produce_version_synopsis():
             result += line
             result += "\n"
             line = ""
+        if "fork_extension" in tc.keys():
+            result += "%s%sL // fork extension\n" % (
+                indent_to("", indent),
+                tc["fork_extension"]["value"],
+            )
         while True:
             prev_defined_std = get_std_before(tc["values"], prev_defined_std)
             if prev_defined_std is None:
@@ -1816,6 +1937,18 @@ test_types = {
 #    error "{name} should have the value {value} in {std}"
 #  endif
 """,
+    "fork_extension": """
+#  ifndef {name}
+#    error "{name} should be defined in {std}"
+#  endif
+#  if {guard}
+#    if {name} != {ext_value}
+#      error "{name} should have the value {ext_value} when the requirement '{guard}' is met!"
+#    endif
+#  elif {name} != {value}
+#    error "{name} should have the value {value} in {std}"
+#  endif
+""",
 }
 
 
@@ -1839,6 +1972,14 @@ def generate_std_test(test_list, std):
                 value=val,
                 std=std,
                 test_suite_guard=tc["test_suite_guard"],
+            )
+        elif "fork_extension" in tc.keys():
+            result += test_types["fork_extension"].format(
+                name=tc["name"],
+                value=val,
+                std=std,
+                guard=tc["fork_extension"]["guard"],
+                ext_value="%sL" % tc["fork_extension"]["value"],
             )
         else:
             result += test_types["defined"].format(name=tc["name"], value=val, std=std)

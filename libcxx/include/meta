@@ -441,6 +441,7 @@ template <reflection_range R1 = initializer_list<info>,
 #include <type_traits>
 #include <variant>
 #include <vector>
+#include <version>
 
 #if __has_feature(reflection)
 

@@ -695,8 +695,12 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     Builder.defineMacro("__cpp_variadic_using", "201611L");
     Builder.defineMacro("__cpp_aggregate_bases", "201603L");
     Builder.defineMacro("__cpp_structured_bindings", "202411L");
+    // P4340 (C++29 with reflection): class types opt into being constant
+    // template parameters via 'operator template'.
     Builder.defineMacro("__cpp_nontype_template_args",
-                        "201411L"); // (not latest)
+                        LangOpts.Reflection && LangOpts.CPlusPlus29
+                            ? "202611L"
+                            : "201411L"); // (not latest)
     Builder.defineMacro("__cpp_fold_expressions", "201603L");
     Builder.defineMacro("__cpp_guaranteed_copy_elision", "201606L");
     Builder.defineMacro("__cpp_nontype_template_parameter_auto", "201606L");
@@ -712,8 +716,13 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
 
     Builder.defineMacro("__cpp_concepts", "202002");
     Builder.defineMacro("__cpp_conditional_explicit", "201806L");
-    Builder.defineMacro("__cpp_consteval", "202211L");
-    Builder.defineMacro("__cpp_constexpr_dynamic_alloc", "201907L");
+    // C++26 gets consteval-only values (P4101R1, 202606L) and consteval
+    // variables (P4339, not adopted).
+    Builder.defineMacro("__cpp_consteval",
+                        LangOpts.CPlusPlus26 ? "202611L" : "202211L");
+    // P4341 (C++29): non-transient constexpr allocation.
+    Builder.defineMacro("__cpp_constexpr_dynamic_alloc",
+                        LangOpts.CPlusPlus29 ? "202611L" : "201907L");
     Builder.defineMacro("__cpp_constinit", "201907L");
 
     // Support for coroutines on 32-bit x86 Microsoft platforms is
@@ -738,22 +747,36 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     Builder.defineMacro("__cpp_auto_cast", "202110L");
     Builder.defineMacro("__cpp_explicit_this_parameter", "202110L");
   }
+  // C++26 reflection (P2996, P3394, P3096, P3795) and expansion statements
+  // (P1306), plus this fork's extensions.
+  //
+  // None of the fork's features are adopted, so there is no plenary date to
+  // use as their value: they all use 202611L, which is later than every C++26
+  // value, so that a bumped standard macro still compares greater.
+  if (LangOpts.Reflection) {
+    // C++26 is 202603L. Bumped for reflecting overload sets and for P4466
+    // (namespace-scope using-declarators are transparent to '^^').
+    Builder.defineMacro("__cpp_impl_reflection", "202611L");
+    // P4380: token sequences, their interpolation and injection, and the
+    // on_complete / on_template_defined / inject_members callbacks.
+    Builder.defineMacro("__cpp_token_sequences", "202611L");
+    // P4380: token sequence macros, 'name!(...)'.
+    Builder.defineMacro("__cpp_token_macros", "202611L");
+  }
+  if (LangOpts.ExpansionStatements)
+    Builder.defineMacro("__cpp_expansion_statements", "202506L");
+  if (LangOpts.TemplateStrings) // P3951
+    Builder.defineMacro("__cpp_template_strings", "202611L");
+  if (LangOpts.OperatorFor)
+    Builder.defineMacro("__cpp_operator_for", "202611L");
+
   // C++29 features.
-  if (LangOpts.DoExpressions) {
-    // P2806 asks for `__cpp_do_expressions`, but the paper is not adopted yet,
-    // so there is no plenary date to use as the value. Define it as 1, the way
-    // __cpp_modules above is defined, so that `#if __cpp_do_expressions` works
-    // today and the value can be set once WG21 fixes it.
-    Builder.defineMacro("__cpp_do_expressions", "1");
-  }
-  if (LangOpts.DivergingExpressions) {
-    // P3549, likewise not adopted: 1 for now.
-    Builder.defineMacro("__cpp_diverging_expressions", "1");
-  }
-  if (LangOpts.TemplateParameterBounds) {
-    // P2481, likewise not adopted: 1 for now.
-    Builder.defineMacro("__cpp_template_parameter_bounds", "1");
-  }
+  if (LangOpts.DoExpressions) // P2806
+    Builder.defineMacro("__cpp_do_expressions", "202611L");
+  if (LangOpts.DivergingExpressions) // P3549
+    Builder.defineMacro("__cpp_diverging_expressions", "202611L");
+  if (LangOpts.TemplateParameterBounds) // P2481
+    Builder.defineMacro("__cpp_template_parameter_bounds", "202611L");
 
   // We provide those C++23 features as extensions in earlier language modes, so
   // we also define their feature test macros.

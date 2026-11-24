@@ -26,7 +26,7 @@ template <typename T : Base> void f(T &&); // off-error {{bounded template param
 #else
 
 static_assert(__has_feature(template_parameter_bounds));
-static_assert(__cpp_template_parameter_bounds == 1);
+static_assert(__cpp_template_parameter_bounds == 202611L);
 
 namespace std {
 template <class T> struct remove_reference { using type = T; };

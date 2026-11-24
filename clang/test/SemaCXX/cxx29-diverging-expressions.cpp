@@ -10,7 +10,7 @@ static_assert(!__has_feature(diverging_expressions));
 #else
 
 static_assert(__has_feature(diverging_expressions));
-static_assert(__cpp_diverging_expressions == 1);
+static_assert(__cpp_diverging_expressions == 202611L);
 
 namespace std {
 using noreturn_t = decltype(throw 0);
