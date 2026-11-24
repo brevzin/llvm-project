@@ -16,3 +16,11 @@ FLAGS=(-std=c++2d -freflection -stdlib=libc++ -nostdinc++
   "$DIR/iter_example.cpp" -o "$DIR/iter_example"
 
 "$DIR/iter_example"
+
+"$B/bin/clang++" "${FLAGS[@]}" -fconsteval-plugin -fPIC -shared -O2 \
+  "$DIR/eq_plugin.cpp" -o "$DIR/libeq.so"
+
+"$B/bin/clang++" "${FLAGS[@]}" -fconsteval-plugin-load="$DIR/libeq.so" \
+  "$DIR/eq_example.cpp" -o "$DIR/eq_example"
+
+"$DIR/eq_example"

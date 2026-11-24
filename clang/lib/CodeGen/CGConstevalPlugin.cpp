@@ -184,7 +184,7 @@ void CodeGenModule::EmitConstevalPluginThunk(const FunctionDecl *FD) {
   if (!getLangOpts().ConstevalPlugin)
     return;
   if (!FD->isConsteval() || !FD->hasBody() || FD->isTemplated() ||
-      isa<CXXMethodDecl>(FD) ||
+      isa<CXXConstructorDecl, CXXDestructorDecl>(FD) ||
       getContext().getSourceManager().isInSystemHeader(FD->getLocation()))
     return;
 
@@ -211,10 +211,20 @@ void CodeGenModule::EmitConstevalPluginThunk(const FunctionDecl *FD) {
   llvm::Value *RetPtr = ThunkFn->getArg(1);
 
   CallArgList CallArgs;
+  unsigned ArgOffset = 0;
+  const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+  if (MD && MD->isInstance()) {
+    llvm::Value *ThisSlotPtr =
+        CGF.Builder.CreateConstInBoundsGEP1_64(PtrTy, ArgPtrsBase, 0);
+    llvm::Value *ThisAddr = CGF.Builder.CreateLoad(
+        Address(ThisSlotPtr, PtrTy, getPointerAlign()));
+    CallArgs.add(RValue::get(ThisAddr), MD->getThisType());
+    ArgOffset = 1;
+  }
   for (unsigned I = 0, N = FD->getNumParams(); I < N; ++I) {
     QualType ParamTy = FD->getParamDecl(I)->getType();
-    llvm::Value *SlotPtrPtr =
-        CGF.Builder.CreateConstInBoundsGEP1_64(PtrTy, ArgPtrsBase, I);
+    llvm::Value *SlotPtrPtr = CGF.Builder.CreateConstInBoundsGEP1_64(
+        PtrTy, ArgPtrsBase, I + ArgOffset);
     llvm::Value *ArgAddr = CGF.Builder.CreateLoad(
         Address(SlotPtrPtr, PtrTy, getPointerAlign()));
 
@@ -233,7 +243,9 @@ void CodeGenModule::EmitConstevalPluginThunk(const FunctionDecl *FD) {
     }
   }
 
-  const CGFunctionInfo &FnInfo = getTypes().arrangeGlobalDeclaration(FD);
+  const CGFunctionInfo &FnInfo =
+      (MD && MD->isInstance()) ? getTypes().arrangeCXXMethodDeclaration(MD)
+                               : getTypes().arrangeGlobalDeclaration(FD);
   llvm::Constant *CalleeAddr = GetAddrOfFunction(FD);
   CGCallee Callee = CGCallee::forDirect(CalleeAddr, GlobalDecl(FD));
 

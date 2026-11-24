@@ -9721,14 +9721,25 @@ public:
 
     // If this is an undefined consteval function and native consteval plugins
     // are loaded (-fconsteval-plugin-load=), try invoking the native plugin.
-    if (!Body && FD->isConsteval() && !This &&
+    if (!Body && FD->isConsteval() &&
         !Info.Ctx.getLangOpts().ConstevalPluginPaths.empty() &&
         Info.Ctx.getMetaActions()) {
       bool AllowInjection =
           (Info.EvalMode ==
            EvaluationMode::ConstantExpressionPlainlyConstantEvaluated);
       SmallVector<APValue, 8> EvalArgs;
-      EvalArgs.reserve(Args.size());
+      EvalArgs.reserve(Args.size() + (This ? 1 : 0));
+      if (This) {
+        auto *MD = dyn_cast<CXXMethodDecl>(FD);
+        if (MD && MD->isInstance()) {
+          APValue ThisVal;
+          QualType ThisObjTy = Info.Ctx.getCanonicalTagType(MD->getParent());
+          if (!handleLValueToRValueConversion(Info, E, ThisObjTy, *This,
+                                              ThisVal))
+            return false;
+          EvalArgs.push_back(std::move(ThisVal));
+        }
+      }
       for (const Expr *ArgE : Args) {
         APValue V;
         if (!Evaluate(V, Info, ArgE))

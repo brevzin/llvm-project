@@ -955,16 +955,34 @@ int clang::invokeConstevalPlugin(ASTContext &Ctx, MetaActions &Meta,
   CurrentHost = &Host;
 
   // Marshal each argument into a scratch buffer.
+  // For instance member functions, Args[0] is `*this`.
   SmallVector<const void *, 8> ArgPtrs;
   ArgPtrs.reserve(Args.size());
-  for (unsigned I = 0; I < Args.size() && I < FD->getNumParams(); ++I) {
+  const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+  unsigned ParamOffset = 0;
+  if (MD && MD->isInstance() && !Args.empty()) {
+    QualType ThisObjTy = Ctx.getCanonicalTagType(MD->getParent());
+    size_t Sz =
+        std::max<size_t>(8, Ctx.getTypeSizeInChars(ThisObjTy).getQuantity());
+    uint8_t *Buf = Host.ScratchAlloc.Allocate<uint8_t>(Sz);
+    std::memset(Buf, 0, Sz);
+    if (!marshalArg(Host, ThisObjTy, Args[0], Buf, Sz)) {
+      CurrentHost = PrevHost;
+      ErrorMsg = "unsupported receiver type for consteval plugin";
+      return 0;
+    }
+    ArgPtrs.push_back(Buf);
+    ParamOffset = 1;
+  }
+  for (unsigned I = 0; I + ParamOffset < Args.size() && I < FD->getNumParams();
+       ++I) {
     QualType ParamTy = FD->getParamDecl(I)->getType();
     if (ParamTy->isReferenceType())
       ParamTy = ParamTy.getNonReferenceType();
     size_t Sz = std::max<size_t>(8, Ctx.getTypeSizeInChars(ParamTy).getQuantity());
     uint8_t *Buf = Host.ScratchAlloc.Allocate<uint8_t>(Sz);
     std::memset(Buf, 0, Sz);
-    if (!marshalArg(Host, ParamTy, Args[I], Buf, Sz)) {
+    if (!marshalArg(Host, ParamTy, Args[I + ParamOffset], Buf, Sz)) {
       CurrentHost = PrevHost;
       ErrorMsg = "unsupported parameter type for consteval plugin";
       return 0;

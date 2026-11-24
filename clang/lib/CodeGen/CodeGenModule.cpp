@@ -7975,9 +7975,18 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
           DI->completeUnusedClass(*CRD);
     }
     // Emit any static data members, they may be definitions.
-    for (auto *I : CRD->decls())
+    for (auto *I : CRD->decls()) {
       if (isa<VarDecl>(I) || isa<CXXRecordDecl>(I) || isa<EnumDecl>(I))
         EmitTopLevelDecl(I);
+      else if (getLangOpts().ConstevalPlugin) {
+        if (auto *MD = dyn_cast<CXXMethodDecl>(I);
+            MD && MD->isConsteval() && MD->hasBody() && !MD->isTemplated() &&
+            !isa<CXXConstructorDecl, CXXDestructorDecl>(MD)) {
+          EmitGlobal(MD);
+          EmitConstevalPluginThunk(MD);
+        }
+      }
+    }
     break;
   }
     // No code generation needed.
