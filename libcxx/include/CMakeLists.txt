@@ -1068,6 +1068,7 @@ set(files
   memory
   memory_resource
   meta
+  meta_fwd
   mutex
   new
   numbers

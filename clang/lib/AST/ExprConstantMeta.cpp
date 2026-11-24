@@ -932,6 +932,16 @@ static bool transform_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                            bool AllowInjection, QualType ResultTy,
                            SourceRange Range, ArrayRef<Expr *> Args,
                            Decl *ContainingDecl);
+static bool display_string_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                              EvalFn Evaluator, DiagFn Diagnoser,
+                              bool AllowInjection, QualType ResultTy,
+                              SourceRange Range, ArrayRef<Expr *> Args,
+                              Decl *ContainingDecl);
+static bool is_convertible_type(APValue &Result, ASTContext &C,
+                                MetaActions &Meta, EvalFn Evaluator,
+                                DiagFn Diagnoser, bool AllowInjection,
+                                QualType ResultTy, SourceRange Range,
+                                ArrayRef<Expr *> Args, Decl *ContainingDecl);
 
 static bool token_type(APValue &Result, ASTContext &C, MetaActions &Meta,
                        EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
@@ -1171,6 +1181,8 @@ static constexpr Metafunction Metafunctions[] = {
     {Metafunction::MFRK_metaInfo, 1, 1, object_parameter_of},
     {Metafunction::MFRK_bool, 1, 1, is_closure_type},
     {Metafunction::MFRK_metaInfo, 2, 2, transform_type},
+    {Metafunction::MFRK_spliceFromArg, 3, 3, display_string_of},
+    {Metafunction::MFRK_bool, 3, 3, is_convertible_type},
 };
 constexpr const unsigned NumMetafunctions = sizeof(Metafunctions) /
                                             sizeof(Metafunction);
@@ -3254,6 +3266,137 @@ bool transform_type(APValue &Result, ASTContext &C, MetaActions &Meta,
     llvm_unreachable("unknown transform_type kind");
   }
   return SetAndSucceed(Result, makeReflection(QT));
+}
+
+bool display_string_of(APValue &Result, ASTContext &C, MetaActions &Meta,
+                       EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                       QualType ResultTy, SourceRange Range,
+                       ArrayRef<Expr *> Args, Decl *ContainingDecl) {
+  APValue R, IsUtf8V;
+  if (!Evaluator(R, Args[1], true) || !Evaluator(IsUtf8V, Args[2], true))
+    return true;
+  bool IsUtf8 = IsUtf8V.getInt().getBoolValue();
+
+  R = MaybeUnproxy(C, R);
+  std::string Out;
+  llvm::raw_string_ostream OS(Out);
+  PrintingPolicy Policy(C.getLangOpts());
+  Policy.SuppressTagKeyword = true;
+  Policy.Bool = true;
+
+  switch (R.getReflectionKind()) {
+  case ReflectionKind::Null:
+    Out = "(null-reflection)";
+    break;
+  case ReflectionKind::Namespace: {
+    const Decl *D = R.getReflectedNamespace();
+    if (isa<TranslationUnitDecl>(D))
+      Out = "(global-namespace)";
+    else if (const auto *NS = dyn_cast<NamespaceDecl>(D))
+      Out = NS->isAnonymousNamespace() ? "(anonymous-namespace)"
+                                       : NS->getNameAsString();
+    else if (const auto *NAD = dyn_cast<NamespaceAliasDecl>(D))
+      Out = NAD->getNameAsString();
+    break;
+  }
+  case ReflectionKind::Type: {
+    QualType QT = R.getReflectedType();
+    if (const auto *RD = QT->getAsCXXRecordDecl();
+        RD && (RD->isLambda() || RD->isAnonymousStructOrUnion())) {
+      Out = "(anonymous type)";
+    } else if (isTypeAlias(QT)) {
+      if (const auto *TD = dyn_cast<TypedefType>(QT.getTypePtr())) {
+        if (const auto *TAD = dyn_cast<TypeAliasDecl>(TD->getDecl())) {
+          if (auto *Spec = TAD->getDescribedAliasTemplate()) {
+            Out = Spec->getNameAsString();
+          } else {
+            QT.print(OS, Policy);
+          }
+        } else {
+          QT.print(OS, Policy);
+        }
+      } else {
+        QT.print(OS, Policy);
+      }
+    } else {
+      QT.print(OS, Policy);
+    }
+    break;
+  }
+  case ReflectionKind::Template: {
+    TemplateName TN = R.getReflectedTemplate();
+    if (const auto *TD = TN.getAsTemplateDecl()) {
+      if (const auto *FTD = dyn_cast<FunctionTemplateDecl>(TD)) {
+        if (FTD->getTemplatedDecl()->isOverloadedOperator()) {
+          Out = "operator template";
+          break;
+        }
+      }
+      TD->printName(OS, Policy);
+    } else {
+      TN.print(OS, Policy);
+    }
+    break;
+  }
+  case ReflectionKind::Declaration: {
+    const ValueDecl *VD = R.getReflectedDecl();
+    if (const auto *FD = dyn_cast<FunctionDecl>(VD)) {
+      if (FD->getDeclName().getNameKind() ==
+          DeclarationName::CXXLiteralOperatorName) {
+        OS << "operator\"\""
+           << FD->getDeclName().getCXXLiteralIdentifier()->getName();
+      } else {
+        FD->printName(OS, Policy);
+      }
+    } else {
+      VD->printName(OS, Policy);
+    }
+    break;
+  }
+  case ReflectionKind::Parameter:
+    R.getReflectedParameter()->printName(OS, Policy);
+    break;
+  case ReflectionKind::BaseSpecifier:
+    R.getReflectedBaseSpecifier()->getType().print(OS, Policy);
+    break;
+  case ReflectionKind::Value:
+    R.getReflectedValue().printPretty(OS, Policy,
+                                      R.getTypeOfReflectedResult(C), &C);
+    break;
+  case ReflectionKind::Object:
+    R.getReflectedObject().printPretty(OS, Policy,
+                                       R.getTypeOfReflectedResult(C), &C);
+    break;
+  default:
+    Out = "(reflection)";
+    break;
+  }
+
+  Expr *StrLit = makeStrLiteral(Out, C, IsUtf8);
+  APValue::LValuePathEntry Path[1] = {APValue::LValuePathEntry::ArrayIndex(0)};
+  return SetAndSucceed(Result,
+                       APValue(StrLit, CharUnits::Zero(), Path, false));
+}
+
+bool is_convertible_type(APValue &Result, ASTContext &C, MetaActions &Meta,
+                         EvalFn Evaluator, DiagFn Diagnoser,
+                         bool AllowInjection, QualType ResultTy,
+                         SourceRange Range, ArrayRef<Expr *> Args,
+                         Decl *ContainingDecl) {
+  APValue FromV, ToV, NothrowV;
+  if (!Evaluator(FromV, Args[0], true) || !Evaluator(ToV, Args[1], true) ||
+      !Evaluator(NothrowV, Args[2], true))
+    return true;
+  if (!FromV.isReflectedType())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a type",
+                                  DescriptionOf(FromV));
+  if (!ToV.isReflectedType())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a type",
+                                  DescriptionOf(ToV));
+  bool Res = Meta.IsConvertibleType(
+      FromV.getReflectedType(), ToV.getReflectedType(),
+      NothrowV.getInt().getBoolValue(), Range.getBegin());
+  return SetAndSucceed(Result, makeBool(C, Res));
 }
 
 // tokens_append(token array, token array or token): the first followed by

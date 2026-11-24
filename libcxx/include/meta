@@ -633,6 +633,8 @@ enum : unsigned {
   __metafn_object_parameter_of,
   __metafn_is_closure_type,
   __metafn_transform_type,
+  __metafn_display_string_of,
+  __metafn_is_convertible_type,
 };
 
 consteval auto __workaround_expand_compiler_builtins(info type) -> info;
@@ -2256,11 +2258,11 @@ consteval auto is_base_of_type(info r, info s) -> bool {
 }
 
 consteval auto is_convertible_type(info r, info s) -> bool {
-  return extract<bool>(substitute(^^is_convertible_v, {r, s}));
+  return __metafunction(detail::__metafn_is_convertible_type, r, s, false);
 }
 
 consteval auto is_nothrow_convertible_type(info r, info s) -> bool {
-  return extract<bool>(substitute(^^is_nothrow_convertible_v, {r, s}));
+  return __metafunction(detail::__metafn_is_convertible_type, r, s, true);
 }
 
 // TODO(P2996): Not yet implemented in libc++.
@@ -3620,11 +3622,13 @@ consteval auto pretty_printer<CharT>::tprint_impl::render() -> string_t {
 }  // namespace detail
 
 consteval auto display_string_of(info R) -> string_view {
-  return detail::pretty_printer<char>::print(R);
+  return __metafunction(detail::__metafn_display_string_of, ^^const char *, R,
+                        false);
 }
 
 consteval auto u8display_string_of(info R) -> u8string_view {
-  return detail::pretty_printer<char8_t>::print(R);
+  return __metafunction(detail::__metafn_display_string_of, ^^const char8_t *,
+                        R, true);
 }
 
 // helper for building up delimited lists of token sequences

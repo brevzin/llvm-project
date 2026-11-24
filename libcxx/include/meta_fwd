@@ -1,0 +1,39 @@
+// -*- C++ -*-
+//===----------------------------------------------------------------------===//
+//
+// Copyright 2026 Jump Trading LLC
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// Lightweight forward header for consumer TUs using independently compiled
+// consteval plugins (-fconsteval-plugin-load=). Pulls in zero STL headers.
+
+#ifndef _LIBCPP_META_FWD
+#define _LIBCPP_META_FWD
+
+#if !defined(_LIBCPP_META) && __has_feature(reflection)
+
+#include <__config>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+namespace meta {
+inline namespace reflection_v2 {
+
+using info = decltype(^^int);
+
+class token_sequence {
+public:
+  constexpr token_sequence() noexcept = default;
+};
+
+} // namespace reflection_v2
+} // namespace meta
+_LIBCPP_END_NAMESPACE_STD
+
+#endif // !defined(_LIBCPP_META) && __has_feature(reflection)
+
+#endif // _LIBCPP_META_FWD

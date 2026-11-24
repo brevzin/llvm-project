@@ -6,10 +6,11 @@
 
 #include <cstddef>
 #include <iterator>
+#include <meta_fwd>
 
 namespace iface {
 
-using info = decltype(^^int);
+using std::meta::info;
 
 // Probe templates for the adaptor path (substituted via reflection by the plugin).
 template <class B> constexpr bool base_can_deref = requires(B const& b) { *b; };

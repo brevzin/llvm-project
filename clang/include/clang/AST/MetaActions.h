@@ -217,6 +217,10 @@ public:
                                         Decl *ContainingDecl,
                                         SourceLocation DefinitionLoc) = 0;
 
+  // Evaluates std::is_convertible_v<From, To> (or is_nothrow_convertible_v).
+  virtual bool IsConvertibleType(QualType From, QualType To, bool Nothrow,
+                                 SourceLocation Loc) = 0;
+
                         // ============================
                         // Annotation Synthesis Support
                         // ============================

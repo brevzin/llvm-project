@@ -656,6 +656,18 @@ public:
     return E.isInvalid() ? nullptr : E.get();
   }
 
+  bool IsConvertibleType(QualType From, QualType To, bool Nothrow,
+                         SourceLocation Loc) override {
+    TypeSourceInfo *FromTSI = S.Context.getTrivialTypeSourceInfo(From, Loc);
+    TypeSourceInfo *ToTSI = S.Context.getTrivialTypeSourceInfo(To, Loc);
+    ExprResult Res = S.BuildTypeTrait(
+        Nothrow ? BTT_IsNothrowConvertible : BTT_IsConvertible, Loc,
+        {FromTSI, ToTSI}, Loc);
+    if (Res.isInvalid())
+      return false;
+    return cast<TypeTraitExpr>(Res.get())->getBoolValue();
+  }
+
   Expr *TestExpression(TokenSequenceData TSD, SourceLocation Loc) override {
     if (!S.CanParseSpeculativeExpression())
       return nullptr;
