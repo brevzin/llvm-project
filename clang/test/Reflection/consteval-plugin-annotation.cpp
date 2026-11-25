@@ -21,6 +21,7 @@ struct AddTag {
   consteval auto inject_members(info) const -> std::meta::token_sequence {
     int v = value;
     return ^^{
+    public:
       static constexpr int tag = \(v);
     };
   }
@@ -36,7 +37,7 @@ struct AddTag {
   consteval auto inject_members(info) const -> std::meta::token_sequence;
 };
 
-struct [[=AddTag{42}]] S {
+class [[=AddTag{42}]] S {
   int x;
 };
 
