@@ -3262,6 +3262,8 @@ bool transform_type(APValue &Result, ASTContext &C, MetaActions &Meta,
     if (QT->isVoidType() || IsRefableFunc(QT))
       QT = C.getPointerType(QT.getNonReferenceType());
     break;
+  case 12: // the type itself (whatever it was named by)
+    break;
   default:
     llvm_unreachable("unknown transform_type kind");
   }

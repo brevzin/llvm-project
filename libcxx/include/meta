@@ -2251,12 +2251,9 @@ consteval auto extent(info r, unsigned i = 0) -> size_t {
 }
 
 consteval auto is_same_type(info r, info s) -> bool {
-  return __metafunction(detail::__metafn_transform_type, r, size_t(2)) ==
-             __metafunction(detail::__metafn_transform_type, r, size_t(2)) &&
-         __metafunction(detail::__metafn_transform_type, s, size_t(2)) ==
-             __metafunction(detail::__metafn_transform_type, s, size_t(2)) &&
-         __metafunction(detail::__metafn_underlying_entity_of, r) ==
-             __metafunction(detail::__metafn_underlying_entity_of, s);
+  // (Transformation 12 is none: each type itself, whatever it was named by.)
+  return __metafunction(detail::__metafn_transform_type, r, size_t(12)) ==
+         __metafunction(detail::__metafn_transform_type, s, size_t(12));
 }
 
 consteval auto is_base_of_type(info r, info s) -> bool {
