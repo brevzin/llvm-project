@@ -2250,7 +2250,8 @@ consteval auto is_same_type(info r, info s) -> bool {
              __metafunction(detail::__metafn_transform_type, r, size_t(2)) &&
          __metafunction(detail::__metafn_transform_type, s, size_t(2)) ==
              __metafunction(detail::__metafn_transform_type, s, size_t(2)) &&
-         dealias(r) == dealias(s);
+         __metafunction(detail::__metafn_underlying_entity_of, r) ==
+             __metafunction(detail::__metafn_underlying_entity_of, s);
 }
 
 consteval auto is_base_of_type(info r, info s) -> bool {
