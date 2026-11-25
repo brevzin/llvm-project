@@ -9210,6 +9210,198 @@ static bool handleLValueToRValueBitCast(EvalInfo &Info, APValue &DestValue,
   return handleRValueToRValueBitCast(Info, DestValue, SourceRValue, BCE);
 }
 
+//===----------------------------------------------------------------------===//
+// Native consteval plugins (-fconsteval-plugin-load=)
+//===----------------------------------------------------------------------===//
+
+namespace {
+/// What invoking a plugin needs of this evaluation: reading the characters a
+/// pointer points into, and forming a pointer into the same array again.
+class PluginEvalHooks final : public ConstevalPluginHooks {
+  EvalInfo &Info;
+  const Expr *E;
+
+public:
+  PluginEvalHooks(EvalInfo &Info, const Expr *E) : Info(Info), E(E) {}
+
+  bool readCharArray(const APValue &Ptr, QualType CharTy,
+                     SmallVectorImpl<char> &Bytes, uint64_t &Index,
+                     APValue &First) override {
+    ASTContext &C = Info.Ctx;
+    if (!Ptr.isLValue() || Ptr.isNullPointer() ||
+        C.getTypeSizeInChars(CharTy).getQuantity() != 1)
+      return false;
+    const auto *SL = dyn_cast_or_null<StringLiteral>(
+        Ptr.getLValueBase().dyn_cast<const Expr *>());
+
+    LValue LV;
+    LV.setFrom(C, Ptr);
+    uint64_t Size = 0;
+    bool WholeLiteral = false;
+    if (LV.Designator.Invalid) {
+      // A pointer into a string literal that does not say where (as a
+      // metafunction returning a string gives).
+      if (!SL || SL->getCharByteWidth() != 1)
+        return false;
+      const ConstantArrayType *CAT = C.getAsConstantArrayType(SL->getType());
+      Index = Ptr.getLValueOffset().getQuantity();
+      Size = CAT->getZExtSize();
+      if (Index > Size)
+        return false;
+      LV.set(SL);
+      LV.addArray(Info, E, CAT);
+      WholeLiteral = true;
+    } else {
+      if (LV.Designator.isMostDerivedAnUnsizedArray() ||
+          LV.Designator.MostDerivedType.isNull() ||
+          C.getTypeSizeInChars(LV.Designator.MostDerivedType).getQuantity() !=
+              1)
+        return false;
+      auto [Before, After] = LV.Designator.validIndexAdjustments();
+      Index = Before;
+      Size = Before + After;
+      if (Index &&
+          !HandleLValueArrayAdjustment(Info, E, LV, CharTy, -int64_t(Index)))
+        return false;
+      WholeLiteral = SL && SL->getCharByteWidth() == 1 &&
+                     LV.Designator.Entries.size() == 1;
+    }
+    LV.moveInto(First);
+
+    Bytes.clear();
+    if (WholeLiteral) {
+      StringRef Str = SL->getBytes();
+      Bytes.append(Str.begin(),
+                   Str.begin() + std::min<size_t>(Str.size(), Size));
+      Bytes.resize(Size, '\0');
+      return true;
+    }
+    // An element that cannot be read (it is uninitialized, say) is one the
+    // plugin has no business reading either: it gets a zero, and nothing is
+    // said about it here.
+    SmallVectorImpl<PartialDiagnosticAt> *SavedDiag = Info.EvalStatus.Diag;
+    Info.EvalStatus.Diag = nullptr;
+    Bytes.resize(Size, '\0');
+    for (uint64_t I = 0; I != Size; ++I) {
+      APValue Ch;
+      if (handleLValueToRValueConversion(Info, E, CharTy, LV, Ch) && Ch.isInt())
+        Bytes[I] = static_cast<char>(Ch.getInt().getZExtValue());
+      if (I + 1 != Size && !HandleLValueArrayAdjustment(Info, E, LV, CharTy, 1))
+        break;
+    }
+    Info.EvalStatus.Diag = SavedDiag;
+    return true;
+  }
+
+  bool offsetCharPointer(const APValue &First, QualType CharTy, uint64_t Index,
+                         APValue &Result) override {
+    LValue LV;
+    LV.setFrom(Info.Ctx, First);
+    if (Index &&
+        !HandleLValueArrayAdjustment(Info, E, LV, CharTy, int64_t(Index)))
+      return false;
+    LV.moveInto(Result);
+    return true;
+  }
+};
+} // namespace
+
+/// Say why the call to \p FD, which a plugin defines, failed.
+static void DiagnosePluginFailure(EvalInfo &Info, SourceLocation Loc,
+                                  const FunctionDecl *FD,
+                                  const ConstevalPluginFailure &Failure) {
+  if (Failure.IsUserError) {
+    if (Failure.Tag.empty())
+      Info.FFDiag(Loc, diag::note_constexpr_message) << Failure.Message;
+    else
+      Info.FFDiag(Loc, diag::note_constexpr_message_tag)
+          << Failure.Tag << Failure.Message;
+    return;
+  }
+  Info.FFDiag(Loc, diag::note_consteval_plugin_failed)
+      << FD << !Failure.Message.empty() << Failure.Message;
+  Info.addNotes(Failure.Notes);
+}
+
+/// Call \p FD -- a function without a definition here that a loaded plugin
+/// defines -- for the call \p E, whose arguments have been evaluated into
+/// \p Call.
+static ConstevalPluginResult
+CallConstevalPlugin(EvalInfo &Info, const Expr *E, const FunctionDecl *FD,
+                    const LValue *This, CallRef Call, APValue &Result) {
+  ASTContext &C = Info.Ctx;
+  if (!C.getMetaActions() || !hasConstevalPluginSymbol(C, FD))
+    return ConstevalPluginResult::NotFound;
+  if (Info.checkingPotentialConstantExpression())
+    return ConstevalPluginResult::Failure;
+
+  SourceLocation Loc = E->getExprLoc();
+  auto Unsupported = [&](const Twine &Why) {
+    ConstevalPluginFailure Failure;
+    Failure.Message = Why.str();
+    DiagnosePluginFailure(Info, Loc, FD, Failure);
+    return ConstevalPluginResult::Failure;
+  };
+
+  // The values of the parameters: what the plugin is given. It cannot change
+  // anything here, so it is not given anything it could.
+  SmallVector<APValue, 8> Args;
+  if (const auto *MD = dyn_cast<CXXMethodDecl>(FD);
+      MD && MD->isImplicitObjectMemberFunction()) {
+    if (!This)
+      return Unsupported("there is no object to call it on");
+    if (!MD->isConst())
+      return Unsupported("a member function that is not const cannot be "
+                         "called in a plugin (what it did to the object "
+                         "would be lost)");
+    APValue ThisVal;
+    if (!handleLValueToRValueConversion(
+            Info, E, C.getCanonicalTagType(MD->getParent()), *This, ThisVal))
+      return ConstevalPluginResult::Failure;
+    Args.push_back(std::move(ThisVal));
+  }
+  CallStackFrame *ArgFrame = Info.getCallFrameAndDepth(Call.CallIndex).first;
+  for (const ParmVarDecl *PVD : FD->parameters()) {
+    const APValue *Slot =
+        ArgFrame->getTemporary(Call.getOrigParam(PVD), Call.Version);
+    if (!Slot) {
+      Info.FFDiag(E);
+      return ConstevalPluginResult::Failure;
+    }
+    QualType PT = PVD->getType();
+    if (!PT->isReferenceType()) {
+      Args.push_back(*Slot);
+      continue;
+    }
+    QualType Referent = PT.getNonReferenceType();
+    if (PT->isLValueReferenceType() && !Referent.isConstQualified())
+      return Unsupported(
+          "parameter " +
+          (PVD->getIdentifier() ? "'" + PVD->getName() + "'"
+                                : Twine(PVD->getFunctionScopeIndex() + 1)) +
+          " is a reference to non-const, which cannot be passed to a plugin "
+          "(what it did to the argument would be lost)");
+    LValue LV;
+    LV.setFrom(C, *Slot);
+    APValue V;
+    if (!handleLValueToRValueConversion(Info, E, Referent, LV, V))
+      return ConstevalPluginResult::Failure;
+    Args.push_back(std::move(V));
+  }
+
+  PluginEvalHooks Hooks(Info, E);
+  ConstevalPluginFailure Failure;
+  bool AllowInjection =
+      Info.EvalMode ==
+      EvaluationMode::ConstantExpressionPlainlyConstantEvaluated;
+  ConstevalPluginResult R = invokeConstevalPlugin(
+      C, *C.getMetaActions(), FD, Loc, Info.ContainingDecl, AllowInjection,
+      &Info.EvalStatus, Hooks, Args, Result, Failure);
+  if (R == ConstevalPluginResult::Failure)
+    DiagnosePluginFailure(Info, Loc, FD, Failure);
+  return R;
+}
+
 template <class Derived>
 class ExprEvaluatorBase
   : public ConstStmtVisitor<Derived, bool> {
@@ -9722,48 +9914,14 @@ public:
     // If this is an undefined consteval function and native consteval plugins
     // are loaded (-fconsteval-plugin-load=), try invoking the native plugin.
     if (!Body && FD->isConsteval() &&
-        !Info.Ctx.getLangOpts().ConstevalPluginPaths.empty() &&
-        Info.Ctx.getMetaActions()) {
-      bool AllowInjection =
-          (Info.EvalMode ==
-           EvaluationMode::ConstantExpressionPlainlyConstantEvaluated);
-      SmallVector<APValue, 8> EvalArgs;
-      EvalArgs.reserve(Args.size() + (This ? 1 : 0));
-      if (This) {
-        auto *MD = dyn_cast<CXXMethodDecl>(FD);
-        if (MD && MD->isInstance()) {
-          APValue ThisVal;
-          QualType ThisObjTy = Info.Ctx.getCanonicalTagType(MD->getParent());
-          if (!handleLValueToRValueConversion(Info, E, ThisObjTy, *This,
-                                              ThisVal))
-            return false;
-          EvalArgs.push_back(std::move(ThisVal));
-        }
-      }
-      for (const Expr *ArgE : Args) {
-        APValue V;
-        if (!Evaluate(V, Info, ArgE))
-          return false;
-        EvalArgs.push_back(std::move(V));
-      }
-      std::string PluginTag, PluginErr;
-      int Status = invokeConstevalPlugin(
-          Info.Ctx, *Info.Ctx.getMetaActions(), FD, Loc, Info.ContainingDecl,
-          AllowInjection, &Info.EvalStatus, EvalArgs, Result, PluginTag,
-          PluginErr);
-      if (Status == 1)
+        !Info.Ctx.getLangOpts().ConstevalPluginPaths.empty()) {
+      switch (CallConstevalPlugin(Info, E, FD, This, Call, Result)) {
+      case ConstevalPluginResult::Success:
         return CallScope.destroy();
-      if (Status == 0) {
-        if (!PluginErr.empty()) {
-          if (PluginTag.empty())
-            Info.FFDiag(Loc, diag::note_constexpr_message) << PluginErr;
-          else
-            Info.FFDiag(Loc, diag::note_constexpr_message_tag)
-                << PluginTag << PluginErr;
-        } else {
-          Info.FFDiag(Loc);
-        }
+      case ConstevalPluginResult::Failure:
         return false;
+      case ConstevalPluginResult::NotFound:
+        break;
       }
     }
 
@@ -11732,115 +11890,8 @@ public:
       return false;
     }
 
-    TokenSequenceData TSD = Operand.getTokenSequence();
-
-    // Convert tokens to string, preserving whitespace using Token::hasLeadingSpace().
-    std::string ResultStr;
-    llvm::raw_string_ostream OS(ResultStr);
-    PrintingPolicy Policy(Info.Ctx.getLangOpts());
-    // Pretty-print an interpolated expression: a resolved value (a
-    // ConstantExpr carrying its result) by that value, a macro argument
-    // through its opaque value to the argument as written.
-    auto PrintExpr = [&](const Expr *Ex) {
-      if (const auto *CE = dyn_cast<ConstantExpr>(Ex);
-          CE && CE->hasAPValueResult()) {
-        CE->getAPValueResult().printPretty(OS, Info.Ctx, CE->getType());
-        return;
-      }
-      if (const auto *OVE = dyn_cast<OpaqueValueExpr>(Ex))
-        if (const Expr *Src = OVE->getSourceExpr())
-          Ex = Src;
-      Ex->printPretty(OS, nullptr, Policy);
-    };
-    // Where each token's text starts in ResultStr. A token made by the
-    // program (std::meta::id, an interpolation) has no leading space to keep,
-    // so text that would lex differently run together gets one anyway.
-    SmallVector<size_t, 64> Starts;
-    auto StillSeparate = [&] {
-      // Lex from a few tokens back (far enough for '...', '<=>' and '%:%:'
-      // to form across the boundaries), and see that each token still starts
-      // where it did.
-      size_t First = Starts.size() > 3 ? Starts.size() - 3 : 0;
-      const char *Begin = ResultStr.data() + Starts[First];
-      Lexer L(SourceLocation(), Info.Ctx.getLangOpts(), Begin, Begin,
-              ResultStr.data() + ResultStr.size());
-      size_t Next = First;
-      Token Lexed;
-      while (Next != Starts.size()) {
-        bool AtEnd = L.LexFromRawLexer(Lexed);
-        if (Lexed.is(tok::eof))
-          break;
-        // (The lexer's locations are offsets from Begin.)
-        size_t Offset = Starts[First] + Lexed.getLocation().getRawEncoding();
-        if (Offset > Starts[Next])
-          return false;
-        if (Offset == Starts[Next])
-          ++Next;
-        if (AtEnd)
-          break;
-      }
-      return Next == Starts.size();
-    };
-    for (const Token &Tok : TSD) {
-      // Add space if this token had leading space (preserves original spacing).
-      if (!Starts.empty() && Tok.hasLeadingSpace())
-        ResultStr += ' ';
-      size_t Start = ResultStr.size();
-
-      // Get the token's text representation. Annotation tokens (interpolated
-      // types, expressions, templates, declaration descriptions) render as
-      // source-like text -- stringize exists for humans to read.
-      if (Tok.is(tok::annot_typename)) {
-        QualType::getFromOpaquePtr(Tok.getAnnotationValue()).print(OS, Policy);
-      } else if (Tok.isOneOf(tok::annot_primary_expr,
-                             tok::annot_token_seq_expr)) {
-        // An interpolated argument or value. (A resolved *value*
-        // interpolation keeps the annot_token_seq_expr kind, only its
-        // annotation value changes; an interpolation belonging to a nested,
-        // not-yet-evaluated literal is raw tokens, not an annotation.)
-        PrintExpr(static_cast<const Expr *>(Tok.getAnnotationValue()));
-      } else if (Tok.is(tok::annot_template_name)) {
-        TemplateName::getFromVoidPointer(Tok.getAnnotationValue())
-            .print(OS, Policy);
-      } else if (Tok.is(tok::annot_decl_spec)) {
-        const auto *FDS =
-            static_cast<const FunctionDeclSpec *>(Tok.getAnnotationValue());
-        // (A function type's description clones an implicit prototype.)
-        if (FDS->Source->isImplicit())
-          OS << "<declaration of function type '"
-             << cast<FunctionDecl>(FDS->Source)->getType().getAsString(Policy)
-             << "'>";
-        else
-          OS << "<declaration of '" << FDS->Source->getQualifiedNameAsString()
-             << "'>";
-      } else if (Tok.is(tok::annot_template_param_spec)) {
-        const auto *TPS = static_cast<const TemplateParamListSpec *>(
-            Tok.getAnnotationValue());
-        OS << "<template parameters of '"
-           << TPS->Spec->Source->getQualifiedNameAsString() << "'>";
-      } else if (Tok.isAnnotation()) {
-        OS << "<annotation>";
-      } else if (Tok.isLiteral() && Tok.getLiteralData()) {
-        ResultStr.append(Tok.getLiteralData(), Tok.getLength());
-      } else if (const IdentifierInfo *II = Tok.getIdentifierInfo()) {
-        ResultStr += II->getName();
-      } else if (const char *Sp = tok::getPunctuatorSpelling(Tok.getKind())) {
-        ResultStr += Sp;
-      } else if (Tok.is(tok::unknown) && Tok.getLength() == 1 &&
-                 Tok.getLocation().isValid()) {
-        // The '\' of an interpolation belonging to a nested literal lexes as
-        // a single-character unknown token; spell it from the source.
-        ResultStr += *Info.Ctx.getSourceManager().getCharacterData(
-            Tok.getLocation());
-      }
-      if (ResultStr.size() == Start)
-        continue;
-      Starts.push_back(Start);
-      if (Starts.size() > 1 && !Tok.hasLeadingSpace() && !StillSeparate()) {
-        ResultStr.insert(Start, 1, ' ');
-        ++Starts.back();
-      }
-    }
+    std::string ResultStr =
+        StringizeTokenSequence(Info.Ctx, Operand.getTokenSequence());
 
     // Create a string literal with the result.
     QualType CharTy = Info.Ctx.CharTy.withConst();
@@ -23671,19 +23722,240 @@ static tok::TokenKind tokenKindForOverloadedOperator(OverloadedOperatorKind OO) 
   }
 }
 
-/// Interpolate one '\(e)' -- the annotation token \p SrcTok, whose
-/// expression is \p SubExpr -- appending the tokens it stands for to
-/// \p NewTokens.
-static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
-                              Expr *SubExpr,
-                              SmallVectorImpl<Token> &NewTokens) {
-  // Evaluate the expression in the current constexpr context.
-  APValue Val;
-  QualType ExprTy = SubExpr->getType();
+} // namespace
+
+std::string clang::StringizeTokenSequence(const ASTContext &C,
+                                          TokenSequenceData TSD) {
+  // Convert tokens to string, preserving whitespace using
+  // Token::hasLeadingSpace().
+  std::string ResultStr;
+  llvm::raw_string_ostream OS(ResultStr);
+  PrintingPolicy Policy(C.getLangOpts());
+  // Pretty-print an interpolated expression: a resolved value (a
+  // ConstantExpr carrying its result) by that value, a macro argument
+  // through its opaque value to the argument as written.
+  auto PrintExpr = [&](const Expr *Ex) {
+    if (const auto *CE = dyn_cast<ConstantExpr>(Ex);
+        CE && CE->hasAPValueResult()) {
+      CE->getAPValueResult().printPretty(OS, C, CE->getType());
+      return;
+    }
+    if (const auto *OVE = dyn_cast<OpaqueValueExpr>(Ex))
+      if (const Expr *Src = OVE->getSourceExpr())
+        Ex = Src;
+    Ex->printPretty(OS, nullptr, Policy);
+  };
+  // Where each token's text starts in ResultStr. A token made by the
+  // program (std::meta::id, an interpolation) has no leading space to keep,
+  // so text that would lex differently run together gets one anyway.
+  SmallVector<size_t, 64> Starts;
+  auto StillSeparate = [&] {
+    // Lex from a few tokens back (far enough for '...', '<=>' and '%:%:'
+    // to form across the boundaries), and see that each token still starts
+    // where it did.
+    size_t First = Starts.size() > 3 ? Starts.size() - 3 : 0;
+    const char *Begin = ResultStr.data() + Starts[First];
+    Lexer L(SourceLocation(), C.getLangOpts(), Begin, Begin,
+            ResultStr.data() + ResultStr.size());
+    size_t Next = First;
+    Token Lexed;
+    while (Next != Starts.size()) {
+      bool AtEnd = L.LexFromRawLexer(Lexed);
+      if (Lexed.is(tok::eof))
+        break;
+      // (The lexer's locations are offsets from Begin.)
+      size_t Offset = Starts[First] + Lexed.getLocation().getRawEncoding();
+      if (Offset > Starts[Next])
+        return false;
+      if (Offset == Starts[Next])
+        ++Next;
+      if (AtEnd)
+        break;
+    }
+    return Next == Starts.size();
+  };
+  for (const Token &Tok : TSD) {
+    // Add space if this token had leading space (preserves original spacing).
+    if (!Starts.empty() && Tok.hasLeadingSpace())
+      ResultStr += ' ';
+    size_t Start = ResultStr.size();
+
+    // Get the token's text representation. Annotation tokens (interpolated
+    // types, expressions, templates, declaration descriptions) render as
+    // source-like text -- stringize exists for humans to read.
+    if (Tok.is(tok::annot_typename)) {
+      QualType::getFromOpaquePtr(Tok.getAnnotationValue()).print(OS, Policy);
+    } else if (Tok.isOneOf(tok::annot_primary_expr,
+                           tok::annot_token_seq_expr)) {
+      // An interpolated argument or value. (A resolved *value*
+      // interpolation keeps the annot_token_seq_expr kind, only its
+      // annotation value changes; an interpolation belonging to a nested,
+      // not-yet-evaluated literal is raw tokens, not an annotation.)
+      PrintExpr(static_cast<const Expr *>(Tok.getAnnotationValue()));
+    } else if (Tok.is(tok::annot_template_name)) {
+      TemplateName::getFromVoidPointer(Tok.getAnnotationValue())
+          .print(OS, Policy);
+    } else if (Tok.is(tok::annot_decl_spec)) {
+      const auto *FDS =
+          static_cast<const FunctionDeclSpec *>(Tok.getAnnotationValue());
+      // (A function type's description clones an implicit prototype.)
+      if (FDS->Source->isImplicit())
+        OS << "<declaration of function type '"
+           << cast<FunctionDecl>(FDS->Source)->getType().getAsString(Policy)
+           << "'>";
+      else
+        OS << "<declaration of '" << FDS->Source->getQualifiedNameAsString()
+           << "'>";
+    } else if (Tok.is(tok::annot_template_param_spec)) {
+      const auto *TPS =
+          static_cast<const TemplateParamListSpec *>(Tok.getAnnotationValue());
+      OS << "<template parameters of '"
+         << TPS->Spec->Source->getQualifiedNameAsString() << "'>";
+    } else if (Tok.isAnnotation()) {
+      OS << "<annotation>";
+    } else if (Tok.isLiteral() && Tok.getLiteralData()) {
+      ResultStr.append(Tok.getLiteralData(), Tok.getLength());
+    } else if (const IdentifierInfo *II = Tok.getIdentifierInfo()) {
+      ResultStr += II->getName();
+    } else if (const char *Sp = tok::getPunctuatorSpelling(Tok.getKind())) {
+      ResultStr += Sp;
+    } else if (Tok.is(tok::unknown) && Tok.getLength() == 1 &&
+               Tok.getLocation().isValid()) {
+      // The '\' of an interpolation belonging to a nested literal lexes as
+      // a single-character unknown token; spell it from the source.
+      ResultStr += *C.getSourceManager().getCharacterData(Tok.getLocation());
+    }
+    if (ResultStr.size() == Start)
+      continue;
+    Starts.push_back(Start);
+    if (Starts.size() > 1 && !Tok.hasLeadingSpace() && !StillSeparate()) {
+      ResultStr.insert(Start, 1, ' ');
+      ++Starts.back();
+    }
+  }
+  return ResultStr;
+}
+
+bool clang::MakeIdentifierTokenSequence(ASTContext &C, StringRef Name,
+                                        SourceLocation Loc,
+                                        TokenSequenceData &Result,
+                                        bool &LexesAsIdentifier) {
+  // A single identifier token: id() is a token_sequence producer, the
+  // identifier sibling of str_lit(). The name must lex as exactly one
+  // identifier -- not, say, 'operator|=' (which would declare an ordinary
+  // function of that odd name, not an operator function) -- and not as a
+  // keyword, which the token would not behave as.
+  LexesAsIdentifier = false;
+  {
+    SmallString<64> Buf(Name);
+    Buf.push_back('\0');
+    Lexer RawLex(SourceLocation(), C.getLangOpts(), Buf.begin(), Buf.begin(),
+                 Buf.end() - 1);
+    Token First, Next;
+    RawLex.LexFromRawLexer(First);
+    RawLex.LexFromRawLexer(Next);
+    LexesAsIdentifier = First.is(tok::raw_identifier) &&
+                        First.getLength() == Name.size() && Next.is(tok::eof);
+  }
+  IdentifierInfo &II = C.Idents.get(Name);
+  if (!LexesAsIdentifier || II.isKeyword(C.getLangOpts()))
+    return false;
+  Token Tok;
+  Tok.startToken();
+  Tok.setKind(tok::identifier);
+  Tok.setIdentifierInfo(&II);
+  Tok.setLength(II.getLength());
+  Tok.setLocation(Loc);
+  Token Toks[] = {Tok};
+  Result = CreateTokenSequenceData(C, Toks);
+  return true;
+}
+
+TokenSequenceData clang::MakeStringLiteralTokenSequence(ASTContext &C,
+                                                        StringRef Content,
+                                                        SourceLocation Loc) {
+  // Build the string literal token: the literal whose value is 'Content', so
+  // the spelling has quotes and escapes: '"', '\', control characters, and
+  // bytes that aren't part of a valid UTF-8 sequence (which the lexer would
+  // otherwise warn about). The latter two as three-digit octal escapes, which,
+  // unlike hex escapes, can't run into a following digit.
+  SmallString<68> LiteralData;
+  LiteralData.push_back('"');
+  auto PushOctal = [&](unsigned char Ch) {
+    LiteralData.push_back('\\');
+    LiteralData.push_back('0' + ((Ch >> 6) & 7));
+    LiteralData.push_back('0' + ((Ch >> 3) & 7));
+    LiteralData.push_back('0' + (Ch & 7));
+  };
+  for (size_t I = 0, N = Content.size(); I != N; ++I) {
+    unsigned char Ch = Content[I];
+    if (Ch >= 0x80) {
+      auto *Begin = reinterpret_cast<const llvm::UTF8 *>(Content.data() + I);
+      unsigned Len = llvm::getNumBytesForUTF8(Ch);
+      if (I + Len <= N && llvm::isLegalUTF8Sequence(Begin, Begin + Len)) {
+        LiteralData.append(Content.begin() + I, Content.begin() + I + Len);
+        I += Len - 1;
+      } else {
+        PushOctal(Ch);
+      }
+      continue;
+    }
+    switch (Ch) {
+    case '"':
+      LiteralData.append("\\\"");
+      break;
+    case '\\':
+      LiteralData.append("\\\\");
+      break;
+    case '\n':
+      LiteralData.append("\\n");
+      break;
+    case '\t':
+      LiteralData.append("\\t");
+      break;
+    default:
+      if (Ch < 0x20 || Ch == 0x7f)
+        PushOctal(Ch);
+      else
+        LiteralData.push_back(Ch);
+      break;
+    }
+  }
+  LiteralData.push_back('"');
+
+  // Allocate the literal data in ASTContext.
+  char *StoredData = new (C) char[LiteralData.size()];
+  std::copy(LiteralData.begin(), LiteralData.end(), StoredData);
+
+  // Create the string literal token.
+  Token Tok;
+  Tok.startToken();
+  Tok.setKind(tok::string_literal);
+  Tok.setLocation(Loc);
+  Tok.setLiteralData(StoredData);
+  Tok.setLength(LiteralData.size());
+
+  // Create a token sequence containing just this token.
+  Token Tokens[] = {Tok};
+  return CreateTokenSequenceData(C, Tokens);
+}
+
+MetaTokenEnumKind clang::getMetaTokenEnumKind(QualType T) {
+  if (isStdMetaEnum(T, "punctuator"))
+    return MetaTokenEnumKind::Punctuator;
+  if (isStdMetaEnum(T, "operators"))
+    return MetaTokenEnumKind::Operators;
+  return MetaTokenEnumKind::None;
+}
+
+bool clang::InterpolateValueTokens(ASTContext &C, const Token &SrcTok,
+                                   QualType ExprTy, MetaTokenEnumKind EnumKind,
+                                   const APValue &Val, SourceLocation Loc,
+                                   Expr *SourceExpr,
+                                   SmallVectorImpl<Token> &NewTokens,
+                                   unsigned &DiagID, std::string &DiagArg) {
   if (ExprTy->isTokenSequenceType() || ExprTy->isMetaTokenType()) {
     // Token sequence (or token) interpolation: splice tokens inline.
-    if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
-      return false;
     assert(Val.isTokenSequence());
     TokenSequenceData Inner = Val.getTokenSequence();
     // The first token of the inner sequence should inherit the leading
@@ -23699,15 +23971,13 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
     }
   } else if (ExprTy->isReflectionType()) {
     // Reflection-typed expression: evaluate and check kind.
-    if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
-      return false;
 
     if (Val.isReflectedType()) {
       QualType QT = Val.getReflectedType();
 
       // Strip deduced type sugar (e.g. AutoType from 'auto L = ...')
       // so the injected type is the concrete type, not 'auto'.
-      QT = stripDeducedTypeSugar(Info.Ctx, QT);
+      QT = stripDeducedTypeSugar(C, QT);
 
       // Create an annot_typename token carrying the type.
       Token Tok = SrcTok;
@@ -23719,7 +23989,7 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
       // so it is emitted in place, evaluating the argument exactly
       // where (and as often as) it was interpolated.
       Expr *Arg = Val.getReflectedExpression();
-      auto *OVE = new (Info.Ctx)
+      auto *OVE = new (C)
           OpaqueValueExpr(Arg->getExprLoc(), Arg->getType(),
                           Arg->getValueKind(), Arg->getObjectKind(), Arg);
       OVE->setIsUnique(true);
@@ -23735,13 +24005,12 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
       // interpolate as a constant of the reflected type, so it can
       // appear anywhere a constant can - a template argument in
       // particular.
-      QualType QT = Val.getTypeOfReflectedResult(Info.Ctx);
+      QualType QT = Val.getTypeOfReflectedResult(C);
       APValue Underlying = Val.isReflectedValue() ? Val.getReflectedValue()
                                                   : Val.getReflectedObject();
       ExprValueKind VK = Val.isReflectedObject() ? VK_LValue : VK_PRValue;
-      OpaqueValueExpr *OVE =
-          new (Info.Ctx) OpaqueValueExpr(SubExpr->getExprLoc(), QT, VK);
-      ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Underlying);
+      OpaqueValueExpr *OVE = new (C) OpaqueValueExpr(Loc, QT, VK);
+      ConstantExpr *CE = ConstantExpr::Create(C, OVE, Underlying);
 
       Token Tok = SrcTok;
       Tok.setKind(tok::annot_primary_expr);
@@ -23768,18 +24037,18 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
       if (const auto *ET = EnumTy->getAs<EnumType>())
         UnderlyingTy = ET->getDecl()->getIntegerType();
 
-      IntegerLiteral *IL = IntegerLiteral::Create(
-          Info.Ctx, ECD->getInitVal(), UnderlyingTy, SubExpr->getExprLoc());
+      IntegerLiteral *IL =
+          IntegerLiteral::Create(C, ECD->getInitVal(), UnderlyingTy, Loc);
 
       Expr *ResultExpr = IL;
       if (EnumTy != UnderlyingTy) {
-        ResultExpr = ImplicitCastExpr::Create(
-            Info.Ctx, EnumTy, CK_IntegralCast, IL,
-            /*BasePath=*/nullptr, VK_PRValue, FPOptionsOverride());
+        ResultExpr = ImplicitCastExpr::Create(C, EnumTy, CK_IntegralCast, IL,
+                                              /*BasePath=*/nullptr, VK_PRValue,
+                                              FPOptionsOverride());
       }
 
       APValue EnumVal(ECD->getInitVal());
-      ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, ResultExpr, EnumVal);
+      ConstantExpr *CE = ConstantExpr::Create(C, ResultExpr, EnumVal);
 
       Token Tok = SrcTok;
       Tok.setAnnotationValue(static_cast<void *>(CE));
@@ -23794,9 +24063,8 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
       ExprValueKind VK =
           VD->getType()->isReferenceType() ? VK_LValue : VK_LValue;
       DeclRefExpr *DRE = DeclRefExpr::Create(
-          Info.Ctx, NestedNameSpecifierLoc(), SourceLocation(), VD,
-          /*RefersToEnclosingVariableOrCapture=*/false, SubExpr->getExprLoc(),
-          DeclTy, VK);
+          C, NestedNameSpecifierLoc(), SourceLocation(), VD,
+          /*RefersToEnclosingVariableOrCapture=*/false, Loc, DeclTy, VK);
 
       Token Tok = SrcTok;
       Tok.setAnnotationValue(static_cast<void *>(DRE));
@@ -23814,12 +24082,11 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
       // accepts as the leading component of a nested-name-specifier
       // and in using-directives. A valid SpliceResult's opaque
       // pointer is the SpliceSpecifier pointer itself.
-      OpaqueValueExpr *OVE = new (Info.Ctx)
-          OpaqueValueExpr(SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                          OK_Ordinary, SubExpr);
-      ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+      OpaqueValueExpr *OVE = new (C)
+          OpaqueValueExpr(Loc, ExprTy, VK_PRValue, OK_Ordinary, SourceExpr);
+      ConstantExpr *CE = ConstantExpr::Create(C, OVE, Val);
       SpliceSpecifier *Splice = SpliceSpecifier::Create(
-          Info.Ctx, SrcTok.getLocation(), CE, SrcTok.getLocation(),
+          C, SrcTok.getLocation(), CE, SrcTok.getLocation(),
           /*TemplateArgs=*/nullptr);
 
       Token Tok = SrcTok;
@@ -23831,10 +24098,9 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
       // emit as annot_primary_expr with a ConstantExpr carrying the
       // reflection value. The parser handles this in member access
       // context by treating it as a splice.
-      OpaqueValueExpr *OVE = new (Info.Ctx)
-          OpaqueValueExpr(SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                          OK_Ordinary, SubExpr);
-      ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+      OpaqueValueExpr *OVE = new (C)
+          OpaqueValueExpr(Loc, ExprTy, VK_PRValue, OK_Ordinary, SourceExpr);
+      ConstantExpr *CE = ConstantExpr::Create(C, OVE, Val);
 
       Token Tok = SrcTok;
       Tok.setAnnotationValue(static_cast<void *>(CE));
@@ -23844,12 +24110,9 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
     // Record type without a conversion to std::meta::info or
     // std::meta::token_sequence (Sema would have inserted one
     // otherwise). Interpolate the value literally.
-    if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
-      return false;
-    OpaqueValueExpr *OVE = new (Info.Ctx)
-        OpaqueValueExpr(SubExpr->getExprLoc(), SubExpr->getType(), VK_PRValue,
-                        OK_Ordinary, SubExpr);
-    ConstantExpr *CE = ConstantExpr::Create(Info.Ctx, OVE, Val);
+    OpaqueValueExpr *OVE = new (C)
+        OpaqueValueExpr(Loc, ExprTy, VK_PRValue, OK_Ordinary, SourceExpr);
+    ConstantExpr *CE = ConstantExpr::Create(C, OVE, Val);
 
     Token Tok = SrcTok;
     Tok.setAnnotationValue(static_cast<void *>(CE));
@@ -23857,19 +24120,17 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
   } else {
     // Non-reflection, non-record interpolation: evaluate as
     // rvalue and wrap in a ConstantExpr.
-    if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
-      return false;
 
     Expr *ResultExpr;
-    QualType ExprType = SubExpr->getType();
+    QualType ExprType = ExprTy;
 
     // A std::meta::punctuator value is the punctuator's token.
-    if (Val.isInt() && isStdMetaEnum(ExprType, "punctuator")) {
+    if (Val.isInt() && EnumKind == MetaTokenEnumKind::Punctuator) {
       tok::TokenKind Kind =
           getPunctuatorForMetaIndex(Val.getInt().getZExtValue());
       if (Kind == tok::unknown) {
-        Info.FFDiag(SubExpr, diag::note_constexpr_invalid_punctuator)
-            << toString(Val.getInt(), 10);
+        DiagID = diag::note_constexpr_invalid_punctuator;
+        DiagArg = toString(Val.getInt(), 10);
         return false;
       }
       Token Tok;
@@ -23884,13 +24145,13 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
     }
 
     // A std::meta::operators value spells the operator's token.
-    if (Val.isInt() && isStdMetaEnum(ExprType, "operators")) {
+    if (Val.isInt() && EnumKind == MetaTokenEnumKind::Operators) {
       OverloadedOperatorKind OO =
           getOverloadedOperatorForMetaIndex(Val.getInt().getZExtValue());
       tok::TokenKind Kind = tokenKindForOverloadedOperator(OO);
       if (Kind == tok::unknown) {
-        Info.FFDiag(SubExpr, diag::note_constexpr_macro_operator_not_token)
-            << getOperatorSpelling(OO);
+        DiagID = diag::note_constexpr_macro_operator_not_token;
+        DiagArg = getOperatorSpelling(OO);
         return false;
       }
       Token Tok;
@@ -23911,9 +24172,9 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
     if (Val.isInt() && ExprType->isBooleanType()) {
       // A bool is 'true' or 'false' (an IntegerLiteral can't be a bool).
       ResultExpr = ConstantExpr::Create(
-          Info.Ctx,
-          CXXBoolLiteralExpr::Create(Info.Ctx, Val.getInt().getBoolValue(),
-                                     ExprType, SubExpr->getExprLoc()),
+          C,
+          CXXBoolLiteralExpr::Create(C, Val.getInt().getBoolValue(), ExprType,
+                                     Loc),
           Val);
     } else if (Val.isInt() && ExprType->isAnyCharacterType()) {
       // A character is a character literal: 'x', u8'x', L'x', ...
@@ -23924,9 +24185,9 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
           : ExprType->isChar32Type() ? CharacterLiteralKind::UTF32
                                      : CharacterLiteralKind::Ascii;
       ResultExpr = ConstantExpr::Create(
-          Info.Ctx,
-          new (Info.Ctx) CharacterLiteral(Val.getInt().getZExtValue(), Kind,
-                                          ExprType, SubExpr->getExprLoc()),
+          C,
+          new (C) CharacterLiteral(Val.getInt().getZExtValue(), Kind, ExprType,
+                                   Loc),
           Val);
     } else if (Val.isInt() && ExprType->isIntegralOrEnumerationType()) {
       // For enums, we need to use the underlying integer type for
@@ -23936,23 +24197,23 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
         LiteralType = ET->getDecl()->getIntegerType();
 
       // Create an integer literal with the evaluated value
-      IntegerLiteral *IL = IntegerLiteral::Create(
-          Info.Ctx, Val.getInt(), LiteralType, SubExpr->getExprLoc());
+      IntegerLiteral *IL =
+          IntegerLiteral::Create(C, Val.getInt(), LiteralType, Loc);
 
       Expr *InnerExpr = IL;
       // If it was an enum, add an implicit cast back to enum type
       if (ExprType != LiteralType) {
-        InnerExpr = ImplicitCastExpr::Create(
-            Info.Ctx, ExprType, CK_IntegralCast, IL,
-            /*BasePath=*/nullptr, VK_PRValue, FPOptionsOverride());
+        InnerExpr = ImplicitCastExpr::Create(C, ExprType, CK_IntegralCast, IL,
+                                             /*BasePath=*/nullptr, VK_PRValue,
+                                             FPOptionsOverride());
       }
-      ResultExpr = ConstantExpr::Create(Info.Ctx, InnerExpr, Val);
+      ResultExpr = ConstantExpr::Create(C, InnerExpr, Val);
     } else {
       // For other types, use OpaqueValueExpr as before
-      OpaqueValueExpr *OVE = new (Info.Ctx) OpaqueValueExpr(
-          SubExpr->getExprLoc(), ExprType, VK_PRValue, OK_Ordinary, SubExpr);
+      OpaqueValueExpr *OVE = new (C)
+          OpaqueValueExpr(Loc, ExprType, VK_PRValue, OK_Ordinary, SourceExpr);
       OVE->setIsUnique(true);
-      ResultExpr = ConstantExpr::Create(Info.Ctx, OVE, Val);
+      ResultExpr = ConstantExpr::Create(C, OVE, Val);
     }
 
     Token Tok = SrcTok;
@@ -23960,6 +24221,28 @@ static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
     NewTokens.push_back(Tok);
   }
   return true;
+}
+
+namespace {
+/// Interpolate one '\(e)' -- the annotation token \p SrcTok, whose
+/// expression is \p SubExpr -- appending the tokens it stands for to
+/// \p NewTokens.
+static bool interpolateTokens(EvalInfo &Info, const Token &SrcTok,
+                              Expr *SubExpr,
+                              SmallVectorImpl<Token> &NewTokens) {
+  // Evaluate the expression in the current constexpr context.
+  APValue Val;
+  if (!EvaluateOperandAsRValue(Info, SubExpr, Val))
+    return false;
+  unsigned DiagID = 0;
+  std::string DiagArg;
+  if (InterpolateValueTokens(Info.Ctx, SrcTok, SubExpr->getType(),
+                             getMetaTokenEnumKind(SubExpr->getType()), Val,
+                             SubExpr->getExprLoc(), SubExpr, NewTokens, DiagID,
+                             DiagArg))
+    return true;
+  Info.FFDiag(SubExpr, DiagID) << DiagArg;
+  return false;
 }
 
 bool ReflectionEvaluator::VisitCXXTokenInterpolationListExpr(
@@ -24085,37 +24368,15 @@ bool ReflectionEvaluator::VisitCXXBuiltinIdExpr(const CXXBuiltinIdExpr *E) {
       return false;
   }
 
-  // A single identifier token: id() is a token_sequence producer, the
-  // identifier sibling of str_lit(). The name must lex as exactly one
-  // identifier -- not, say, 'operator|=' (which would declare an ordinary
-  // function of that odd name, not an operator function) -- and not as a
-  // keyword, which the token would not behave as.
+  TokenSequenceData TSD;
   bool IsIdentifier = false;
-  {
-    SmallString<64> Buf(Name);
-    Buf.push_back('\0');
-    Lexer RawLex(SourceLocation(), Info.Ctx.getLangOpts(), Buf.begin(),
-                 Buf.begin(), Buf.end() - 1);
-    Token First, Next;
-    RawLex.LexFromRawLexer(First);
-    RawLex.LexFromRawLexer(Next);
-    IsIdentifier = First.is(tok::raw_identifier) &&
-                   First.getLength() == Name.size() && Next.is(tok::eof);
-  }
-  IdentifierInfo &II = Info.Ctx.Idents.get(Name);
-  if (!IsIdentifier || II.isKeyword(Info.Ctx.getLangOpts())) {
+  if (!MakeIdentifierTokenSequence(Info.Ctx, Name, E->getBeginLoc(), TSD,
+                                   IsIdentifier)) {
     Info.FFDiag(E->getExprLoc(), diag::note_constexpr_id_not_identifier)
         << Name << IsIdentifier;
     return false;
   }
-  Token Tok;
-  Tok.startToken();
-  Tok.setKind(tok::identifier);
-  Tok.setIdentifierInfo(&II);
-  Tok.setLength(II.getLength());
-  Tok.setLocation(E->getBeginLoc());
-  Token Toks[] = {Tok};
-  return Success(APValue(CreateTokenSequenceData(Info.Ctx, Toks)), E);
+  return Success(APValue(TSD), E);
 }
 
 bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
@@ -24128,71 +24389,9 @@ bool ReflectionEvaluator::VisitCXXBuiltinStrLiteralExpr(
       return false;
   }
 
-  // Build the string literal token: the literal whose value is 'Content', so
-  // the spelling has quotes and escapes: '"', '\', control characters, and
-  // bytes that aren't part of a valid UTF-8 sequence (which the lexer would
-  // otherwise warn about). The latter two as three-digit octal escapes, which,
-  // unlike hex escapes, can't run into a following digit.
-  SmallString<68> LiteralData;
-  LiteralData.push_back('"');
-  auto PushOctal = [&](unsigned char Ch) {
-    LiteralData.push_back('\\');
-    LiteralData.push_back('0' + ((Ch >> 6) & 7));
-    LiteralData.push_back('0' + ((Ch >> 3) & 7));
-    LiteralData.push_back('0' + (Ch & 7));
-  };
-  for (size_t I = 0, N = Content.size(); I != N; ++I) {
-    unsigned char Ch = Content[I];
-    if (Ch >= 0x80) {
-      auto *Begin = reinterpret_cast<const llvm::UTF8 *>(Content.data() + I);
-      unsigned Len = llvm::getNumBytesForUTF8(Ch);
-      if (I + Len <= N && llvm::isLegalUTF8Sequence(Begin, Begin + Len)) {
-        LiteralData.append(Content.begin() + I, Content.begin() + I + Len);
-        I += Len - 1;
-      } else {
-        PushOctal(Ch);
-      }
-      continue;
-    }
-    switch (Ch) {
-    case '"':
-      LiteralData.append("\\\"");
-      break;
-    case '\\':
-      LiteralData.append("\\\\");
-      break;
-    case '\n':
-      LiteralData.append("\\n");
-      break;
-    case '\t':
-      LiteralData.append("\\t");
-      break;
-    default:
-      if (Ch < 0x20 || Ch == 0x7f)
-        PushOctal(Ch);
-      else
-        LiteralData.push_back(Ch);
-      break;
-    }
-  }
-  LiteralData.push_back('"');
-
-  // Allocate the literal data in ASTContext.
-  char *StoredData = new (Info.Ctx) char[LiteralData.size()];
-  std::copy(LiteralData.begin(), LiteralData.end(), StoredData);
-
-  // Create the string literal token.
-  Token Tok;
-  Tok.startToken();
-  Tok.setKind(tok::string_literal);
-  Tok.setLocation(E->getBeginLoc());
-  Tok.setLiteralData(StoredData);
-  Tok.setLength(LiteralData.size());
-
-  // Create a token sequence containing just this token.
-  Token Tokens[] = {Tok};
-  TokenSequenceData TSD = CreateTokenSequenceData(Info.Ctx, Tokens);
-  return Success(APValue(TSD), E);
+  return Success(APValue(MakeStringLiteralTokenSequence(Info.Ctx, Content,
+                                                        E->getBeginLoc())),
+                 E);
 }
 
 bool ReflectionEvaluator::VisitCXXBuiltinTokenizeExpr(
@@ -24333,7 +24532,7 @@ bool ReflectionEvaluator::VisitArraySubscriptExpr(
   Token Toks[] = {TSD[Index.getZExtValue()]};
   return Success(APValue(CreateTokenSequenceData(Info.Ctx, Toks)), E);
 }
-}  // end anonymous namespace
+} // end anonymous namespace
 
 static bool EvaluateReflection(const Expr *E, APValue &Result, EvalInfo &Info) {
   assert(E->isPRValue() &&
@@ -26000,7 +26199,8 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
   // If this is an undefined __macro and a consteval plugin provides it, invoke
   // the plugin natively.
   if (!Macro->getBody() && !Ctx.getLangOpts().ConstevalPluginPaths.empty() &&
-      Ctx.getMetaActions()) {
+      Ctx.getMetaActions() &&
+      hasConstevalPluginSymbol(const_cast<ASTContext &>(Ctx), Macro)) {
     SmallVector<APValue, 8> EvalArgs;
     EvalArgs.reserve(Macro->getNumParams());
     for (unsigned I = 0, N = std::min<unsigned>(ParamValues.size(),
@@ -26016,29 +26216,26 @@ bool Expr::EvaluateMacroBody(const FunctionDecl *Macro,
         EvalArgs.push_back(ParamValues[I]);
       }
     }
-    std::string PluginTag, PluginErr;
-    int PluginStatus = invokeConstevalPlugin(
+    // (Only somewhere to say an error is.)
+    OpaqueValueExpr Where(Macro->getLocation(), Ctx.VoidTy, VK_PRValue);
+    PluginEvalHooks Hooks(Info, &Where);
+    ConstevalPluginFailure Failure;
+    switch (invokeConstevalPlugin(
         const_cast<ASTContext &>(Ctx), *Ctx.getMetaActions(), Macro,
         Macro->getLocation(), InvocationContext, /*AllowInjection=*/true,
-        &Status, EvalArgs, Result, PluginTag, PluginErr);
-    if (PluginStatus == 1) {
+        &Status, Hooks, EvalArgs, Result, Failure)) {
+    case ConstevalPluginResult::Success:
       if (Result.isStruct() && Result.getStructNumFields() == 1 &&
           Result.getStructField(0).isTokenSequence()) {
         APValue TS = Result.getStructField(0);
         Result = std::move(TS);
       }
       return true;
-    }
-    if (PluginStatus == 0) {
-      if (!PluginErr.empty()) {
-        if (PluginTag.empty())
-          Info.FFDiag(Macro->getLocation(), diag::note_constexpr_message)
-              << PluginErr;
-        else
-          Info.FFDiag(Macro->getLocation(), diag::note_constexpr_message_tag)
-              << PluginTag << PluginErr;
-      }
+    case ConstevalPluginResult::Failure:
+      DiagnosePluginFailure(Info, Macro->getLocation(), Macro, Failure);
       return false;
+    case ConstevalPluginResult::NotFound:
+      break;
     }
   }
 

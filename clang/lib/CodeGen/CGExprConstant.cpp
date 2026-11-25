@@ -23,6 +23,7 @@
 #include "clang/AST/APValue.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Attr.h"
+#include "clang/AST/ConstevalPlugin.h"
 #include "clang/AST/NSAPI.h"
 #include "clang/AST/RecordLayout.h"
 #include "clang/AST/StmtVisitor.h"
@@ -2296,6 +2297,14 @@ ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
     }
 
     if (const auto *VD = dyn_cast<VarDecl>(D)) {
+      // In a consteval plugin, a variable holding a reflection or a token
+      // sequence is not emitted (a constant is made at each use: see
+      // CodeGenFunction::EmitConstevalPluginConstant), so there is no
+      // address to refer to.
+      if (CGM.getLangOpts().ConstevalPlugin &&
+          isOrContainsMetaType(CGM.getContext(), VD->getType()))
+        return nullptr;
+
       // We can never refer to a variable with local storage.
       if (!VD->hasLocalStorage()) {
         if (VD->isFileVarDecl() || VD->hasExternalStorage())

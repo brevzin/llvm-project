@@ -125,6 +125,15 @@ public:
   static bool Lookup(unsigned ID, const Metafunction *&result);
 };
 
+/// The specialization of \p TDecl for the template arguments \p Args, as
+/// std::meta::substitute gives it: a reflection of the type, function,
+/// variable, or (for a concept) value. Returns true on error.
+bool SubstituteReflectedTemplate(
+    APValue &Result, ASTContext &C, MetaActions &Meta,
+    Metafunction::EvaluateFn Evaluator, Metafunction::DiagnoseFn Diagnoser,
+    TemplateDecl *TDecl, ArrayRef<TemplateArgument> Args, SourceRange Range,
+    SourceLocation TemplateLoc, bool NoDiagnose);
+
 } // namespace clang
 
 #endif

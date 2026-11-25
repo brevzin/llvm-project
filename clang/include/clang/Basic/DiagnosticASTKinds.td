@@ -53,6 +53,10 @@ def note_constexpr_token_index_out_of_range : Note<
   "token index %0 is out of range for a token sequence of %1 token%s1">;
 def note_constexpr_message_tag : Note<
   "constexpr message with tag '%0': %1">, ShowInSystemHeader;
+def note_consteval_plugin_failed : Note<
+  "call to %0 in a consteval plugin failed%select{|: %2}1">;
+def err_consteval_plugin_load : Error<
+  "unable to load consteval plugin '%0': %1">;
 def warn_constexpr_message : Warning<"constexpr message: %0">,
   InGroup<ConstexprMessages>, ShowInSystemHeader;
 def warn_constexpr_message_tag : Warning<

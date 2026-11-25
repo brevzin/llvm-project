@@ -25,6 +25,10 @@ inline namespace reflection_v2 {
 
 using info = decltype(^^int);
 
+// A stand-in for <meta>'s class of the same name: enough to declare, call and
+// return from functions that take or give token sequences. (<meta> cannot be
+// included after it.)
+#  define _LIBCPP_META_FWD_DEFINES_TOKEN_SEQUENCE
 class token_sequence {
 public:
   constexpr token_sequence() noexcept = default;

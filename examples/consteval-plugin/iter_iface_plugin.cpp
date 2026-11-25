@@ -3,25 +3,15 @@
 // Independently compiled native plugin implementation of iterator_interface.
 // Build: clang++ ... -fconsteval-plugin -fPIC -shared -O2 iter_iface_plugin.cpp -o libiter_iface.so
 
-#include <cstddef>
+// <meta> first: the header shared with consumers includes <meta_fwd>, which
+// does nothing after it.
 #include <meta>
 #include <string_view>
 #include <vector>
 
+#include "iter_iface.hpp"
+
 namespace iface {
-
-template <class B> constexpr bool base_can_deref = requires(B const& b) { *b; };
-template <class B> constexpr bool base_can_pre_inc = requires(B& b) { ++b; };
-template <class B>
-constexpr bool base_can_eq = requires(B const& a, B const& b) {
-    { a == b } -> std::convertible_to<bool>;
-};
-
-struct iter_config {
-    std::meta::info iterator_concept;
-    std::meta::info value_type;
-    std::meta::info difference_type = ^^std::ptrdiff_t;
-};
 
 consteval auto declares_op(std::meta::info cls, std::meta::operators which) -> bool {
     for (auto m : members_of(cls, std::meta::access_context::unchecked())) {
@@ -41,6 +31,7 @@ consteval auto declares_fn(std::meta::info cls, std::string_view name) -> bool {
     return false;
 }
 
+// Declared in iter_iface.hpp.
 consteval auto iterator_interface(std::meta::info cls, iter_config cfg) -> void {
     using namespace std::meta;
     auto ts = ^^{

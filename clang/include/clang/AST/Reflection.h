@@ -16,11 +16,12 @@
 #ifndef LLVM_CLANG_AST_REFLECTION_H
 #define LLVM_CLANG_AST_REFLECTION_H
 
+#include "clang/AST/TypeBase.h"
 #include "clang/Basic/OperatorKinds.h"
 #include "clang/Basic/TokenKinds.h"
-#include "clang/AST/TypeBase.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include <optional>
 #include <string>
 
@@ -223,6 +224,38 @@ APValue MaterializeTokens(ASTContext &C, TokenSequenceData TSD, QualType PtrTy);
 
 /// The tokens of an array made by MaterializeTokens, or null.
 const TokenSequenceData *getMaterializedTokens(const Decl *Storage);
+
+/// Whether a type is one of the std::meta enumerations whose values
+/// interpolate into a token sequence as the token they name.
+enum class MetaTokenEnumKind { None, Punctuator, Operators };
+MetaTokenEnumKind getMetaTokenEnumKind(QualType T);
+
+/// Interpolate the value \p Val of an expression of type \p ExprTy (which is
+/// \p EnumKind) for the '\(e)' that the annotation token \p SrcTok stands
+/// for, appending the tokens to \p NewTokens. \p SourceExpr is the
+/// expression as written, if there is one. Returns false if the value has no
+/// tokens, with the note to give (and its one argument) in \p DiagID and
+/// \p DiagArg.
+bool InterpolateValueTokens(ASTContext &C, const Token &SrcTok, QualType ExprTy,
+                            MetaTokenEnumKind EnumKind, const APValue &Val,
+                            SourceLocation Loc, Expr *SourceExpr,
+                            SmallVectorImpl<Token> &NewTokens, unsigned &DiagID,
+                            std::string &DiagArg);
+
+/// The identifier token std::meta::id gives for \p Name. Returns false if
+/// \p Name is not an identifier (\p LexesAsIdentifier says whether it at
+/// least lexes as one, i.e. is a keyword).
+bool MakeIdentifierTokenSequence(ASTContext &C, StringRef Name,
+                                 SourceLocation Loc, TokenSequenceData &Result,
+                                 bool &LexesAsIdentifier);
+
+/// The string-literal token std::meta::str_lit gives for \p Content.
+TokenSequenceData MakeStringLiteralTokenSequence(ASTContext &C,
+                                                 StringRef Content,
+                                                 SourceLocation Loc);
+
+/// The text std::meta::stringize gives for \p TSD.
+std::string StringizeTokenSequence(const ASTContext &C, TokenSequenceData TSD);
 
 /// \brief Representation of a hypothetical data member, which could be used to
 /// complete an incomplete class definition using the 'std::meta::define_class'

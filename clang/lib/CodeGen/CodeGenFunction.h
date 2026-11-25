@@ -3345,7 +3345,29 @@ public:
   llvm::Value *EmitCXXTypeidExpr(const CXXTypeidExpr *E);
   llvm::Value *EmitConstevalPluginMetafnScalar(const CXXMetafunctionExpr *E);
   llvm::Value *EmitConstevalPluginTokenSeq(const CXXTokenSequenceExpr *E);
+  llvm::Value *EmitConstevalPluginTokens(TokenSequenceData TSD);
+  /// Something at \p Loc cannot be compiled for a consteval plugin: an
+  /// error -- except in a system header, whose functions a plugin may never
+  /// call, where the plugin fails if it gets there.
+  void EmitConstevalPluginUnsupported(SourceLocation Loc, const Twine &What);
   llvm::Value *EmitConstevalPluginReflect(const CXXReflectExpr *E);
+  llvm::Value *EmitConstevalPluginReflection(const APValue &RV,
+                                             SourceLocation Loc, QualType Ty);
+  /// In a consteval plugin, a constant that is or holds a reflection or a
+  /// token sequence has no representation of its own: it is made, where it
+  /// is used, by asking the host for each reflection and token sequence in
+  /// it.
+  ///
+  /// The variable \p VD is such a constant, if a use of it here cannot simply
+  /// read the variable (which it can if the variable is one of this
+  /// function's own).
+  bool isConstevalPluginMetaConstant(const VarDecl *VD);
+  /// Make the constant \p V of type \p T at \p Dest.
+  void EmitConstevalPluginConstant(const APValue &V, QualType T, Address Dest,
+                                   SourceLocation Loc);
+  /// The value of the load \p E of a std::meta::info from such a constant,
+  /// or null if it is not one.
+  llvm::Value *tryEmitConstevalPluginInfoConstant(const Expr *E);
   llvm::Value *EmitConstevalPluginMetaEqual(llvm::Value *LHS, llvm::Value *RHS);
   void EmitConstevalPluginQueueInjection(const CXXBuiltinInjectExpr *E);
   llvm::Value *EmitConstevalPluginIdOrStrLit(bool IsStrLit,

@@ -1,7 +1,9 @@
 // Copyright 2026 Jump Trading LLC
 //
 // Consumer header for the independently compiled iterator_interface plugin.
-// Notice: ZERO #include <meta>, <vector>, or <ranges> required by consumers.
+// Consumers need no <meta>, <vector> or <ranges>. The plugin includes this
+// header too (after <meta>), so there is one declaration of everything the
+// two share.
 #pragma once
 
 #include <cstddef>

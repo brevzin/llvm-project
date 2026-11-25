@@ -5510,75 +5510,17 @@ static TemplateArgument TArgFromReflection(ASTContext &C, MetaActions &Meta,
   return TemplateArgument();
 }
 
-bool substitute(APValue &Result, ASTContext &C, MetaActions &Meta,
-                EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
-                QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
-                Decl *ContainingDecl) {
-  assert(Args[0]->getType()->isReflectionType());
-  assert(
-      Args[1]->getType()->getPointeeOrArrayElementType()->isReflectionType());
-  assert(Args[2]->getType()->isIntegerType());
-
-  APValue Template;
-  if (!Evaluator(Template, Args[0], true))
-    return true;
-
-  if (!Template.isReflectedTemplate())
-    return DiagnoseReflectionKind(Diagnoser, Range, "a template",
-                                  DescriptionOf(Template));
-
-  TemplateDecl *TDecl = Template.getReflectedTemplate().getAsTemplateDecl();
-  if (TDecl->isInvalidDecl())
-    return true;
-
-  APValue DiagnoseAPV;
-  if (!Evaluator(DiagnoseAPV, Args[3], true))
-    return true;
-  bool NoDiagnose = !DiagnoseAPV.getInt().getBoolValue();
+bool SubstituteReflectedTemplate(
+    APValue &Result, ASTContext &C, MetaActions &Meta,
+    Metafunction::EvaluateFn Evaluator, Metafunction::DiagnoseFn Diagnoser,
+    TemplateDecl *TDecl, ArrayRef<TemplateArgument> Args, SourceRange Range,
+    SourceLocation TemplateLoc, bool NoDiagnose) {
   auto ElideDiagnosis = [&] {
     return SetAndSucceed(Result, makeReflection(nullptr));
   };
-
   SmallVector<TemplateArgument, 4> TArgs;
-  {
-    // Evaluate how many template arguments were provided.
-    APValue NumArgs;
-    if (!Evaluator(NumArgs, Args[2], true))
-      return true;
-    size_t nArgs = NumArgs.getInt().getExtValue();
-    TArgs.reserve(nArgs);
-
-    for (uint64_t k = 0; k < nArgs; ++k) {
-      llvm::APInt Idx(C.getTypeSize(C.getSizeType()), k, false);
-      Expr *Synthesized = IntegerLiteral::Create(C, Idx, C.getSizeType(),
-                                                 Args[1]->getExprLoc());
-
-      Synthesized = new (C) ArraySubscriptExpr(Args[1], Synthesized,
-                                               C.MetaInfoTy, VK_LValue,
-                                               OK_Ordinary, Range.getBegin());
-      if (Synthesized->isValueDependent() || Synthesized->isTypeDependent())
-        return true;
-
-      APValue Unwrapped;
-      if (!Evaluator(Unwrapped, Synthesized, true) ||
-          !Unwrapped.isReflection())
-        return true;
-      Unwrapped = MaybeUnproxy(C, Unwrapped);
-      if (!CanActAsTemplateArg(Unwrapped))
-        return NoDiagnose ? ElideDiagnosis() :
-               Diagnoser(Range.getBegin(), diag::metafn_cannot_be_arg)
-                 << DescriptionOf(Unwrapped) << 1 << Range;
-
-      TemplateArgument TArg = TArgFromReflection(C, Meta, Evaluator, Unwrapped,
-                                                 Range.getBegin());
-      if (TArg.isNull())
-        return true;
-      TArgs.push_back(TArg);
-    }
-  }
-
   SmallVector<TemplateArgument, 4> ExpandedTArgs;
-  expandTemplateArgPacks(TArgs, ExpandedTArgs);
+  expandTemplateArgPacks(Args, ExpandedTArgs);
 
   // Lookup cached specialization; if found, return it.
   llvm::FoldingSetNodeID ID;
@@ -5592,7 +5534,7 @@ bool substitute(APValue &Result, ASTContext &C, MetaActions &Meta,
     return false;
 
   if (!Meta.CheckTemplateArgumentList(TDecl, ExpandedTArgs, NoDiagnose,
-                                      Args[0]->getExprLoc()))
+                                      TemplateLoc))
     return NoDiagnose ? ElideDiagnosis() : true;
   for (const auto &TArg : ExpandedTArgs)
     if (TArg.getKind() == TemplateArgument::Expression &&
@@ -5673,6 +5615,77 @@ bool substitute(APValue &Result, ASTContext &C, MetaActions &Meta,
   llvm_unreachable("unimplemented for template kind");
 }
 
+bool substitute(APValue &Result, ASTContext &C, MetaActions &Meta,
+                EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,
+                QualType ResultTy, SourceRange Range, ArrayRef<Expr *> Args,
+                Decl *ContainingDecl) {
+  assert(Args[0]->getType()->isReflectionType());
+  assert(
+      Args[1]->getType()->getPointeeOrArrayElementType()->isReflectionType());
+  assert(Args[2]->getType()->isIntegerType());
+
+  APValue Template;
+  if (!Evaluator(Template, Args[0], true))
+    return true;
+
+  if (!Template.isReflectedTemplate())
+    return DiagnoseReflectionKind(Diagnoser, Range, "a template",
+                                  DescriptionOf(Template));
+
+  TemplateDecl *TDecl = Template.getReflectedTemplate().getAsTemplateDecl();
+  if (TDecl->isInvalidDecl())
+    return true;
+
+  APValue DiagnoseAPV;
+  if (!Evaluator(DiagnoseAPV, Args[3], true))
+    return true;
+  bool NoDiagnose = !DiagnoseAPV.getInt().getBoolValue();
+  auto ElideDiagnosis = [&] {
+    return SetAndSucceed(Result, makeReflection(nullptr));
+  };
+
+  SmallVector<TemplateArgument, 4> TArgs;
+  {
+    // Evaluate how many template arguments were provided.
+    APValue NumArgs;
+    if (!Evaluator(NumArgs, Args[2], true))
+      return true;
+    size_t nArgs = NumArgs.getInt().getExtValue();
+    TArgs.reserve(nArgs);
+
+    for (uint64_t k = 0; k < nArgs; ++k) {
+      llvm::APInt Idx(C.getTypeSize(C.getSizeType()), k, false);
+      Expr *Synthesized = IntegerLiteral::Create(C, Idx, C.getSizeType(),
+                                                 Args[1]->getExprLoc());
+
+      Synthesized =
+          new (C) ArraySubscriptExpr(Args[1], Synthesized, C.MetaInfoTy,
+                                     VK_LValue, OK_Ordinary, Range.getBegin());
+      if (Synthesized->isValueDependent() || Synthesized->isTypeDependent())
+        return true;
+
+      APValue Unwrapped;
+      if (!Evaluator(Unwrapped, Synthesized, true) || !Unwrapped.isReflection())
+        return true;
+      Unwrapped = MaybeUnproxy(C, Unwrapped);
+      if (!CanActAsTemplateArg(Unwrapped))
+        return NoDiagnose
+                   ? ElideDiagnosis()
+                   : Diagnoser(Range.getBegin(), diag::metafn_cannot_be_arg)
+                         << DescriptionOf(Unwrapped) << 1 << Range;
+
+      TemplateArgument TArg =
+          TArgFromReflection(C, Meta, Evaluator, Unwrapped, Range.getBegin());
+      if (TArg.isNull())
+        return true;
+      TArgs.push_back(TArg);
+    }
+  }
+
+  return SubstituteReflectedTemplate(Result, C, Meta, Evaluator, Diagnoser,
+                                     TDecl, TArgs, Range, Args[0]->getExprLoc(),
+                                     NoDiagnose);
+}
 
 bool extract(APValue &Result, ASTContext &C, MetaActions &Meta,
              EvalFn Evaluator, DiagFn Diagnoser, bool AllowInjection,

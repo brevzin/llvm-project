@@ -28,6 +28,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/CharUnits.h"
+#include "clang/AST/ConstevalPlugin.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclOpenACC.h"
@@ -429,6 +430,20 @@ CodeGenFunction::AddInitializerToStaticVarDecl(const VarDecl &D,
 
 void CodeGenFunction::EmitStaticVarDecl(const VarDecl &D,
                                       llvm::GlobalValue::LinkageTypes Linkage) {
+  // In a consteval plugin, a variable holding a reflection or a token
+  // sequence has nothing to hold: what it would hold is the host's, and only
+  // for the length of one call. A constant is made where it is used instead
+  // (see EmitConstevalPluginConstant).
+  if (getLangOpts().ConstevalPlugin &&
+      isOrContainsMetaType(getContext(), D.getType())) {
+    if (!isConstevalPluginMetaConstant(&D))
+      CGM.Error(D.getLocation(),
+                "a variable with static storage duration that holds a "
+                "reflection or a token sequence has to be constexpr in a "
+                "consteval plugin");
+    return;
+  }
+
   // Check to see if we already have a global variable for this
   // declaration.  This can happen when double-emitting function
   // bodies, e.g. with complete and base constructors.

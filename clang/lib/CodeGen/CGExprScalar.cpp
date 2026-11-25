@@ -3056,6 +3056,9 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
   case CK_LValueToRValue:
     assert(CGF.getContext().hasSameUnqualifiedType(E->getType(), DestTy));
     assert(E->isGLValue() && "lvalue-to-rvalue applied to r-value!");
+    if (CGF.getLangOpts().ConstevalPlugin)
+      if (Value *V = CGF.tryEmitConstevalPluginInfoConstant(E))
+        return V;
     return Visit(E);
 
   case CK_IntegralToPointer: {

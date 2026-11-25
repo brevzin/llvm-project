@@ -31,6 +31,7 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTLambda.h"
 #include "clang/AST/CharUnits.h"
+#include "clang/AST/ConstevalPlugin.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
@@ -6397,6 +6398,22 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
   if (getLangOpts().HLSL &&
       D->getType().getAddressSpace() == LangAS::hlsl_constant)
     return;
+
+  // In a consteval plugin, a variable holding a reflection or a token
+  // sequence is not emitted: a constant is made where it is used (see
+  // CodeGenFunction::EmitConstevalPluginConstant), and nothing else can be
+  // (the host has not been called when a plugin's variables are initialized).
+  if (getLangOpts().ConstevalPlugin &&
+      isOrContainsMetaType(getContext(), ASTTy)) {
+    const VarDecl *Init = nullptr;
+    if (!D->getAnyInitializer(Init) || !Init ||
+        !Init->isUsableInConstantExpressions(getContext()) ||
+        !Init->evaluateValue())
+      Error(D->getLocation(),
+            "a variable with static storage duration that holds a reflection "
+            "or a token sequence has to be constexpr in a consteval plugin");
+    return;
+  }
 
   // If this is OpenMP device, check if it is legal to emit this global
   // normally.

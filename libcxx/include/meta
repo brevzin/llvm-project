@@ -443,7 +443,12 @@ template <reflection_range R1 = initializer_list<info>,
 #include <vector>
 #include <version>
 
-#if __has_feature(reflection)
+// <meta_fwd> defines a stand-in for std::meta::token_sequence, for translation
+// units that only call functions compiled elsewhere (-fconsteval-plugin-load=).
+// It cannot be followed by the real one.
+#if defined(_LIBCPP_META_FWD_DEFINES_TOKEN_SEQUENCE)
+#  error "<meta_fwd> was included before <meta> in this translation unit; include <meta> first (after it, <meta_fwd> does nothing)"
+#elif __has_feature(reflection)
 
 _LIBCPP_BEGIN_NAMESPACE_REFLECTION_V2
 

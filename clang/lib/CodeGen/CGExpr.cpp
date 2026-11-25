@@ -2033,7 +2033,11 @@ CodeGenFunction::tryEmitAsConstant(const DeclRefExpr *RefExpr) {
     }
   }
 
-  // Emit as a constant.
+  // Emit as a constant. (In a consteval plugin, one holding a reflection or
+  // a token sequence is not one: see EmitConstevalPluginConstant.)
+  if (getLangOpts().ConstevalPlugin &&
+      !ConstantEmitter(*this).tryEmitAbstract(result.Val, resultType))
+    return ConstantEmission();
   llvm::Constant *C = ConstantEmitter(*this).emitAbstract(
       RefExpr->getLocation(), result.Val, resultType);
 
@@ -3645,11 +3649,37 @@ LValue CodeGenFunction::EmitDeclRefLValue(const DeclRefExpr *E) {
         VD->hasAttr<AsmLabelAttr>() && !VD->isLocalVarDecl())
       return EmitGlobalNamedRegister(VD, CGM);
 
+    // In a consteval plugin, a constant holding a reflection or a token
+    // sequence is made where it is used.
+    // (Unless the use is of a capture, which is read from the closure.)
+    if (getLangOpts().ConstevalPlugin &&
+        (!E->refersToEnclosingVariableOrCapture() ||
+         E->isNonOdrUse() == NOUR_Constant) &&
+        isConstevalPluginMetaConstant(VD)) {
+      Address Addr = CreateMemTemp(VD->getType(), "ce.const");
+      EmitConstevalPluginConstant(*VD->evaluateValue(), VD->getType(), Addr,
+                                  E->getLocation());
+      return MakeAddrLValue(Addr, T, AlignmentSource::Decl);
+    }
+
     // If this DeclRefExpr does not constitute an odr-use of the variable,
     // we're not permitted to emit a reference to it in general, and it might
     // not be captured if capture would be necessary for a use. Emit the
     // constant value directly instead.
-    if (E->isNonOdrUse() == NOUR_Constant &&
+    // (In a consteval plugin, a reference to such a constant is not a
+    // constant either; one of this function's own is read like any other
+    // variable.)
+    bool IsConstevalPluginLocalRef = false;
+    if (getLangOpts().ConstevalPlugin && E->isNonOdrUse() == NOUR_Constant &&
+        VD->getType()->isReferenceType() && LocalDeclMap.count(VD)) {
+      const VarDecl *InitVD = nullptr;
+      IsConstevalPluginLocalRef =
+          VD->getAnyInitializer(InitVD) && InitVD->evaluateValue() &&
+          !ConstantEmitter(*this).tryEmitAbstract(*InitVD->evaluateValue(),
+                                                  VD->getType());
+    }
+
+    if (E->isNonOdrUse() == NOUR_Constant && !IsConstevalPluginLocalRef &&
         (VD->getType()->isReferenceType() ||
          !canEmitSpuriousReferenceToVariable(*this, E, VD))) {
       VD->getAnyInitializer(VD);
